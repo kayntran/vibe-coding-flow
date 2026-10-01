@@ -36,11 +36,24 @@ Viết `PLAN.md` cạnh SPEC.md, mọi path phải kiểm có thật trong code:
   `docs/adr/NNNN-<tên>.md` = Bối cảnh · Quyết định · Hệ quả · Trạng thái. ADR Accepted không sửa; đổi ý = ADR mới.
 - **Dễ mở rộng/bảo trì** — tự kiểm: tách theo trách nhiệm không theo layer; không abstraction cho thứ dùng một
   lần; không phụ thuộc vòng; điểm mở rộng có thật trong roadmap chứ không đoán.
-- **Wave + làn**:
-  - Wave 0: contract/type dùng chung — một người làm, gộp trước.
-  - Wave 1..n: làn song song, mỗi làn một bộ file KHÔNG giao nhau; ghi rõ worker (`coder`/`coder-lite`/captain-UI).
-  - File nóng (lockfile, migration, root config, i18n chung, registry) thuộc đúng một làn hoặc captain gom cuối.
-  - Mỗi task có test của nó; mỗi làn có lệnh `accept`.
+- **Làn song song — bảng máy đọc được** (mục `## Làn` trong PLAN.md, đúng tên cột):
+
+  ```
+  | lane | worker | files | ops | depends_on | accept |
+  |---|---|---|---|---|---|
+  | A | coder | shared/types.ts | new | - | pnpm test types |
+  | B | coder | web/src/api/** | extend | A | pnpm -C web test api |
+  | C | coder-lite | web/src/i18n/** | extend | A | pnpm -C web test i18n |
+  ```
+  - `files`: glob ngăn bởi phẩy. `ops`: replace/extend/rename/delete/new. `depends_on`: làn phải xong trước (`-` = không).
+  - Contract/type dùng chung là một làn riêng không phụ thuộc ai (wave 1); các làn dùng nó `depends_on` làn đó.
+  - File nóng (lockfile, migration, config gốc, i18n chung, registry) thuộc đúng một làn hoặc captain gom cuối.
+  - Mỗi task có test của nó; mỗi làn có `accept`.
+  - **Kiểm bằng máy, bắt buộc trước cổng 2:** `node ~/.claude/hooks/lane-check.mjs plan <PLAN.md>` — báo làn trùng file
+    (`OVERLAP`), file nóng hai chủ (`HOT`), phụ thuộc sai/vòng, rồi in các **wave**. Exit 1 ⇒ sửa bảng tới khi sạch.
+    Hai làn cùng đụng một symbol (vd A `replace` còn B `extend` cùng `PaymentService`) git không thấy được ⇒ captain
+    soát cột `ops`, gộp hai làn làm một hoặc cho chạy nối tiếp.
+  - Chạy song song có đáng không ⇒ theo mục "Khi nào KHÔNG song song" trong skill `flow-team`.
 - **Kế hoạch test**: unit/integration/e2e cần thêm + **QA charter** (từ acceptance criteria: vai, trạng thái đầu,
   dữ liệu, bằng chứng cần có) cho pha 6.
 
@@ -54,12 +67,9 @@ codex exec --sandbox read-only -m gpt-6.1-sol -c model_reasoning_effort="high" -
 Chỉ báo: lỗi logic, yêu cầu bị sót, contract mâu thuẫn, làn giao file, rủi ro mở rộng/bảo trì/bảo mật/hiệu năng.
 CẤM đề xuất thêm tính năng. Tối đa 10 mục, mỗi mục: mức, vấn đề, bằng chứng, hướng sửa." < /dev/null
 ```
-Cỡ L, thêm Grok (provider thứ ba):
-```bash
-grok -p "<cùng nội dung>" -m grok-4.7 --agent design-doc-reviewer --permission-mode plan \
-  --cwd "<gốc repo>" --output-format plain > "<scratchpad>/plan-review-grok.md" 2>&1 < /dev/null
-```
-Grok lỗi ⇒ bỏ qua, báo user một dòng. Codex lỗi ⇒ Agent `code-reviewer` review plan.
+Cỡ L: lượt thứ hai bằng Grok đang TẠM TẮT (2026-10-01 — Grok CLI `-p` treo khi gọi công cụ; xem `agents/researcher.md`).
+Thay bằng lượt Codex thứ hai chạy song song cùng brief (hai lượt hay ra finding khác nhau). agy không dùng review.
+Codex lỗi ⇒ Agent `code-reviewer` review plan.
 
 Hợp nhất: kiểm từng mục vào SPEC/PLAN/code; sửa plan; mục bác bỏ ghi một dòng lý do cuối PLAN.md.
 **Cổng 2:** user duyệt plan (ExitPlanMode) ⇒ mở sổ tiến độ ⇒ thi công theo skill `flow-team`.

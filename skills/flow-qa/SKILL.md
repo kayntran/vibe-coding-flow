@@ -11,7 +11,7 @@ Agent `test-runner` chạy đủ bộ (lint, typecheck, unit, integration, build
 
 ## Pha 6 — Test thực tế
 1. Lấy QA charter trong PLAN.md (cỡ S: captain tự viết 3–5 dòng từ yêu cầu).
-2. Agent `qa-tester` — brief: charter, lệnh chạy app, **port riêng** (không trùng worktree khác đang chạy),
+2. Agent `qa-tester` — brief: charter, lệnh chạy app, **port riêng** từ `node ~/.claude/hooks/wt-env.mjs alloc <đường worktree>` (`PORT_BASE`),
    dữ liệu/tài khoản test (từ seed của dự án), đường ghi `<scratchpad>/qa/qa-report.md`.
    Nhiều luồng độc lập ⇒ 2–3 `qa-tester` song song, mỗi con một nhóm criteria + port riêng.
 3. Đọc báo cáo, mở 1–2 ảnh của bug nặng nhất để kiểm claim.

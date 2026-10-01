@@ -18,17 +18,20 @@ Chỉ chạy khi user đã gật trong chat. Nhánh chính tên `master`/khác �
    rồi `git merge --ff-only <branch>`.
 4. **Trước khi push:** `git log --oneline origin/main..main`. Ngoài commit của mình còn commit khác chưa push (của phiên
    khác/việc cũ) ⇒ liệt kê cho user, hỏi có push kèm không — push là đẩy tất cả. Rồi `git push origin main` (nếu có
-   remote) → `git worktree remove <path> && git branch -d <branch>`.
+   remote) → `git worktree remove <path> && git branch -d <branch>` → `node ~/.claude/hooks/wt-env.mjs release <path>`.
 5. Có `progress.md` ⇒ đổi `Trạng thái: xong`, ghi commit gộp (hook sẽ thôi nạp sổ này).
 6. `merge --ff-only` bị từ chối ⇒ không ép, không stash hộ, không đụng file dở của phiên khác. Main có commit mới ⇒
    `EnterWorktree` `path` quay lại, làm lại bước 1–5; trùng file dở ⇒ hỏi user.
 
 ## Nhiều làn song song
-1. Thứ tự theo phụ thuộc: contract/type → backend/service → frontend → test → docs.
-2. Gộp từng làn vào **nhánh tích hợp** của tính năng (không vào main), chạy test giữa mỗi lần gộp.
-   Dò conflict trước: `git merge-tree --write-tree <nhánh-tích-hợp> <làn>`.
-3. Trên nhánh tích hợp: test đủ bộ + `flow-qa` các luồng chính + `flow-review` MỘT lần cho cả nhánh.
-4. Rồi gộp nhánh tích hợp vào main theo mục "Một nhánh".
+1. Mỗi làn đã qua `lane-check audit` (không có file ngoài scope) — xem skill `flow-team`.
+2. Dò xung đột cả bộ một lần: `node ~/.claude/hooks/lane-check.mjs conflicts --base <nhánh-tích-hợp> <làn1> <làn2> …`
+   ⇒ in cặp xung đột + **thứ tự gộp gợi ý**. Hai làn xung đột ⇒ gộp nối tiếp, làn sau rebase lên nhánh tích hợp
+   rồi test lại trước khi gộp; không gộp song song.
+3. Gộp từng làn vào **nhánh tích hợp** của tính năng (không vào main) theo thứ tự đó, kết hợp thứ tự phụ thuộc
+   (contract → backend → frontend → test → docs), chạy test giữa mỗi lần gộp.
+4. Trên nhánh tích hợp: test đủ bộ + `flow-qa` các luồng chính + `flow-review` MỘT lần cho cả nhánh.
+5. Rồi gộp nhánh tích hợp vào main theo mục "Một nhánh". Xong: `node ~/.claude/hooks/wt-env.mjs release <đường worktree>` cho từng worktree đã xoá (hoặc `prune`).
 
 ## Sau push
 CI đỏ ⇒ Agent `debugger` với run id (`gh run view <id> --log-failed`) ⇒ sửa trên nhánh mới theo flow.

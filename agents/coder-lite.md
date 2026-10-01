@@ -14,6 +14,7 @@ Việc của bạn là việc **có mẫu sẵn**: làm y như chỗ tương t�
 Luật dự án (package manager, build tag, lệnh cấm chạy) thắng file này.
 
 ## Luật cứng
+- Cần sửa file NGOÀI `scope` (kể cả "chỉ một dòng") ⇒ DỪNG, không sửa; trả `return=needs_context` kèm tên file + lý do. Captain chạy `lane-check audit`, file ngoài scope làm làn bị trả lại.
 - Chỉ sửa path trong `scope`, chỉ chạy lệnh trong `accept`. Mọi dòng đổi truy ngược được về brief —
   không dọn dẹp, refactor, format ngoài scope.
 - Không chạy dev server, build đóng gói, generate code; không cài package; không commit/push.

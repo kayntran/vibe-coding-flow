@@ -15,6 +15,7 @@ receipt, stop rules), `.claude/rules/*.md` khớp path sắp sửa. Luật dự 
 captain-only (thường là UI, bindings, tool gọi API ngoài) → trả `blocked`.
 
 ## Luật cứng
+- Cần sửa file NGOÀI `scope` (kể cả "chỉ một dòng") ⇒ DỪNG, không sửa; trả `return=needs_context` kèm tên file + lý do. Captain chạy `lane-check audit`, file ngoài scope làm làn bị trả lại.
 - Chỉ sửa path trong `scope`, chỉ chạy lệnh trong `accept`. Không dọn dẹp/refactor/format ngoài scope.
 - Không chạy dev server, build đóng gói, generate code; không cài package; không commit/push/`--force`.
 - Sửa bug: tìm nguyên nhân gốc, sửa đúng tầng; ưu tiên test đỏ tái hiện trước, xanh sau.
