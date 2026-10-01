@@ -82,6 +82,14 @@ function assertBlock(r) {
   return r.json.reason
 }
 
+// Quyết định "ask" (flow-v5): hỏi lại user trước khi push nhánh chính; trả lý do.
+function assertAsk(r) {
+  assert.equal(r.status, 0)
+  assert.equal(r.json?.hookSpecificOutput?.permissionDecision, 'ask', `đáng lẽ hỏi lại, stdout: ${r.stdout}`)
+  assert.equal(r.json.hookSpecificOutput.hookEventName, 'PreToolUse')
+  return r.json.hookSpecificOutput.permissionDecisionReason
+}
+
 // Thêm nhánh `name` (worktree riêng, một commit file <name>.go nội dung riêng); trả đường dẫn worktree.
 function addBranch(fx, name) {
   const wt = path.join(fx.root, `wt-${name}`)
@@ -92,13 +100,18 @@ function addBranch(fx, name) {
 
 const pidOf = (fx, cwd = fx.wt) => /^pid: ([0-9a-f]{40,})$/m.exec(cli(fx, cwd, 'status').stdout)?.[1]
 
-function stampBoth(fx, { qa = 'QA ok\n', cwd = fx.wt } = {}) {
+// Đóng đủ dấu review + qa + test (flow-v5: cổng gộp đòi thêm dấu test; test:false = chỉ review + qa).
+function stampBoth(fx, { qa = 'QA ok\n', cwd = fx.wt, test = true } = {}) {
   const review = write(fx.root, 'review.json', JSON.stringify({ findings: [] }))
   const qaFile = write(fx.root, 'qa.md', qa)
   const r1 = cli(fx, cwd, 'stamp', 'review', review)
   const r2 = cli(fx, cwd, 'stamp', 'qa', qaFile)
   assert.equal(r1.status, 0, r1.stderr)
   assert.equal(r2.status, 0, r2.stderr)
+  if (test) {
+    const r3 = cli(fx, cwd, 'stamp', 'test', '--', 'node', '-e', '0')
+    assert.equal(r3.status, 0, r3.stderr)
+  }
 }
 
 const bashIn = (cwd, command) => ({ hook_event_name: 'PreToolUse', tool_name: 'Bash', cwd, tool_input: { command } })
@@ -627,8 +640,9 @@ describe('bash secret scan', () => {
     commit(fx.main, 'old.js', withSecret, 'secret cũ')
     git(fx.main, 'push', '-u', 'origin', 'main')
     commit(fx.main, 'clean.js', 'ok\n', 'sạch')
-    assertPass(sh(fx, fx.main, 'git push')) // secret cũ đã nằm trên upstream
-    assertPass(sh(fx, fx.main, 'git push origin main'))
+    // secret cũ đã nằm trên upstream ⇒ quét sạch; flow-v5: push nhánh chính sạch giờ bị hỏi lại (ask) thay vì cho qua
+    assertAsk(sh(fx, fx.main, 'git push'))
+    assertAsk(sh(fx, fx.main, 'git push origin main'))
     commit(fx.main, 'new.js', withSecret, 'secret mới')
     for (const c of ['git push', 'git push origin main', 'git -C . push --force-with-lease']) {
       const reason = assertDeny(sh(fx, fx.main, c))
@@ -766,12 +780,13 @@ describe('bash secret scan', () => {
     for (const c of ['git push origin feat', 'git push origin +feat:refs/heads/x', 'git push origin main feat', 'git push -o ci.skip origin feat', 'git push --force origin refs/heads/feat']) {
       assert.match(assertDeny(sh(fx, fx.main, c)), /new\.js:2 — github/, c)
     }
-    // HEAD (main) sạch nên các lệnh gửi main/HEAD cho qua; src sạch dù dst trùng tên nhánh bẩn
-    for (const c of ['git push', 'git push origin main', 'git push origin HEAD', 'git push origin main:feat', 'git push origin :feat', 'git push origin khong-ton-tai']) {
+    // HEAD (main) sạch nên quét secret không chặn (flow-v5: gửi main/HEAD ⇒ ask); src sạch dù dst trùng tên nhánh bẩn ⇒ qua
+    for (const c of ['git push', 'git push origin main', 'git push origin HEAD']) assertAsk(sh(fx, fx.main, c))
+    for (const c of ['git push origin main:feat', 'git push origin :feat', 'git push origin khong-ton-tai']) {
       assertPass(sh(fx, fx.main, c))
     }
-    // HEAD (feat) bẩn: gửi main thì qua; không refspec / HEAD / feat:main thì chặn
-    assertPass(sh(fx, fx.wt, 'git push origin main'))
+    // HEAD (feat) bẩn: gửi main thì không bị chặn vì secret (flow-v5: ask); không refspec / HEAD / feat:main thì chặn
+    assertAsk(sh(fx, fx.wt, 'git push origin main'))
     for (const c of ['git push', 'git push origin HEAD', 'git push origin feat:main', 'git push origin HEAD:refs/heads/y']) {
       assert.match(assertDeny(sh(fx, fx.wt, c)), /new\.js:2 — github/, c)
     }
@@ -794,8 +809,8 @@ describe('bash secret scan', () => {
     for (const c of ['git push --repo=origin feat', 'git push --repo origin feat', 'git push --repo origin main feat']) {
       assert.match(assertDeny(sh(fx, fx.main, c)), /new\.js:2 — github/, c)
     }
-    assertPass(sh(fx, fx.main, 'git push --repo=origin main')) // gửi main sạch
-    assertPass(sh(fx, fx.main, 'git push --repo origin')) // không refspec ⇒ HEAD (main) sạch
+    assertAsk(sh(fx, fx.main, 'git push --repo=origin main')) // gửi main sạch (flow-v5: ask)
+    assertAsk(sh(fx, fx.main, 'git push --repo origin')) // không refspec ⇒ HEAD (main) sạch (flow-v5: ask)
     assert.match(assertDeny(sh(fx, fx.wt, 'git push --repo origin')), /new\.js:2/) // HEAD = feat bẩn
   })
 
@@ -836,15 +851,15 @@ describe('bash secret scan', () => {
     const fx = fixture()
     addRemote(fx)
     git(fx.main, 'tag', 'v0')
-    assertPass(sh(fx, fx.main, 'git push --mirror origin'))
+    assertAsk(sh(fx, fx.main, 'git push --mirror origin')) // mirror sạch: quét secret qua, flow-v5 hỏi lại vì gửi cả nhánh chính
     git(fx.wt, 'checkout', '-q', '--detach')
     commit(fx.wt, 'tagged.js', withSecret, 'secret chỉ có ở tag')
     git(fx.wt, 'tag', 'v9')
     git(fx.wt, 'checkout', '-q', 'feat')
     for (const c of ['git push --mirror origin', 'git push origin --mirror']) assert.match(assertDeny(sh(fx, fx.main, c)), /tagged\.js:2 — github/, c)
-    assertPass(sh(fx, fx.main, 'git push --all origin')) // --all chỉ gửi nhánh, các nhánh đều sạch
+    assertAsk(sh(fx, fx.main, 'git push --all origin')) // --all chỉ gửi nhánh, các nhánh đều sạch (flow-v5: ask vì có main)
     git(fx.wt, 'tag', '-d', 'v9')
-    assertPass(sh(fx, fx.main, 'git push --mirror origin'))
+    assertAsk(sh(fx, fx.main, 'git push --mirror origin'))
     git(fx.wt, 'checkout', '-q', '--detach')
     commit(fx.wt, 'other.js', withSecret, 'secret ở ref lạ')
     git(fx.wt, 'update-ref', 'refs/other/x', 'HEAD')
@@ -875,5 +890,626 @@ describe('bash secret scan', () => {
     stage(fx.main, 'cfg.js', withSecret)
     assertDeny(sh(fx, fx.main, 'git merge feat'))
     assert.match(assertDeny(sh(fx, fx.main, 'git merge feat && git commit -m x')), /Chưa đủ dấu/)
+  })
+})
+
+// ---------- Làn A (flow-v5): dấu test xanh ----------
+
+describe('stamp test (dấu test xanh)', () => {
+  function featFx() {
+    const fx = fixture()
+    commit(fx.wt, 'feat.go', 'package x\n', 'feat')
+    return fx
+  }
+  const stampTest = (fx, ...cmd) => cli(fx, fx.wt, 'stamp', 'test', '--', ...cmd)
+  const stampFile = (fx, ext) => path.join(fx.gates, `test-${pidOf(fx)}.${ext}`)
+
+  test('lệnh xanh: ghi test-<pid>.json {cmd, ts, durationMs} + test-<pid>.log, in output ra màn hình, in pid cuối cùng', () => {
+    const fx = featFx()
+    const r = stampTest(fx, 'node', '-e', "console.log('hello-stamp'); console.error('err-line')")
+    assert.equal(r.status, 0, r.stderr)
+    assert.match(r.stdout, /hello-stamp/)
+    assert.match(r.stderr, /err-line/)
+    const pid = pidOf(fx)
+    assert.equal(r.stdout.trim().split(/\r?\n/).at(-1), pid)
+    const stamp = JSON.parse(fs.readFileSync(stampFile(fx, 'json'), 'utf8'))
+    assert.match(stamp.cmd, /hello-stamp/)
+    assert.ok(!Number.isNaN(Date.parse(stamp.ts)), `ts không phải ngày: ${stamp.ts}`)
+    assert.ok(Number.isInteger(stamp.durationMs) && stamp.durationMs >= 0, `durationMs: ${stamp.durationMs}`)
+    const logText = fs.readFileSync(stampFile(fx, 'log'), 'utf8')
+    assert.match(logText, /hello-stamp/)
+    assert.match(logText, /err-line/)
+  })
+
+  test('lệnh đỏ: thoát cùng mã, không ghi dấu json nhưng vẫn giữ log', () => {
+    const fx = featFx()
+    const r = stampTest(fx, 'node', '-e', "console.log('truoc-khi-do'); process.exit(3)")
+    assert.equal(r.status, 3)
+    assert.match(r.stdout, /truoc-khi-do/)
+    assert.ok(!fs.existsSync(stampFile(fx, 'json')))
+    assert.match(fs.readFileSync(stampFile(fx, 'log'), 'utf8'), /truoc-khi-do/)
+  })
+
+  test('lệnh không tồn tại ⇒ thoát ≠ 0, không ghi dấu', () => {
+    const fx = featFx()
+    const r = stampTest(fx, 'lenh-khong-ton-tai-flow-gate')
+    assert.notEqual(r.status, 0)
+    assert.ok(!fs.existsSync(stampFile(fx, 'json')))
+  })
+
+  test('đã có dấu xanh mà chạy lại ra đỏ ⇒ dấu cũ bị gỡ (lần chạy cuối quyết định)', () => {
+    const fx = featFx()
+    assert.equal(stampTest(fx, 'node', '-e', '0').status, 0)
+    assert.ok(fs.existsSync(stampFile(fx, 'json')))
+    assert.equal(stampTest(fx, 'node', '-e', 'process.exit(1)').status, 1)
+    assert.ok(!fs.existsSync(stampFile(fx, 'json')))
+  })
+
+  test('chạy trong cwd của worktree; một token duy nhất được chạy nguyên văn như dòng lệnh (có &&)', () => {
+    const fx = featFx()
+    const line = "node -e 0 && node -e require('fs').writeFileSync('ran.txt','x')"
+    const r = stampTest(fx, line)
+    assert.equal(r.status, 0, r.stderr)
+    assert.ok(fs.existsSync(path.join(fx.wt, 'ran.txt')), 'lệnh phải chạy với cwd = worktree')
+    assert.equal(JSON.parse(fs.readFileSync(stampFile(fx, 'json'), 'utf8')).cmd, line)
+  })
+
+  test('diff rỗng hoặc thiếu lệnh ⇒ lỗi, không chạy lệnh, không tạo dấu', () => {
+    const fx = fixture() // chưa có commit nào khác main
+    const r = stampTest(fx, 'node', '-e', "require('fs').writeFileSync('ran.txt','x')")
+    assert.equal(r.status, 1)
+    assert.match(r.stderr, /rỗng/)
+    assert.ok(!fs.existsSync(path.join(fx.wt, 'ran.txt')))
+    commit(fx.wt, 'feat.go', 'package x\n', 'feat')
+    assert.equal(cli(fx, fx.wt, 'stamp', 'test', '--').status, 1)
+    assert.equal(cli(fx, fx.wt, 'stamp', 'test').status, 1)
+    assert.ok(!fs.existsSync(fx.gates) || fs.readdirSync(fx.gates).every((f) => !f.endsWith('.json')))
+  })
+
+  test('merge: thiếu dấu test bị chặn, lý do liệt kê "test" + lệnh mẫu; có dấu test thì qua', () => {
+    const fx = featFx()
+    stampBoth(fx, { test: false })
+    const reason = assertDeny(hook(fx, 'bash', bashIn(fx.main, 'git merge feat')))
+    assert.match(reason, /feat: thiếu test \(/)
+    assert.doesNotMatch(reason, /thiếu review|thiếu .*qa/)
+    assert.ok(reason.includes('node ~/.claude/hooks/flow-gate.mjs stamp test -- <lệnh test đủ bộ>'), reason)
+    assert.equal(stampTest(fx, 'node', '-e', '0').status, 0)
+    assertPass(hook(fx, 'bash', bashIn(fx.main, 'git merge feat')))
+  })
+
+  test('thiếu cả ba dấu: lý do liệt kê review, qa, test', () => {
+    const fx = featFx()
+    assert.match(assertDeny(hook(fx, 'bash', bashIn(fx.main, 'git merge feat'))), /thiếu review, qa, test/)
+  })
+
+  test('dấu test của diff cũ không còn hiệu lực sau khi diff đổi (patch-id đổi)', () => {
+    const fx = featFx()
+    stampBoth(fx)
+    assertPass(hook(fx, 'bash', bashIn(fx.main, 'git merge feat')))
+    commit(fx.wt, 'feat2.go', 'package y\n', 'feat2')
+    assert.match(assertDeny(hook(fx, 'bash', bashIn(fx.main, 'git merge feat'))), /thiếu review, qa, test/)
+  })
+
+  test('flow.json {"tests":"none"} ⇒ merge không đòi dấu test; vẫn đòi review + qa', () => {
+    const fx = featFx()
+    write(fx.main, '.claude/flow.json', JSON.stringify({ tests: 'none' }))
+    const reason = assertDeny(hook(fx, 'bash', bashIn(fx.main, 'git merge feat')))
+    assert.match(reason, /thiếu review, qa \(/)
+    stampBoth(fx, { test: false })
+    assertPass(hook(fx, 'bash', bashIn(fx.main, 'git merge feat')))
+  })
+
+  test('flow.json hỏng hoặc tests khác "none" ⇒ vẫn đòi dấu test', () => {
+    const fx = featFx()
+    stampBoth(fx, { test: false })
+    write(fx.main, '.claude/flow.json', '{không json')
+    assert.match(assertDeny(hook(fx, 'bash', bashIn(fx.main, 'git merge feat'))), /thiếu test/)
+    write(fx.main, '.claude/flow.json', JSON.stringify({ tests: 'all' }))
+    assert.match(assertDeny(hook(fx, 'bash', bashIn(fx.main, 'git merge feat'))), /thiếu test/)
+  })
+
+  test('stop nudge tính cả test: thiếu test thì nhắc kèm lệnh mẫu; đủ ba dấu thì thôi', () => {
+    const fx = featFx()
+    stampBoth(fx, { test: false })
+    const reason = assertBlock(hook(fx, 'stop', { cwd: fx.wt, stop_hook_active: false }))
+    assert.match(reason, /thiếu: test\./)
+    assert.match(reason, /stamp test -- <lệnh test đủ bộ>/)
+    const fx2 = featFx()
+    stampBoth(fx2)
+    assertPass(hook(fx2, 'stop', { cwd: fx2.wt, stop_hook_active: false }))
+  })
+
+  test('status in dòng test: không → có; "không đòi" khi flow.json tests=none', () => {
+    const fx = featFx()
+    stampBoth(fx, { test: false })
+    assert.match(cli(fx, fx.wt, 'status').stdout, /review: có\r?\nqa: có\r?\ntest: không\r?\n?$/)
+    assert.equal(stampTest(fx, 'node', '-e', '0').status, 0)
+    assert.match(cli(fx, fx.wt, 'status').stdout, /qa: có\r?\ntest: có/)
+    const fx2 = featFx()
+    commit(fx2.wt, '.claude/flow.json', JSON.stringify({ tests: 'none' }), 'flow.json') // status đọc flow.json của checkout hiện tại
+    assert.match(cli(fx2, fx2.wt, 'status').stdout, /test: không đòi/)
+  })
+
+  // ----- diff chỉ có tài liệu (.md/.mdx/.txt hoặc dưới docs/) ⇒ không đòi dấu test; review + qa vẫn đòi -----
+
+  const merge = (fx) => hook(fx, 'bash', bashIn(fx.main, 'git merge feat'))
+
+  test('diff chỉ có .md thiếu dấu test ⇒ cho gộp; diff có .ts thiếu dấu test ⇒ chặn', () => {
+    const fx = fixture()
+    commit(fx.wt, 'README.md', '# doc\n', 'docs')
+    stampBoth(fx, { test: false })
+    assertPass(merge(fx))
+    const fx2 = fixture()
+    commit(fx2.wt, 'src/app.ts', 'export {}\n', 'code')
+    stampBoth(fx2, { test: false })
+    assert.match(assertDeny(merge(fx2)), /feat: thiếu test \(/)
+  })
+
+  test('tài liệu: .md .mdx .txt (không phân biệt hoa thường) và mọi file dưới docs/; diff chỉ tài liệu vẫn đòi review + qa', () => {
+    const fx = fixture()
+    commit(fx.wt, 'README.MD', '# a\n', 'a')
+    commit(fx.wt, 'guide/intro.mdx', '# b\n', 'b')
+    commit(fx.wt, 'notes/todo.txt', 'c\n', 'c')
+    commit(fx.wt, 'docs/diagram.png', 'png\n', 'd')
+    commit(fx.wt, 'docs/api/schema.json', '{}\n', 'e')
+    const reason = assertDeny(merge(fx))
+    assert.match(reason, /feat: thiếu review, qa \(/) // không có "test"
+    stampBoth(fx, { test: false })
+    assertPass(merge(fx))
+  })
+
+  test('diff lẫn tài liệu và code ⇒ vẫn đòi test; docs nằm sâu (src/docs/…) hoặc đuôi .md.ts không phải tài liệu', () => {
+    const fx = fixture()
+    commit(fx.wt, 'README.md', '# doc\n', 'docs')
+    commit(fx.wt, 'src/app.ts', 'export {}\n', 'code')
+    stampBoth(fx, { test: false })
+    assert.match(assertDeny(merge(fx)), /thiếu test/)
+    const fx2 = fixture()
+    commit(fx2.wt, 'src/docs/Viewer.ts', 'export {}\n', 'x')
+    stampBoth(fx2, { test: false })
+    assert.match(assertDeny(merge(fx2)), /thiếu test/)
+    const fx3 = fixture()
+    commit(fx3.wt, 'notes.md.ts', 'export {}\n', 'x')
+    stampBoth(fx3, { test: false })
+    assert.match(assertDeny(merge(fx3)), /thiếu test/)
+  })
+
+  test('đổi tên file code thành tài liệu vẫn tính là đổi code (cả hai đầu đường dẫn)', () => {
+    const fx = fixture()
+    commit(fx.main, 'src/old.ts', 'export {}\n', 'thêm old.ts')
+    git(fx.wt, 'rebase', 'main')
+    fs.mkdirSync(path.join(fx.wt, 'docs'), { recursive: true })
+    git(fx.wt, 'mv', 'src/old.ts', 'docs/old.md')
+    git(fx.wt, 'commit', '-m', 'đổi tên')
+    stampBoth(fx, { test: false })
+    assert.match(assertDeny(merge(fx)), /thiếu test/)
+  })
+
+  test('diff chỉ tài liệu: stop nudge không đòi test; status ghi lý do không đòi', () => {
+    const fx = fixture()
+    commit(fx.wt, 'README.md', '# doc\n', 'docs')
+    stampBoth(fx, { test: false })
+    assertPass(hook(fx, 'stop', { cwd: fx.wt, stop_hook_active: false }))
+    assert.match(cli(fx, fx.wt, 'status').stdout, /test: không đòi \(diff chỉ có tài liệu\)/)
+  })
+})
+
+// ---------- Làn A (flow-v5): chặn lệnh phá huỷ trên nhánh chính ----------
+
+describe('bash: lệnh phá huỷ trên nhánh chính', () => {
+  const sh = (fx, cwd, command) => hook(fx, 'bash', bashIn(cwd, command))
+
+  test('git push ép lên nhánh chính bị chặn (cờ ép, refspec +, HEAD khi đang ở main, --all/--mirror)', () => {
+    const fx = fixture()
+    for (const c of [
+      'git push --force origin main', 'git push -f origin main', 'git push origin main --force', 'git push --force-with-lease origin main',
+      'git push --force-with-lease=main:abc123 origin main', 'git push --force-if-includes origin main', 'git push -fu origin main',
+      'git push -uf origin master', 'git push origin +main', 'git push origin +HEAD:main', 'git push origin +feat:master',
+      'git push origin +refs/heads/feat:refs/heads/main', 'git push --force', 'git push -f origin', 'git push --force origin HEAD',
+      'git push --force --all origin', 'git push -f --mirror origin', 'git -C . push --force origin main', 'echo ok && git push -f origin main',
+    ]) assert.match(assertDeny(sh(fx, fx.main, c)), /nhánh chính/, c)
+  })
+
+  test('push ép không phải nhánh chính, dry-run, chỉ tag ⇒ không chặn', () => {
+    const fx = fixture()
+    for (const c of [
+      'git push --force origin feat', 'git push -f origin feat:other', 'git push origin +feat', 'git push --force origin main:feat',
+      'git push --force --dry-run origin main', 'git push --force --tags origin', 'git push -o ci.skip --force origin feat',
+    ]) assertPass(sh(fx, fx.main, c))
+    assertPass(sh(fx, fx.wt, 'git push --force')) // HEAD = feat
+    assertPass(sh(fx, fx.wt, 'git push --force-with-lease origin HEAD'))
+  })
+
+  test('git reset --hard chỉ bị chặn ở thư mục chính khi đang ở nhánh chính', () => {
+    const fx = fixture()
+    for (const c of ['git reset --hard', 'git reset --hard HEAD~1', 'git reset -q --hard origin/main', 'echo x && git reset --hard']) {
+      assert.match(assertDeny(sh(fx, fx.main, c)), /reset --hard/, c)
+    }
+    assertDeny(sh(fx, fx.root, `git -C "${fx.main.replace(/\\/g, '/')}" reset --hard`))
+    for (const c of ['git reset --soft HEAD~1', 'git reset', 'git reset HEAD a.txt', 'git reset --mixed', 'echo "git reset --hard"']) assertPass(sh(fx, fx.main, c))
+    assertPass(sh(fx, fx.wt, 'git reset --hard')) // linked worktree
+    git(fx.main, 'checkout', '-q', '-b', 'topic') // thư mục chính nhưng không ở nhánh chính
+    assertPass(sh(fx, fx.main, 'git reset --hard'))
+  })
+
+  test('git branch -D / -d -f xoá nhánh chính bị chặn; xoá nhánh khác, -d thường, di chuyển/đổi tên cho qua', () => {
+    const fx = fixture()
+    for (const cwd of [fx.main, fx.wt]) {
+      for (const c of [
+        'git branch -D main', 'git branch -D master', 'git branch -d -f main', 'git branch -df main', 'git branch -fd main',
+        'git branch --delete --force main', 'git branch -D feat main',
+      ]) assert.match(assertDeny(sh(fx, cwd, c)), /nhánh chính/, c)
+    }
+    for (const c of ['git branch -D feat', 'git branch -d main', 'git branch', 'git branch -f feat main', 'git branch -m main trunk', 'git branch topic']) {
+      assertPass(sh(fx, fx.main, c))
+    }
+  })
+
+  test('xoá nhánh chính trên remote (--delete/-d main|master, refspec rỗng nguồn :main) bị chặn; xoá nhánh khác thì qua', () => {
+    const fx = fixture()
+    for (const cwd of [fx.main, fx.wt]) {
+      for (const c of [
+        'git push origin --delete main', 'git push origin -d main', 'git push --delete origin master', 'git push origin --delete refs/heads/main',
+        'git push origin --delete feat main', 'git push --repo origin --delete main', 'git push --repo=origin --delete master',
+        'git push origin :main', 'git push origin :master', 'git push origin :refs/heads/main', 'git push origin +:main',
+        'git push origin feat :main', 'git push --repo=origin :main', 'echo ok && git push origin --delete main',
+      ]) assert.match(assertDeny(sh(fx, cwd, c)), /nhánh chính/, c)
+    }
+    for (const c of [
+      'git push origin --delete feat', 'git push origin -d topic', 'git push --delete origin tag-x', 'git push origin :feat', 'git push origin :refs/heads/feat',
+      'git push --dry-run origin --delete main', 'git push -n origin :main', 'git push origin main:feat', 'git push --repo origin --delete feat',
+    ]) assertPass(sh(fx, fx.main, c))
+  })
+
+  test('git branch -m/-M/--move đè nhánh chính (đích là main|master) bị chặn; đổi tên sang tên khác hoặc đổi tên đi thì qua', () => {
+    const fx = fixture()
+    for (const [cwd, c] of [
+      [fx.main, 'git branch -M feat main'], [fx.main, 'git branch -m feat main'], [fx.main, 'git branch -M feat master'],
+      [fx.main, 'git branch --move feat main'], [fx.main, 'git branch -M -f feat main'], [fx.main, 'git branch -M master'],
+      [fx.wt, 'git branch -m main'], [fx.wt, 'git branch -M master'], [fx.wt, 'echo ok && git branch -M feat main'],
+    ]) assert.match(assertDeny(sh(fx, cwd, c)), /nhánh chính/, c)
+    for (const [cwd, c] of [
+      [fx.main, 'git branch -m main trunk'], [fx.main, 'git branch -m feat feat2'], [fx.main, 'git branch -M feat topic'],
+      [fx.main, 'git branch -m topic'], [fx.main, 'git branch -m main'], // đang ở main: đổi tên main thành main = không làm gì
+      [fx.wt, 'git branch -M x'], [fx.wt, 'git branch -m'],
+    ]) assertPass(sh(fx, cwd, c))
+  })
+
+  test('git checkout -- . / restore . / clean -f* ở thư mục chính bị chặn; ở worktree thì qua', () => {
+    const fx = fixture()
+    const bad = [
+      'git checkout -- .', 'git checkout .', 'git checkout HEAD -- .', 'git restore .', 'git restore --source=HEAD~1 .', 'git restore -W .',
+      'git restore --staged --worktree .', 'git clean -f', 'git clean -fd', 'git clean -fdx', 'git clean -df', 'git clean --force -d', 'git clean -d -f -x',
+    ]
+    for (const c of bad) assertDeny(sh(fx, fx.main, c))
+    for (const c of bad) assertPass(sh(fx, fx.wt, c))
+    for (const c of [
+      'git checkout feat', 'git checkout -b x', 'git checkout -- a.txt', 'git restore a.txt', 'git restore --staged .', 'git restore -S .',
+      'git clean -n', 'git clean -nfd', 'git clean --dry-run -f', 'git clean', 'echo "git clean -fd"',
+    ]) assertPass(sh(fx, fx.main, c))
+    git(fx.main, 'checkout', '-q', '-b', 'topic') // thư mục chính, nhánh khác: vẫn chặn (luật theo thư mục, không theo nhánh)
+    assertDeny(sh(fx, fx.main, 'git clean -fd'))
+    assertDeny(sh(fx, fx.main, 'git restore .'))
+  })
+
+  test('deny thắng ask khi nhiều lệnh trong một chuỗi (ask đến trước hay sau đều vậy)', () => {
+    const fx = fixture()
+    assertAsk(sh(fx, fx.main, 'git push origin main')) // đơn lẻ chỉ hỏi
+    assertDeny(sh(fx, fx.main, 'git push origin main && git push --force origin main'))
+    assertDeny(sh(fx, fx.main, 'git push --force origin main; git push origin main'))
+    assertDeny(sh(fx, fx.main, 'git push origin main && git reset --hard'))
+  })
+
+  test('lỗi nội bộ (không phải repo, cwd không tồn tại) ⇒ cho qua', () => {
+    const fx = fixture()
+    for (const cwd of [fx.root, path.join(fx.root, 'khong-co')]) {
+      for (const c of ['git push --force origin main', 'git reset --hard', 'git clean -fd', 'git restore .', 'git branch -D main']) assertPass(sh(fx, cwd, c))
+    }
+  })
+})
+
+// ---------- Làn A (flow-v5): hỏi lại khi push nhánh chính ----------
+
+describe('bash: push nhánh chính ⇒ ask', () => {
+  const sh = (fx, cwd, command) => hook(fx, 'bash', bashIn(cwd, command))
+  const GHP = 'ghp_' + 'a'.repeat(36)
+
+  // Repo + remote bare `origin`, main đã push (origin/main = HEAD của main).
+  function remoteFx() {
+    const fx = fixture()
+    const bare = path.join(fx.root, 'remote.git')
+    git(fx.root, 'init', '--bare', '-b', 'main', bare)
+    git(fx.main, 'remote', 'add', 'origin', bare)
+    git(fx.main, 'push', '-u', 'origin', 'main')
+    return fx
+  }
+
+  test('main trước remote 2 commit ⇒ ask, lý do "Sắp push 2 commit lên origin/main" + log --oneline', () => {
+    const fx = remoteFx()
+    commit(fx.main, 'x1.txt', 'x\n', 'thêm x1')
+    commit(fx.main, 'x2.txt', 'x\n', 'thêm x2')
+    for (const c of ['git push', 'git push origin main', 'git push origin HEAD', 'git -C . push origin main', 'git push -u origin main', 'git push origin refs/heads/main:refs/heads/main']) {
+      const reason = assertAsk(sh(fx, fx.main, c))
+      assert.match(reason, /^Sắp push 2 commit lên origin\/main:\n[0-9a-f]+ thêm x2\n[0-9a-f]+ thêm x1$/, c)
+    }
+  })
+
+  test('commit nhiều hơn 15 ⇒ n là tổng, nhưng chỉ liệt kê tối đa 15 dòng', () => {
+    const fx = remoteFx()
+    for (let i = 1; i <= 20; i++) git(fx.main, 'commit', '--allow-empty', '-m', `c${i}`)
+    const reason = assertAsk(sh(fx, fx.main, 'git push'))
+    assert.match(reason, /^Sắp push 20 commit lên origin\/main:\n/)
+    const lines = reason.split('\n').slice(1)
+    assert.equal(lines.length, 15)
+    assert.match(lines[0], / c20$/)
+    assert.match(lines[14], / c6$/)
+  })
+
+  test('không có remote-tracking ⇒ đếm toàn bộ lịch sử; remote lấy từ tham số hoặc cấu hình nhánh', () => {
+    const fx = fixture() // chưa có remote nào
+    assert.match(assertAsk(sh(fx, fx.main, 'git push origin main')), /^Sắp push 1 commit lên origin\/main:\n[0-9a-f]+ init$/)
+    assert.match(assertAsk(sh(fx, fx.main, 'git push upstream main')), /^Sắp push 1 commit lên upstream\/main:/)
+    git(fx.main, 'config', 'branch.main.remote', 'gitlab')
+    assert.match(assertAsk(sh(fx, fx.main, 'git push')), /^Sắp push 1 commit lên gitlab\/main:/)
+  })
+
+  test('đã đồng bộ (0 commit), nhánh khác main, dry-run, xoá ref, chỉ tag ⇒ cho qua', () => {
+    const fx = remoteFx()
+    assertPass(sh(fx, fx.main, 'git push')) // origin/main = main
+    commit(fx.main, 'x1.txt', 'x\n', 'thêm x1')
+    commit(fx.wt, 'f.go', 'package f\n', 'feat commit')
+    assertPass(sh(fx, fx.wt, 'git push origin feat'))
+    assertPass(sh(fx, fx.wt, 'git push'))
+    assertPass(sh(fx, fx.main, 'git push --dry-run origin main'))
+    assertPass(sh(fx, fx.main, 'git push origin --delete topic'))
+    assertPass(sh(fx, fx.main, 'git push origin --tags'))
+    assertPass(sh(fx, fx.main, 'git push origin main:feat'))
+  })
+
+  test('gửi nhánh khác vào main (feat:main) ⇒ ask với commit của feat; --all / --mirror cũng hỏi', () => {
+    const fx = remoteFx()
+    commit(fx.wt, 'f.go', 'package f\n', 'feat commit')
+    const reason = assertAsk(sh(fx, fx.wt, 'git push origin feat:main'))
+    assert.match(reason, /^Sắp push \d+ commit lên origin\/main:\n[0-9a-f]+ feat commit/)
+    assertPass(sh(fx, fx.main, 'git push --all origin')) // main chưa có gì mới ⇒ không gửi gì lên main
+    commit(fx.main, 'x1.txt', 'x\n', 'thêm x1')
+    assert.match(assertAsk(sh(fx, fx.main, 'git push --all origin')), /^Sắp push 1 commit lên origin\/main:\n[0-9a-f]+ thêm x1$/)
+    assert.match(assertAsk(sh(fx, fx.main, 'git push --mirror origin')), /^Sắp push 1 commit lên origin\/main:/)
+  })
+
+  test('có secret trong phần sắp push ⇒ deny (không phải ask)', () => {
+    const fx = remoteFx()
+    commit(fx.main, 'cfg.js', `const t = "${GHP}"\n`, 'secret')
+    for (const c of ['git push', 'git push origin main']) {
+      assert.match(assertDeny(sh(fx, fx.main, c)), /cfg\.js:1 — github/, c)
+    }
+  })
+
+  test('đầu ra đúng khuôn hookSpecificOutput với permissionDecision "ask"', () => {
+    const fx = remoteFx()
+    commit(fx.main, 'x1.txt', 'x\n', 'thêm x1')
+    const r = sh(fx, fx.main, 'git push')
+    assert.deepEqual(Object.keys(r.json), ['hookSpecificOutput'])
+    assert.deepEqual(Object.keys(r.json.hookSpecificOutput).sort(), ['hookEventName', 'permissionDecision', 'permissionDecisionReason'])
+    assert.equal(r.json.hookSpecificOutput.permissionDecision, 'ask')
+  })
+})
+
+// ---------- Làn A (flow-v5): audit phạm vi khi worker nộp ----------
+
+describe('subagent-stop: audit phạm vi làn', () => {
+  const RECEIPT = 'return=done; paths=feat.go; checks=ok; blocker=; stop'
+  const jsonl = (fx, name, entries) => write(fx.root, name, entries.map((e) => JSON.stringify(e)).join('\n') + '\n')
+  const userMsg = (content) => ({ type: 'user', message: { role: 'user', content } })
+  const asst = (...content) => ({ type: 'assistant', message: { role: 'assistant', content } })
+  const briefOf = (plan, rest = 'lane=A') => `outcome=x\nscope=feat.go\nconstraints=-\naccept=-\nplan=${plan} ${rest}`
+
+  // wt (nhánh feat) có commit feat.go; PLAN.md nằm ngoài repo (như plan trong ~/.claude/plans), làn A = feat.go, làn B = other.go.
+  function auditFx() {
+    const fx = fixture()
+    commit(fx.wt, 'feat.go', 'package x\n', 'feat')
+    const plan = write(fx.root, 'PLAN.md', '| lane | files | depends_on |\n|---|---|---|\n| A | feat.go | - |\n| B | other.go | - |\n')
+    return { fx, plan }
+  }
+  const stopIn = (fx, transcript, agent_type = 'coder', extra = {}) => ({
+    hook_event_name: 'SubagentStop', stop_hook_active: false, agent_id: 'a1', agent_type, cwd: fx.wt,
+    last_assistant_message: RECEIPT, agent_transcript_path: transcript, ...extra,
+  })
+  const tx = (fx, brief, name = 'tx.jsonl') => jsonl(fx, name, [userMsg(brief), asst({ type: 'text', text: 'làm' })])
+  const go = (fx, transcript, agent_type, extra) => hook(fx, 'subagent-stop', stopIn(fx, transcript, agent_type, extra))
+
+  test('mọi file đổi nằm trong scope của làn ⇒ cho qua', () => {
+    const { fx, plan } = auditFx()
+    assertPass(go(fx, tx(fx, briefOf(plan))))
+  })
+
+  test('commit file ngoài scope ⇒ block, lý do có dòng OUTSIDE + hướng dẫn gỡ hoặc needs_context', () => {
+    const { fx, plan } = auditFx()
+    commit(fx.wt, 'extra.js', 'x\n', 'ngoài scope')
+    const reason = assertBlock(go(fx, tx(fx, briefOf(plan))))
+    assert.match(reason, /OUTSIDE extra\.js/)
+    assert.doesNotMatch(reason, /OUTSIDE feat\.go/)
+    assert.match(reason, /gỡ thay đổi ngoài scope, hoặc trả return=needs_context kèm tên file/)
+  })
+
+  test('file chưa commit (sửa dở + untracked) ngoài scope cũng bị bắt', () => {
+    const { fx, plan } = auditFx()
+    write(fx.wt, 'junk.txt', 'rác\n')
+    write(fx.wt, 'a.txt', 'đổi\n')
+    const reason = assertBlock(go(fx, tx(fx, briefOf(plan))))
+    assert.match(reason, /OUTSIDE junk\.txt/)
+    assert.match(reason, /OUTSIDE a\.txt/)
+  })
+
+  test('receipt needs_context / blocked ⇒ không audit (cho qua dù có file ngoài scope)', () => {
+    const { fx, plan } = auditFx()
+    commit(fx.wt, 'extra.js', 'x\n', 'ngoài scope')
+    const t = tx(fx, briefOf(plan))
+    assertPass(go(fx, t, 'coder', { last_assistant_message: 'return=needs_context; paths=extra.js; stop' }))
+    assertPass(go(fx, t, 'coder', { last_assistant_message: 'return=blocked; blocker=x; stop' }))
+    assertBlock(go(fx, t, 'coder', { last_assistant_message: 'return=done_with_concerns; stop' }))
+  })
+
+  test('coder-lite cũng bị audit; agent khác (recon, test-runner, debugger) thì không', () => {
+    const { fx, plan } = auditFx()
+    commit(fx.wt, 'extra.js', 'x\n', 'ngoài scope')
+    const t = tx(fx, briefOf(plan))
+    assertBlock(go(fx, t, 'coder-lite'))
+    for (const agent of ['recon', 'test-runner', 'debugger', 'qa-tester']) assertPass(go(fx, t, agent))
+  })
+
+  test('stop_hook_active ⇒ cho qua', () => {
+    const { fx, plan } = auditFx()
+    commit(fx.wt, 'extra.js', 'x\n', 'ngoài scope')
+    assertPass(go(fx, tx(fx, briefOf(plan)), 'coder', { stop_hook_active: true }))
+  })
+
+  test('brief thiếu plan= hoặc lane=, transcript không đọc được hoặc không có ⇒ cho qua', () => {
+    const { fx, plan } = auditFx()
+    commit(fx.wt, 'extra.js', 'x\n', 'ngoài scope')
+    assertPass(go(fx, tx(fx, 'outcome=x\nscope=feat.go\naccept=-')))
+    assertPass(go(fx, tx(fx, `outcome=x\nplan=${plan}`)))
+    assertPass(go(fx, tx(fx, 'outcome=x\nlane=A')))
+    assertPass(go(fx, path.join(fx.root, 'khong-co.jsonl')))
+    assertPass(go(fx, undefined))
+    assertPass(go(fx, write(fx.root, 'rong.jsonl', '')))
+  })
+
+  test('brief là tin nhắn user ĐẦU TIÊN (các tin sau không tính); content dạng mảng text block cũng đọc được', () => {
+    const { fx, plan } = auditFx()
+    commit(fx.wt, 'extra.js', 'x\n', 'ngoài scope')
+    const later = jsonl(fx, 'later.jsonl', [userMsg('làm đi'), asst({ type: 'text', text: 'ok' }), userMsg(briefOf(plan))])
+    assertPass(go(fx, later))
+    const blocks = jsonl(fx, 'blocks.jsonl', [userMsg([{ type: 'text', text: briefOf(plan) }]), asst({ type: 'text', text: 'ok' })])
+    assertBlock(go(fx, blocks))
+  })
+
+  test('plan= có nháy (đường dẫn có dấu cách) và lane đứng riêng dòng', () => {
+    const { fx } = auditFx()
+    const plan = write(fx.root, 'my plans/PLAN.md', '| lane | files | depends_on |\n|---|---|---|\n| A | feat.go | - |\n')
+    commit(fx.wt, 'extra.js', 'x\n', 'ngoài scope')
+    assertBlock(go(fx, tx(fx, `outcome=x\nplan="${plan}"\nlane=A\n`)))
+    assertBlock(go(fx, tx(fx, `outcome=x plan='${plan}' lane=A`)))
+  })
+
+  test('plan= KHÔNG nháy, đường dẫn có dấu cách, lane= đứng ngay sau ⇒ audit chạy đúng file và chặn file ngoài scope (bộ đọc chung lib/brief.mjs)', () => {
+    const { fx } = auditFx()
+    // như `plan=D:\AI\Vibe Coding\x\PLAN.md lane=A`: không nháy, có dấu cách, không có file nào khác để lane-check nhặt nhầm
+    const plan = write(fx.root, 'Vibe Coding/x/PLAN.md', '| lane | files | depends_on |\n|---|---|---|\n| A | feat.go | - |\n')
+    assertPass(go(fx, tx(fx, `outcome=x\nplan=${plan} lane=A`))) // trong scope ⇒ qua (tìm đúng file nên không exit 2)
+    commit(fx.wt, 'extra.js', 'x\n', 'ngoài scope')
+    for (const brief of [
+      `outcome=x\nplan=${plan} lane=A`,
+      `outcome=x\nplan=${plan} lane=A base=main`,
+      `outcome=x\nlane=A, plan=${plan}, base=main`,
+      `outcome=x\nplan=${plan} (xem thêm ở đó)\nlane=A`, // chữ thường theo sau: thử tiền tố ngắn dần
+      `outcome=x\nplan=${plan.replace(/\\/g, '/')}\nlane=A`,
+    ]) assert.match(assertBlock(go(fx, tx(fx, brief))), /OUTSIDE extra\.js/, brief)
+    if (process.platform === 'win32') { // đường dẫn git bash /c/Users/...
+      const gitBash = plan.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, d) => `/${d.toLowerCase()}`)
+      assert.match(assertBlock(go(fx, tx(fx, `outcome=x\nplan=${gitBash} lane=A`))), /OUTSIDE extra\.js/)
+    }
+  })
+
+  test('làn khác trong cùng plan: file của làn A là ngoài scope của làn B', () => {
+    const { fx, plan } = auditFx()
+    const reason = assertBlock(go(fx, tx(fx, briefOf(plan, 'lane=B'))))
+    assert.match(reason, /OUTSIDE feat\.go/)
+  })
+
+  test('base= được chuyển cho lane-check (base không tồn tại ⇒ lane-check exit 2 ⇒ cho qua + log)', () => {
+    const { fx, plan } = auditFx()
+    commit(fx.wt, 'extra.js', 'x\n', 'ngoài scope')
+    assertBlock(go(fx, tx(fx, briefOf(plan, 'lane=A base=main'))))
+    assertPass(go(fx, tx(fx, briefOf(plan, 'lane=A base=khong-co-nhanh-nay'))))
+    assert.match(fs.readFileSync(fx.log, 'utf8'), /lane-check/)
+  })
+
+  test('lane-check lỗi (không có plan, lane lạ, bảng hỏng) ⇒ cho qua + log, không chặn oan', () => {
+    const { fx, plan } = auditFx()
+    commit(fx.wt, 'extra.js', 'x\n', 'ngoài scope')
+    assertPass(go(fx, tx(fx, briefOf(path.join(fx.root, 'khong-co.md')))))
+    assertPass(go(fx, tx(fx, briefOf(plan, 'lane=Z'))))
+    assertPass(go(fx, tx(fx, briefOf(write(fx.root, 'hong.md', '# không có bảng\n')))))
+    assert.match(fs.readFileSync(fx.log, 'utf8'), /lane-check/)
+  })
+
+  test('báo cáo qua SubagentHandback: receipt trong tool_input.message vẫn quyết định audit', () => {
+    const { fx, plan } = auditFx()
+    commit(fx.wt, 'extra.js', 'x\n', 'ngoài scope')
+    const hb = (message) => ({ type: 'tool_use', name: 'SubagentHandback', input: { message } })
+    const mk = (name, message) => jsonl(fx, name, [userMsg(briefOf(plan)), asst({ type: 'text', text: 'xong' }, hb(message)), asst({ type: 'text', text: 'Đã giao báo cáo.' })])
+    assertBlock(hook(fx, 'subagent-stop', stopIn(fx, mk('done.jsonl', RECEIPT), 'coder', { last_assistant_message: 'Đã giao báo cáo.' })))
+    assertPass(hook(fx, 'subagent-stop', stopIn(fx, mk('blocked.jsonl', 'return=blocked; blocker=x; stop'), 'coder', { last_assistant_message: 'Đã giao báo cáo.' })))
+  })
+
+  test('thiếu receipt vẫn bị chặn như cũ (không phụ thuộc audit)', () => {
+    const { fx, plan } = auditFx()
+    assert.match(assertBlock(go(fx, tx(fx, briefOf(plan)), 'coder', { last_assistant_message: 'Xong rồi.' })), /Thiếu receipt/)
+  })
+})
+
+// ---------- Làn A (flow-v5, finding Codex): refspec matching `:` / `+:` và push.default=matching ----------
+
+describe('bash: push refspec matching (`:`, `+:`, push.default=matching)', () => {
+  const sh = (fx, cwd, command) => hook(fx, 'bash', bashIn(cwd, command))
+  const GHP = 'ghp_' + 'a'.repeat(36)
+
+  // Remote bare `origin` đã có main (origin/main = main) và feat (origin/feat = feat); wt đang ở feat.
+  function remoteFx() {
+    const fx = fixture()
+    const bare = path.join(fx.root, 'remote.git')
+    git(fx.root, 'init', '--bare', '-b', 'main', bare)
+    git(fx.main, 'remote', 'add', 'origin', bare)
+    git(fx.main, 'push', '-u', 'origin', 'main')
+    git(fx.wt, 'push', 'origin', 'feat')
+    return fx
+  }
+
+  test('đang ở feature, `+:` hoặc `:` kèm cờ ép = ép mọi nhánh trùng tên, trong đó có main ⇒ deny', () => {
+    const fx = remoteFx()
+    for (const c of [
+      'git push origin +:', 'git push --repo origin +:', 'git push --force origin :', 'git push -f origin :', 'git push origin : --force-with-lease',
+      'git push --force-with-lease=main:abc origin :', 'echo ok && git push origin +:',
+    ]) assert.match(assertDeny(sh(fx, fx.wt, c)), /nhánh chính/, c)
+    assertDeny(sh(fx, fx.main, 'git push origin +:')) // từ thư mục chính cũng vậy
+  })
+
+  test('`:` không ép ⇒ ask như push nhánh chính (nếu main có commit chưa lên remote); đã đồng bộ thì qua', () => {
+    const fx = remoteFx()
+    assertPass(sh(fx, fx.wt, 'git push origin :')) // main = origin/main
+    commit(fx.main, 'x1.txt', 'x\n', 'thêm x1')
+    for (const c of ['git push origin :', 'git push --repo=origin :']) {
+      assert.match(assertAsk(sh(fx, fx.wt, c)), /^Sắp push 1 commit lên origin\/main:\n[0-9a-f]+ thêm x1$/, c)
+    }
+  })
+
+  test('remote chưa có main/master (không có nhánh theo dõi) ⇒ `+:` không chạm nhánh chính ⇒ qua; refspec khác `:` không bị coi là matching', () => {
+    const fx = fixture() // không có remote nào
+    assertPass(sh(fx, fx.wt, 'git push origin +:'))
+    assertPass(sh(fx, fx.wt, 'git push --force origin :'))
+    const fx2 = remoteFx()
+    assertPass(sh(fx2, fx2.wt, 'git push origin +:feat')) // `:feat` = xoá feat trên remote, không phải matching
+    assertPass(sh(fx2, fx2.wt, 'git push --force --dry-run origin :'))
+  })
+
+  test('push.default=matching và không refspec ⇒ gửi mọi nhánh trùng tên: cờ ép ⇒ deny, không ép ⇒ ask; cấu hình khác thì như cũ', () => {
+    const fx = remoteFx()
+    assertPass(sh(fx, fx.wt, 'git push --force origin')) // mặc định: chỉ HEAD (feat)
+    git(fx.main, 'config', 'push.default', 'simple')
+    assertPass(sh(fx, fx.wt, 'git push --force'))
+    git(fx.main, 'config', 'push.default', 'matching')
+    for (const c of ['git push --force', 'git push -f origin', 'git push --force-with-lease']) assertDeny(sh(fx, fx.wt, c))
+    assertPass(sh(fx, fx.wt, 'git push')) // main đã đồng bộ
+    commit(fx.main, 'x1.txt', 'x\n', 'thêm x1')
+    assert.match(assertAsk(sh(fx, fx.wt, 'git push')), /^Sắp push 1 commit lên origin\/main:/)
+    assertPass(sh(fx, fx.wt, 'git push origin feat')) // có refspec rõ ràng ⇒ không phải matching
+    assertPass(sh(fx, fx.wt, 'git push --force origin feat'))
+  })
+
+  test('matching cũng được quét secret theo từng nhánh trùng tên', () => {
+    const fx = remoteFx()
+    commit(fx.wt, 'cfg.js', `const t = "${GHP}"\n`, 'secret trên feat') // origin/feat chưa có commit này
+    for (const c of ['git push origin :', 'git push origin +:']) assert.match(assertDeny(sh(fx, fx.main, c)), /cfg\.js:1 — github/, c)
   })
 })

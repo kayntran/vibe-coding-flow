@@ -31,6 +31,8 @@ const wanted = [
   ["SubagentStop", undefined, cmd("flow-gate.mjs subagent-stop", 15)],
   ["SessionStart", undefined, cmd("session-start.mjs", 10)],
   ["PostToolUse", "mcp__.*", cmd("mcp-usage.mjs log", 5)],
+  ["PreToolUse", "Agent|Task", cmd("flow-dispatch.mjs agent", 30)],
+  ["Stop", undefined, cmd("flow-dispatch.mjs stop", 15)],
 ];
 
 settings.hooks ??= {};

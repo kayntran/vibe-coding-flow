@@ -1,20 +1,25 @@
-// flow-gate: cổng worktree/review/qa cho flow captain + worker. Một script, chế độ chọn bằng argv[2].
-//   hook : edit (PreToolUse Edit|Write|NotebookEdit) · bash (PreToolUse Bash: chặn git merge thiếu dấu,
-//          git commit/push có secret) · stop (Stop) · subagent-stop (SubagentStop)
-//   CLI  : stamp review <file.json> · stamp qa <file.md> · status      (chạy trong worktree)
-// Spec: ~/.claude/plans/flow-v2-hooks-spec.md, flow-v3-hooks-spec.md (Làn A: quét secret). Docs field input: https://code.claude.com/docs/en/hooks
+// flow-gate: cổng worktree/review/qa/test cho flow captain + worker. Một script, chế độ chọn bằng argv[2].
+//   hook : edit (PreToolUse Edit|Write|NotebookEdit) · bash (PreToolUse Bash: chặn git merge thiếu dấu, git commit/push có secret,
+//          lệnh phá huỷ trên nhánh chính; hỏi lại khi push nhánh chính) · stop (Stop) · subagent-stop (SubagentStop: receipt + audit phạm vi làn)
+//   CLI  : stamp review <file.json> · stamp qa <file.md> · stamp test -- <lệnh…> · status      (chạy trong worktree)
+// Spec: ~/.claude/plans/flow-v2-hooks-spec.md, flow-v3-hooks-spec.md (Làn A: quét secret), flow-v5-hooks-spec.md (Làn A: dấu test, lệnh phá huỷ, ask, audit).
+// Docs field input: https://code.claude.com/docs/en/hooks
 // Lỗi nội bộ ở chế độ hook luôn CHO QUA (exit 0, không in gì) và ghi một dòng vào flow-gate.log.
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { briefPlan, briefWord } from './lib/brief.mjs'
 
-const LOG_FILE = process.env.FLOW_GATE_LOG || path.join(path.dirname(fileURLToPath(import.meta.url)), 'flow-gate.log')
+const HOOK_DIR = path.dirname(fileURLToPath(import.meta.url))
+const LOG_FILE = process.env.FLOW_GATE_LOG || path.join(HOOK_DIR, 'flow-gate.log')
 const DEFAULT_UI = /\.(tsx|jsx|vue|svelte|astro|html|css|scss|sass|less)$/i
+const DOC_FILE = /\.(md|mdx|txt)$/i // diff chỉ có file này (hoặc dưới docs/) ⇒ không đòi dấu test
 const RECEIPT_AGENTS = new Set(['coder', 'coder-lite', 'recon', 'researcher', 'test-runner', 'qa-tester', 'debugger', 'code-reviewer'])
 const RECEIPT_RE = /return=(done_with_concerns|done|needs_context|blocked|green|red)\b/ // green|red là của test-runner
 const NA_RE = /^\uFEFF?\s*N\/A/i
+const AUDIT_AGENTS = new Set(['coder', 'coder-lite']) // worker vi\u1EBFt code: n\u1ED9p b\u00E0i th\u00EC audit ph\u1EA1m vi l\u00E0n
 
 function log(msg) {
   try {
@@ -116,6 +121,18 @@ function readMark(file) {
   }
 }
 
+// Lý do KHÔNG đòi dấu test cho diff base...head (null = vẫn đòi): repo có .claude/flow.json {"tests":"none"} (thiếu/hỏng ⇒ vẫn đòi),
+// hoặc diff chỉ gồm tài liệu (.md/.mdx/.txt, hoặc dưới docs/ ở gốc repo). --no-renames: đổi tên code → tài liệu vẫn lộ đường dẫn cũ.
+function testExemption(info, base, head) {
+  try {
+    if (JSON.parse(fs.readFileSync(path.join(info.toplevel, '.claude', 'flow.json'), 'utf8'))?.tests === 'none') return 'flow.json tests=none'
+  } catch (e) {
+    if (e?.code !== 'ENOENT') log(`flow.json: ${e.message}`)
+  }
+  const files = (git(info.dir, ['diff', '--name-only', '--no-renames', '-z', `${base}...${head}`, '--']) ?? '').split('\0').filter(Boolean)
+  return files.length > 0 && files.every((f) => DOC_FILE.test(f) || f.startsWith('docs/')) ? 'diff chỉ có tài liệu' : null
+}
+
 // Trạng thái dấu của diff base...head. null = không có diff (không gate). Ném lỗi nếu không đọc nổi dấu.
 function gateState(info, base, head) {
   const pid = patchId(info.dir, base, head)
@@ -125,10 +142,13 @@ function gateState(info, base, head) {
   const qa = readMark(path.join(info.gatesDir, `qa-${pid}.md`))
   const naOnUi = qa !== null && ui && NA_RE.test(qa)
   const hasQa = qa !== null && !naOnUi
+  const testExempt = testExemption(info, base, head)
+  const hasTest = readMark(path.join(info.gatesDir, `test-${pid}.json`)) !== null
   const missing = []
   if (!hasReview) missing.push('review')
   if (!hasQa) missing.push('qa')
-  return { pid, ui, hasReview, hasQa, naOnUi, missing }
+  if (testExempt === null && !hasTest) missing.push('test')
+  return { pid, ui, hasReview, hasQa, naOnUi, testExempt, hasTest, missing }
 }
 
 // ---------- hook handlers: trả object để in, hoặc null = cho qua ----------
@@ -395,18 +415,25 @@ function commitScans(info, c) {
 
 const PUSH_VALUE_FLAGS = new Set(['-o', '--push-option', '--receive-pack', '--exec', '--recurse-submodules'])
 
-// rest = đối số sau `git push`. Trả { skip, all, mirror, tags, repo, positional } (skip = dry-run/xoá ref: không gửi commit nào).
+// Cờ ép của git push: --force, --force-with-lease[=…], --force-if-includes, hoặc cụm cờ ngắn có f (-f, -fu, -uf; từ `o` trở đi là giá trị của -o).
+const isForceFlag = (t) => t === '--force' || t === '--force-if-includes' || t.startsWith('--force-with-lease') ||
+  (/^-[A-Za-z]+$/.test(t) && /^[^o]*f/.test(t.slice(1)))
+
+// rest = đối số sau `git push`. Trả { skip, dryRun, del, force, all, mirror, tags, repo, positional }
+// (skip = dry-run hoặc xoá ref: không gửi commit nào; del = --delete/-d: positional sau remote là tên nhánh bị xoá).
 function parsePushArgs(rest) {
-  const p = { skip: false, all: false, mirror: false, tags: false, repo: null, positional: [] }
+  const p = { skip: false, dryRun: false, del: false, force: false, all: false, mirror: false, tags: false, repo: null, positional: [] }
   let onlyPositional = false
   for (let j = 0; j < rest.length; j++) {
     const t = rest[j]
     if (!onlyPositional && t === '--') onlyPositional = true
     else if (onlyPositional || !t.startsWith('-')) p.positional.push(t)
-    else if (t === '--dry-run' || t === '-n' || t === '--delete' || t === '-d') p.skip = true
+    else if (t === '--dry-run' || t === '-n') p.skip = p.dryRun = true
+    else if (t === '--delete' || t === '-d') p.skip = p.del = true
     else if (t === '--all' || t === '--branches') p.all = true
     else if (t === '--mirror') p.mirror = true
     else if (t === '--tags') p.tags = true
+    else if (isForceFlag(t)) p.force = true
     else if (t === '--repo') p.repo = rest[++j] ?? null
     else if (t.startsWith('--repo=')) p.repo = t.slice(7)
     else if (PUSH_VALUE_FLAGS.has(t)) j++
@@ -414,8 +441,10 @@ function parsePushArgs(rest) {
   return p
 }
 
-// Các ref sẽ được gửi: [{ src, name }]. name = tên nhánh phía remote (dùng tra refs/remotes/<remote>/<name>), có thể null.
-// Không refspec ⇒ HEAD; --all ⇒ mọi nhánh local; --tags/--mirror không có nguồn riêng (pushScans quét theo ref); `:dst` (xoá) bỏ qua.
+// Các ref sẽ được gửi: [{ src, name, plus }]. name = tên nhánh phía remote (dùng tra refs/remotes/<remote>/<name>), có thể null; plus = refspec bắt đầu `+` (ép).
+// Không refspec ⇒ HEAD (push.default=matching ⇒ nhánh trùng tên); --all ⇒ mọi nhánh local; --tags/--mirror không có nguồn riêng
+// (pushScans quét theo ref); `:dst` (xoá) bỏ qua; `:` / `+:` (matching) ⇒ nhánh trùng tên: mọi nhánh local có nhánh theo dõi cùng tên
+// của remote (offline chỉ biết qua refs/remotes/<remote>/*), nên chỉ thấy main/master khi remote đã từng có chúng.
 // Có --repo thì mọi positional là refspec (remote = --repo); không thì positional đầu là remote.
 function pushSources(info, p) {
   const branchName = (ref) => ref.replace(/^refs\/heads\//, '')
@@ -424,21 +453,31 @@ function pushSources(info, p) {
   const specs = p.repo !== null ? p.positional : p.positional.slice(1)
   const out = []
   if (p.mirror) return out
+  const matching = (plus) => {
+    const remote = p.repo ?? p.positional[0] ?? ((cur ? (git(info.dir, ['config', '--get', `branch.${cur}.remote`]) ?? '').trim() : '') || 'origin')
+    return forEachRef('refs/heads').map(branchName).filter((n) => revOf(info, `refs/remotes/${remote}/${n}`))
+      .map((n) => ({ src: `refs/heads/${n}`, name: n, plus }))
+  }
   if (specs.length === 0) {
-    if (p.all) for (const ref of forEachRef('refs/heads')) out.push({ src: ref, name: branchName(ref) })
-    else if (!p.tags) out.push({ src: 'HEAD', name: cur })
+    if (p.all) for (const ref of forEachRef('refs/heads')) out.push({ src: ref, name: branchName(ref), plus: false })
+    else if (!p.tags) {
+      const byConfig = (git(info.dir, ['config', '--get', 'push.default']) ?? '').trim().toLowerCase() === 'matching'
+      out.push(...(byConfig ? matching(false) : [{ src: 'HEAD', name: cur, plus: false }]))
+    }
     return out
   }
   for (let i = 0; i < specs.length; i++) {
     let s = specs[i]
     if (s === 'tag' && i + 1 < specs.length) s = `refs/tags/${specs[++i]}`
+    const plus = s.startsWith('+')
     s = s.replace(/^\+/, '')
+    if (s === ':') { out.push(...matching(plus)); continue }
     const colon = s.indexOf(':')
     const src = colon < 0 ? s : s.slice(0, colon)
     const dst = colon < 0 ? '' : s.slice(colon + 1)
     if (!src) continue
-    if (/[*?[]/.test(src)) { for (const ref of forEachRef(src)) out.push({ src: ref, name: branchName(ref) }); continue }
-    out.push({ src, name: dst ? branchName(dst) : src === 'HEAD' ? cur : branchName(src) })
+    if (/[*?[]/.test(src)) { for (const ref of forEachRef(src)) out.push({ src: ref, name: branchName(ref), plus }); continue }
+    out.push({ src, name: dst ? branchName(dst) : src === 'HEAD' ? cur : branchName(src), plus })
   }
   return out
 }
@@ -511,6 +550,120 @@ function gateSecrets(g) {
   return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason.join(' ') } }
 }
 
+// ---------- lệnh phá huỷ trên nhánh chính / hỏi lại khi push nhánh chính ----------
+
+const isMainName = (n) => n === 'main' || n === 'master'
+const permission = (decision, reason) => ({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: decision, permissionDecisionReason: reason } })
+
+// Các ref gửi đi mà đích là nhánh chính: [{ src, name, plus }]. --mirror gửi mọi ref ⇒ coi như gửi nhánh chính.
+function mainPushTargets(info, p) {
+  if (p.mirror) {
+    const name = mainBranch(info)
+    return [{ src: `refs/heads/${name}`, name, plus: false }]
+  }
+  return pushSources(info, p).filter((s) => isMainName(s.name))
+}
+
+// g = parseGitSub của `git push`. Deny khi push ép (cờ ép hoặc refspec +) mà đích là nhánh chính.
+function gateForcePush(g) {
+  const info = repoInfo(g.dir)
+  if (!info) return null
+  const p = parsePushArgs(g.rest)
+  if (p.skip) return null // dry-run/xoá ref: không ghi đè gì
+  const hit = mainPushTargets(info, p).find((t) => p.force || t.plus)
+  if (!hit) return null
+  return permission('deny',
+    `Không push ép (--force / --force-with-lease / refspec +) lên nhánh chính ${hit.name}: ghi đè lịch sử trên remote không hoàn tác được. ` +
+    'Push nhánh riêng rồi gộp, hoặc để user tự chạy lệnh này.')
+}
+
+// g = parseGitSub của `git push`. Deny khi xoá nhánh chính trên remote: --delete/-d main|master, hoặc refspec rỗng nguồn `:main` / `:refs/heads/main`.
+function gateDeleteMainPush(g) {
+  if (!repoInfo(g.dir)) return null
+  const p = parsePushArgs(g.rest)
+  if (p.dryRun) return null
+  const specs = p.repo !== null ? p.positional : p.positional.slice(1) // positional đầu là remote (trừ khi có --repo)
+  const hit = specs
+    .map((s) => s.replace(/^\+/, ''))
+    .map((s) => (p.del ? s : s.startsWith(':') ? s.slice(1) : null))
+    .map((n) => n?.replace(/^refs\/heads\//, ''))
+    .find(isMainName)
+  if (!hit) return null
+  return permission('deny', `Không xoá nhánh chính ${hit} trên remote (git push --delete / refspec :${hit}). User tự chạy lệnh này nếu thật sự cần.`)
+}
+
+// g = parseGitSub của `git push` (đã qua quét secret). Ask khi sắp gửi commit lên nhánh chính: liệt kê tối đa 15 commit chưa có trên remote.
+function gateAskMainPush(g) {
+  const info = repoInfo(g.dir)
+  if (!info) return null
+  const p = parsePushArgs(g.rest)
+  if (p.skip) return null
+  const t = mainPushTargets(info, p)[0]
+  if (!t) return null
+  const sha = revOf(info, t.src)
+  if (!sha) return null
+  const remote = p.repo ?? p.positional[0] ?? ((git(info.dir, ['config', '--get', `branch.${t.name}.remote`]) ?? '').trim() || 'origin')
+  const tracked = revOf(info, `refs/remotes/${remote}/${t.name}`)
+  const range = tracked ? `${tracked}..${sha}` : sha
+  const n = Number((git(info.dir, ['rev-list', '--count', range]) ?? '').trim())
+  if (!(n > 0)) return null // đã đồng bộ (hoặc git lỗi): không có gì để hỏi
+  const list = (git(info.dir, ['log', '--oneline', '--no-decorate', '--no-color', '--no-show-signature', '-n', '15', range]) ?? '').trim()
+  return permission('ask', `Sắp push ${n} commit lên ${remote}/${t.name}:\n${list}`)
+}
+
+// Duyệt cờ của lệnh git đơn giản: { short: Set<ký tự cờ ngắn>, long: Set<tên cờ dài không có =giá trị>, pos: [đối số không phải cờ, gồm cả sau `--`] }.
+function simpleFlags(rest) {
+  const short = new Set()
+  const long = new Set()
+  const pos = []
+  let onlyPositional = false
+  for (const t of rest) {
+    if (!onlyPositional && t === '--') onlyPositional = true
+    else if (onlyPositional || !t.startsWith('-')) pos.push(t)
+    else if (t.startsWith('--')) long.add(t.slice(2).split('=')[0])
+    else for (const ch of t.slice(1)) short.add(ch)
+  }
+  return { short, long, pos }
+}
+
+const DESTRUCTIVE_SUBS = new Set(['reset', 'branch', 'checkout', 'restore', 'clean'])
+
+// g = parseGitSub của reset|branch|checkout|restore|clean. Deny lệnh phá huỷ trên nhánh chính / thư mục chính.
+function gateDestructive(g) {
+  const info = repoInfo(g.dir)
+  if (!info) return null
+  const f = simpleFlags(g.rest)
+  const flag = (shortCh, longName) => f.short.has(shortCh) || f.long.has(longName)
+  const here = `thư mục chính của ${info.toplevel} (nhánh ${info.branch ?? '?'})`
+  const wipe = (what) => `${what} ở ${here} sẽ xoá thay đổi chưa commit. Làm trong worktree, hoặc để user tự chạy lệnh này.`
+  switch (g.sub) {
+    case 'reset':
+      if (f.long.has('hard') && !info.linked && isMainName(info.branch)) return permission('deny', wipe('git reset --hard'))
+      return null
+    case 'branch': {
+      const del = f.short.has('D') || (flag('d', 'delete') && flag('f', 'force'))
+      const main = f.pos.map((n) => n.replace(/^refs\/heads\//, '')).find(isMainName)
+      if (del && main) return permission('deny', `Không xoá nhánh chính ${main} bằng git branch -D / -d -f. User tự chạy lệnh này nếu thật sự cần.`)
+      if (flag('m', 'move') || f.short.has('M')) {
+        // `-m <x> <đích>` hoặc `-m <đích>` (đổi tên nhánh hiện tại); đích là nhánh chính khác nguồn ⇒ đè nhánh chính
+        const [from, to] = f.pos.length >= 2 ? f.pos : [info.branch, f.pos[0]]
+        if (isMainName(to) && from !== to) return permission('deny', `Không đè nhánh chính ${to} bằng git branch -m / -M. User tự chạy lệnh này nếu thật sự cần.`)
+      }
+      return null
+    }
+    case 'checkout':
+      return !info.linked && f.pos.some((a) => /^\.\/?$/.test(a)) ? permission('deny', wipe('git checkout -- .')) : null
+    case 'restore': {
+      const stagedOnly = flag('S', 'staged') && !flag('W', 'worktree') // chỉ bỏ stage, không đụng file
+      return !info.linked && !stagedOnly && f.pos.some((a) => /^\.\/?$/.test(a)) ? permission('deny', wipe('git restore .')) : null
+    }
+    case 'clean':
+      return !info.linked && flag('f', 'force') && !flag('n', 'dry-run') ? permission('deny', wipe('git clean -f')) : null
+    default:
+      return null
+  }
+}
+
 function gateMerge(m) {
   const info = repoInfo(m.dir)
   if (!info) return null
@@ -523,22 +676,32 @@ function gateMerge(m) {
   const detail = lacking
     .map(({ target, st }) => `${target}: thiếu ${st.missing.join(', ')}` + (st.naOnUi ? ' (diff có file UI nhưng qa ghi N/A)' : '') + ` (patch-id=${st.pid})`)
     .join('; ')
-  return {
-    hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
-      permissionDecision: 'deny',
-      permissionDecisionReason:
-        `Chưa đủ dấu để gộp vào ${base} — ${detail}. ` +
-        'Chạy trong worktree của nhánh: node ~/.claude/hooks/flow-gate.mjs stamp review <review.json> ' +
-        'và node ~/.claude/hooks/flow-gate.mjs stamp qa <qa.md> (skill flow-review / flow-qa tạo hai file này).',
-    },
+  const kinds = new Set(lacking.flatMap(({ st }) => st.missing))
+  const how = []
+  if (kinds.has('review')) how.push('node ~/.claude/hooks/flow-gate.mjs stamp review <review.json>')
+  if (kinds.has('qa')) how.push('node ~/.claude/hooks/flow-gate.mjs stamp qa <qa.md>')
+  if (kinds.has('test')) how.push('node ~/.claude/hooks/flow-gate.mjs stamp test -- <lệnh test đủ bộ>')
+  return permission('deny',
+    `Chưa đủ dấu để gộp vào ${base} — ${detail}. Chạy trong worktree của nhánh: ${how.join(' · ')}` +
+    (kinds.has('review') || kinds.has('qa') ? ' (skill flow-review / flow-qa tạo file review.json / qa.md)' : '') +
+    (kinds.has('test') ? '. Repo không có test: ghi .claude/flow.json {"tests":"none"}' : '') + '.')
+}
+
+// Chạy một cổng; lỗi nội bộ ⇒ ghi log và coi như cho qua (vẫn xét các cổng/đoạn lệnh sau).
+function safely(name, fn) {
+  try {
+    return fn()
+  } catch (e) {
+    log(`${name}: ${e?.stack ?? e}`)
+    return null
   }
 }
 
 function hookBash(input) {
   const cmd = input.tool_input?.command
-  if (typeof cmd !== 'string' || !/merge|commit|push/.test(cmd)) return null
+  if (typeof cmd !== 'string' || !/merge|commit|push|reset|branch|checkout|restore|clean/.test(cmd)) return null
   let cwd = path.resolve(toNative(input.cwd || process.cwd()))
+  let ask = null // ask chỉ được trả khi không đoạn nào khác bị deny (deny thắng ask)
   for (const toks of tokenize(cmd)) {
     if (toks[0] === 'cd' && toks[1] && !/^[-~$]/.test(toks[1])) { cwd = path.resolve(cwd, toNative(toks[1])); continue }
     const g = parseGitSub(toks, cwd)
@@ -547,16 +710,20 @@ function hookBash(input) {
     if (g.sub === 'merge') {
       const m = parseGitMerge(g)
       if (m) out = gateMerge(m)
-    } else if (g.sub === 'commit' || g.sub === 'push') {
-      try {
-        out = gateSecrets(g)
-      } catch (e) {
-        log(`gateSecrets ${g.sub}: ${e?.stack ?? e}`) // lỗi nội bộ: cho qua, vẫn xét các đoạn lệnh sau
-      }
+    } else if (g.sub === 'commit') {
+      out = safely(`gateSecrets ${g.sub}`, () => gateSecrets(g))
+    } else if (g.sub === 'push') {
+      out = safely(`gateSecrets ${g.sub}`, () => gateSecrets(g)) ??
+        safely('gateForcePush', () => gateForcePush(g)) ??
+        safely('gateDeleteMainPush', () => gateDeleteMainPush(g)) ??
+        safely('gateAskMainPush', () => gateAskMainPush(g))
+    } else if (DESTRUCTIVE_SUBS.has(g.sub)) {
+      out = safely(`gateDestructive ${g.sub}`, () => gateDestructive(g))
     }
-    if (out) return out
+    if (out?.hookSpecificOutput?.permissionDecision === 'ask') ask ??= out
+    else if (out) return out
   }
-  return null
+  return ask
 }
 
 function hookStop(input) {
@@ -575,7 +742,8 @@ function hookStop(input) {
   fs.writeFileSync(nudged, new Date().toISOString())
   return {
     decision: 'block',
-    reason: `${info.branch} đã commit xong nhưng thiếu: ${st.missing.join(', ')}. Chạy skill flow-qa / flow-review trước khi báo user.`,
+    reason: `${info.branch} đã commit xong nhưng thiếu: ${st.missing.join(', ')}. Chạy skill flow-qa / flow-review trước khi báo user.` +
+      (st.missing.includes('test') ? ' Dấu test: node ~/.claude/hooks/flow-gate.mjs stamp test -- <lệnh test đủ bộ>.' : ''),
   }
 }
 
@@ -603,27 +771,84 @@ function readTranscript(file) {
   return { handback, lastText }
 }
 
+// Giá trị return= của receipt cuối cùng trong text (done|done_with_concerns|needs_context|blocked|green|red), không có thì null.
+function receiptValue(text) {
+  if (typeof text !== 'string') return null
+  return [...text.matchAll(new RegExp(RECEIPT_RE.source, 'g'))].at(-1)?.[1] ?? null
+}
+
+// Tin nhắn user đầu tiên trong transcript jsonl của subagent (= brief giao việc); không có thì null.
+function firstUserMessage(file) {
+  const p = file.startsWith('~') ? path.join(os.homedir(), file.slice(1)) : file
+  for (const line of fs.readFileSync(p, 'utf8').split(/\r?\n/)) {
+    let e
+    try { e = JSON.parse(line) } catch { continue }
+    const msg = e?.message
+    if ((e?.type !== 'user' && msg?.role !== 'user') || e?.isMeta) continue
+    const text = typeof msg?.content === 'string' ? msg.content
+      : Array.isArray(msg?.content) ? msg.content.filter((b) => b?.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n') : ''
+    if (text.trim()) return text
+  }
+  return null
+}
+
+// Worker coder nộp bài: brief (tin nhắn user đầu trong transcript) có plan= và lane= ⇒ chạy lane-check audit trong cwd của worker.
+// Phát hiện file ngoài scope (exit 1) ⇒ block; lane-check không chạy được (exit 2/lỗi) hoặc brief không có plan=/lane= ⇒ cho qua.
+function auditScope(input) {
+  if (typeof input.agent_transcript_path !== 'string' || !input.agent_transcript_path) return null
+  const brief = firstUserMessage(input.agent_transcript_path)
+  if (!brief) return null
+  const cwd = path.resolve(toNative(input.cwd || process.cwd()))
+  // Bộ đọc brief dùng chung với flow-dispatch (lib/brief.mjs): nháy, đường dẫn có dấu cách, ~/, /c/…, tiền tố ngắn dần.
+  const plan = briefPlan(brief, cwd)
+  const lane = briefWord(brief, 'lane')
+  if (!plan || !lane) return null
+  const info = repoInfo(cwd)
+  const base = briefWord(brief, 'base') ?? (info ? mainBranch(info) : 'main')
+  // --repo = cwd của worker: plan thường nằm ngoài repo của worker (vd ~/.claude/plans), nên không suy repo từ đường dẫn plan.
+  const args = [path.join(HOOK_DIR, 'lane-check.mjs'), 'audit', plan, lane, '--repo', cwd, '--worktree', cwd, '--branch', 'HEAD', '--base', base]
+  const r = spawnSync(process.execPath, args, { cwd, encoding: 'utf8', timeout: 30000, windowsHide: true })
+  if (r.error || (r.status !== 0 && r.status !== 1)) {
+    log(`lane-check audit lane ${lane}: ${r.error?.message ?? `exit ${r.status}: ${(r.stderr || r.stdout || '').trim()}`}`)
+    return null
+  }
+  if (r.status === 0) return null
+  const lines = r.stdout.split(/\r?\n/).filter(Boolean)
+  const shown = lines.slice(0, 30).join('\n') + (lines.length > 30 ? `\n…và ${lines.length - 30} dòng nữa` : '')
+  return {
+    decision: 'block',
+    reason: `Audit phạm vi làn ${lane} không đạt:\n${shown}\nHãy gỡ thay đổi ngoài scope, hoặc trả return=needs_context kèm tên file.`,
+  }
+}
+
 function hookSubagentStop(input) {
   if (input.stop_hook_active) return null
   if (!RECEIPT_AGENTS.has(input.agent_type)) return null
   const last = input.last_assistant_message
-  if (typeof last === 'string' && RECEIPT_RE.test(last)) return null
-  // Docs: khi subagent báo cáo bằng SubagentHandback (v2.1.271+), last_assistant_message chỉ là lời đóng,
-  // báo cáo thật nằm ở tool_input.message của lời gọi đó trong transcript của subagent.
-  let report = typeof last === 'string' && last.trim() ? last : null
-  if (typeof input.agent_transcript_path === 'string' && input.agent_transcript_path) {
-    try {
-      const tx = readTranscript(input.agent_transcript_path)
-      report = tx.handback ?? report ?? tx.lastText
-    } catch (e) {
-      log(`transcript: ${e.message}`)
+  let receipt = receiptValue(last)
+  if (receipt === null) {
+    // Docs: khi subagent báo cáo bằng SubagentHandback (v2.1.271+), last_assistant_message chỉ là lời đóng,
+    // báo cáo thật nằm ở tool_input.message của lời gọi đó trong transcript của subagent.
+    let report = typeof last === 'string' && last.trim() ? last : null
+    if (typeof input.agent_transcript_path === 'string' && input.agent_transcript_path) {
+      try {
+        const tx = readTranscript(input.agent_transcript_path)
+        report = tx.handback ?? report ?? tx.lastText
+      } catch (e) {
+        log(`transcript: ${e.message}`)
+      }
+    }
+    receipt = receiptValue(report)
+    if (receipt === null) {
+      if (report === null) return null
+      return {
+        decision: 'block',
+        reason: 'Thiếu receipt: kết thúc bằng đúng một dòng return=…; paths=…; checks=…; blocker=…; stop',
+      }
     }
   }
-  if (report === null || RECEIPT_RE.test(report)) return null
-  return {
-    decision: 'block',
-    reason: 'Thiếu receipt: kết thúc bằng đúng một dòng return=…; paths=…; checks=…; blocker=…; stop',
-  }
+  if (!AUDIT_AGENTS.has(input.agent_type) || receipt === 'needs_context' || receipt === 'blocked') return null
+  return safely('audit', () => auditScope(input))
 }
 
 // ---------- CLI ----------
@@ -640,8 +865,47 @@ function cliContext() {
   return { info, base, pid: patchId(info.dir, base, 'HEAD') }
 }
 
+// Một token ⇒ nguyên văn (cả dòng lệnh, vd "pnpm test && pnpm lint"); nhiều token ⇒ nháy token có ký tự đặc biệt rồi nối bằng dấu cách.
+function commandLine(tokens) {
+  if (tokens.length === 1) return tokens[0]
+  const quote = (t) => {
+    if (/^[\w@%+=:,./\\~-]+$/.test(t)) return t
+    return process.platform === 'win32' ? `"${t.replace(/"/g, '\\"')}"` : `"${t.replace(/(["\\$`])/g, '\\$1')}"`
+  }
+  return tokens.map(quote).join(' ')
+}
+
+// stamp test -- <lệnh…>: chạy lệnh (shell) trong cwd, in output ra màn hình đồng thời ghi test-<pid>.log;
+// exit 0 ⇒ ghi test-<pid>.json {cmd, ts, durationMs}; exit ≠ 0 ⇒ không ghi dấu (gỡ dấu cũ của cùng diff) và thoát cùng mã.
+async function cliStampTest(tokens) {
+  if (tokens.length === 0) return fail('Dùng: stamp test -- <lệnh test đủ bộ>')
+  const { info, base, pid, err } = cliContext()
+  if (err) return fail(err)
+  if (!pid) return fail(`Diff ${base}...HEAD rỗng (chưa commit hoặc không khác ${base}) nên không có patch-id để đóng dấu.`)
+  const cmd = commandLine(tokens)
+  const stamp = path.join(info.gatesDir, `test-${pid}.json`)
+  fs.mkdirSync(info.gatesDir, { recursive: true })
+  const logFile = fs.createWriteStream(path.join(info.gatesDir, `test-${pid}.log`))
+  const started = Date.now()
+  const code = await new Promise((resolve) => {
+    const child = spawn(cmd, { shell: true, stdio: ['inherit', 'pipe', 'pipe'], windowsHide: true })
+    child.stdout.on('data', (d) => { process.stdout.write(d); logFile.write(d) })
+    child.stderr.on('data', (d) => { process.stderr.write(d); logFile.write(d) })
+    child.on('error', (e) => { process.stderr.write(`Không chạy được lệnh: ${e.message}\n`); resolve(1) })
+    child.on('close', (c) => resolve(c ?? 1)) // c = null khi bị signal giết
+  })
+  logFile.end()
+  if (code !== 0) {
+    fs.rmSync(stamp, { force: true })
+    process.exitCode = code
+    return
+  }
+  fs.writeFileSync(stamp, JSON.stringify({ cmd, ts: new Date().toISOString(), durationMs: Date.now() - started }) + '\n')
+  console.log(pid)
+}
+
 function cliStamp(kind, file) {
-  if ((kind !== 'review' && kind !== 'qa') || !file) return fail('Dùng: stamp review <file.json> | stamp qa <file.md>')
+  if ((kind !== 'review' && kind !== 'qa') || !file) return fail('Dùng: stamp review <file.json> | stamp qa <file.md> | stamp test -- <lệnh>')
   const { info, base, pid, err } = cliContext()
   if (err) return fail(err)
   if (!pid) return fail(`Diff ${base}...HEAD rỗng (chưa commit hoặc không khác ${base}) nên không có patch-id để đóng dấu.`)
@@ -670,6 +934,7 @@ function cliStatus() {
   console.log(`uiTouched: ${st ? st.ui : false}`)
   console.log(`review: ${st?.hasReview ? 'có' : 'không'}`)
   console.log(`qa: ${st?.hasQa ? 'có' : st?.naOnUi ? 'không (N/A nhưng diff có UI)' : 'không'}`)
+  console.log(`test: ${st?.testExempt ? `không đòi (${st.testExempt})` : st?.hasTest ? 'có' : 'không'}`)
 }
 
 // ---------- main ----------
@@ -684,10 +949,12 @@ if (HOOKS[mode]) {
   } catch (e) {
     log(e?.stack ?? e)
   }
+} else if (mode === 'stamp' && arg1 === 'test') {
+  await cliStampTest(process.argv.slice(process.argv[4] === '--' ? 5 : 4))
 } else if (mode === 'stamp') {
   cliStamp(arg1, arg2)
 } else if (mode === 'status') {
   cliStatus()
 } else {
-  fail('Dùng: flow-gate.mjs edit|bash|stop|subagent-stop (hook) · stamp review <file.json> · stamp qa <file.md> · status')
+  fail('Dùng: flow-gate.mjs edit|bash|stop|subagent-stop (hook) · stamp review <file.json> · stamp qa <file.md> · stamp test -- <lệnh> · status')
 }

@@ -35,8 +35,8 @@ git remote add origin https://github.com/kayntran/vibe-coding-flow.git
 git fetch origin
 git show origin/main:install.mjs > /tmp/kit-install.mjs && node /tmp/kit-install.mjs backup   # sao lưu file trùng tên
 git checkout -f -t origin/main                       # ghi đè các file cùng tên (đã sao lưu), không đụng file khác
-node ~/.claude/install.mjs                           # ghép 7 hook vào settings.json của máy này
-node --test ~/.claude/hooks/*.test.mjs
+node ~/.claude/install.mjs                           # ghép 9 hook vào settings.json của máy này
+node --test ~/.claude/hooks/*.test.mjs ~/.claude/hooks/lib/*.test.mjs
 ```
 
 Sau khi cài: so các file `*.before-kit-*` với bản kit, chép phần riêng của máy (nếu có) trở lại, rồi xoá bản sao lưu.

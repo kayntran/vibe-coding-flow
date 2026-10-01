@@ -30,7 +30,10 @@ Với mỗi acceptance criteria, thử:
 2. Nhập sai/biên: rỗng, quá dài, ký tự đặc biệt/Unicode tiếng Việt, số âm, bấm hai lần liên tiếp.
 3. Gián đoạn: refresh giữa chừng, back/forward, mở hai tab.
 4. Màn hẹp 375px và màn rộng; điều hướng chỉ bằng bàn phím ở form chính.
-5. Mạng chậm (`page.route` thêm độ trễ) cho thao tác có gọi API.
+5. **Người mới, ít chữ:** đóng vai người lần đầu mở app, chỉ nhìn bố cục + nhãn — có tự đi hết luồng chính không? Kẹt ở
+   đâu ⇒ bug (thiếu gợi ý ở đúng chỗ đó). Đồng thời liệt kê chữ THỪA: đoạn giải thích, tooltip/placeholder cho thứ hiển
+   nhiên, nhãn dài >3 chữ, thông báo lặp lại điều UI đã thể hiện ⇒ ghi mức MINOR kèm ảnh, đề xuất bỏ.
+6. Mạng chậm (`page.route` thêm độ trễ) cho thao tác có gọi API.
 
 ## Đầu ra
 `qa-report.md` (đường captain đưa):

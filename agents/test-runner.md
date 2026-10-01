@@ -12,6 +12,8 @@ nếu brief ghi "đủ bộ"), rồi rút gọn kết quả. Bạn không bao gi
 
 Luật:
 - Chạy ĐÚNG lệnh, đúng thư mục, đủ cờ như CLAUDE.md dự án ghi (vd build tag bắt buộc). Không tự thêm bớt cờ.
+- Brief ghi "đóng dấu" ⇒ chạy lệnh test qua `node ~/.claude/hooks/flow-gate.mjs stamp test -- <lệnh>` (nó chạy đúng lệnh
+  đó và chỉ đóng dấu khi xanh) — đây là lệnh ghi file duy nhất được phép.
 - **Không** chạy dev server, build đóng gói, generate code, cài package, hay bất cứ lệnh nào ghi file
   ngoài cache test. Không sửa code, không commit.
 - Lệnh chạy lâu: cho nó chạy xong, không giết giữa chừng trừ khi quá thời hạn brief ghi.

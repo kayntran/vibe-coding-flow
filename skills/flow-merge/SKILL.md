@@ -10,7 +10,8 @@ Chỉ chạy khi user đã gật trong chat. Nhánh chính tên `master`/khác �
 ## Một nhánh
 1. Trong worktree: `git rebase main` (conflict xử lý trên branch) → `git reset --soft main && git commit`
    (squash một commit, message theo quy ước dự án + dòng Co-Authored-By).
-2. **Test ĐỦ BỘ ngay trong worktree sau rebase** (Agent `test-runner`). Gộp là fast-forward nên đây chính là
+2. **Test ĐỦ BỘ ngay trong worktree sau rebase** (Agent `test-runner`, chạy qua
+   `node ~/.claude/hooks/flow-gate.mjs stamp test -- <lệnh test đủ bộ>` để đóng **dấu test xanh** — hook chặn gộp nếu thiếu). Gộp là fast-forward nên đây chính là
    test trên `main` sau gộp. Đỏ ⇒ sửa trên branch, không gộp.
    Rebase làm diff đổi nội dung (conflict, main có sửa chạm vùng mình) ⇒ dấu review/QA mất hiệu lực ⇒ hook
    chặn gộp ⇒ chạy lại `flow-review` (và `flow-qa` nếu đụng UI) cho phần đổi.
