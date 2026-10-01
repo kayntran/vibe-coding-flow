@@ -31,6 +31,10 @@ if (!targets.length || bad.length) {
 }
 
 const bin = [join(homedir(), ".local", "bin", "strix.exe"), join(homedir(), ".local", "bin", "strix")].find(existsSync) ?? "strix";
-const env = { ...process.env, STRIX_TELEMETRY: "0", STRIX_LLM: process.env.STRIX_LLM || "chatgpt/gpt-6.1-sol" };
+// PYTHONUTF8/PYTHONIOENCODING: console Windows mặc định cp1252, Strix in báo cáo tiếng Việt sẽ crash (đã dính 2026-10-01).
+const env = {
+  ...process.env, STRIX_TELEMETRY: "0", STRIX_LLM: process.env.STRIX_LLM || "chatgpt/gpt-6.1-sol",
+  PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8",
+};
 const r = spawnSync(bin, ["-n", ...args], { stdio: "inherit", env });
 process.exit(r.status ?? 1);
