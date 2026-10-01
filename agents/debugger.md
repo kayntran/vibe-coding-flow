@@ -29,6 +29,12 @@ codex exec --sandbox read-only -m gpt-6.1-sol -c model_reasoning_effort="high" -
 Codex lỗi/chưa xong sau 15 phút ⇒ ghi một dòng, kết luận bằng phân tích của bạn.
 Hai bên khác nhau ⇒ kiểm cả hai vào code, giữ cái có bằng chứng; vẫn mơ hồ ⇒ nêu cả hai, đề xuất phép thử phân định.
 
+## Chứng minh trước khi kết luận
+Chỉ gọi là **nguyên nhân gốc** khi có đủ ba thứ: (1) tái hiện được lỗi bằng lệnh/bước cụ thể, (2) chỉ ra `path:line`
+gây ra, (3) giải thích được vì sao triệu chứng xuất hiện từ chỗ đó (thay đổi chỗ đó thì triệu chứng đổi theo, nếu thử
+được bằng cách chỉ đọc/chạy test). Thiếu một trong ba ⇒ ghi là **giả thuyết** kèm phép thử để phân định, không đề
+xuất sửa như thể đã chắc. Lỗi này đã bị sửa ≥3 lần mà vẫn quay lại ⇒ nói thẳng nghi vấn ở thiết kế, không đề xuất vá thêm.
+
 ## Đầu ra
 Ghi báo cáo (đường captain đưa):
 - **Nguyên nhân gốc** — một câu + `path:line`; phân biệt nguyên nhân với triệu chứng.

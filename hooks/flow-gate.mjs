@@ -1,7 +1,8 @@
 // flow-gate: cổng worktree/review/qa cho flow captain + worker. Một script, chế độ chọn bằng argv[2].
-//   hook : edit (PreToolUse Edit|Write|NotebookEdit) · bash (PreToolUse Bash) · stop (Stop) · subagent-stop (SubagentStop)
+//   hook : edit (PreToolUse Edit|Write|NotebookEdit) · bash (PreToolUse Bash: chặn git merge thiếu dấu,
+//          git commit/push có secret) · stop (Stop) · subagent-stop (SubagentStop)
 //   CLI  : stamp review <file.json> · stamp qa <file.md> · status      (chạy trong worktree)
-// Spec: ~/.claude/plans/flow-v2-hooks-spec.md. Docs field input: https://code.claude.com/docs/en/hooks
+// Spec: ~/.claude/plans/flow-v2-hooks-spec.md, flow-v3-hooks-spec.md (Làn A: quét secret). Docs field input: https://code.claude.com/docs/en/hooks
 // Lỗi nội bộ ở chế độ hook luôn CHO QUA (exit 0, không in gì) và ghi một dòng vào flow-gate.log.
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -30,6 +31,17 @@ function git(dir, args, { raw = false } = {}) {
   })
   if (r.error) { log(`git ${args[0]}: ${r.error.message}`); return null }
   return r.status === 0 ? r.stdout : null
+}
+
+// Như git() nhưng chỉ nhận tối đa `limit` byte stdout: trả { text, truncated } hoặc null khi git lỗi. Vượt giới hạn ⇒ truncated.
+function gitCapped(dir, args, limit) {
+  const r = spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8', maxBuffer: limit, timeout: 20000, windowsHide: true })
+  if (r.error) {
+    if (r.error.code === 'ENOBUFS' && typeof r.stdout === 'string') return { text: r.stdout, truncated: true }
+    log(`git ${args.find((a) => !a.startsWith('-') && !a.includes('=')) ?? args[0]}: ${r.error.message}`)
+    return null
+  }
+  return r.status === 0 ? { text: r.stdout, truncated: false } : null
 }
 
 const norm = (p) => (process.platform === 'win32' ? path.resolve(p).toLowerCase() : path.resolve(p))
@@ -215,8 +227,8 @@ function tokenize(cmd) {
 
 const MERGE_VALUE_FLAGS = new Set(['-m', '-F', '-s', '-X', '--message', '--file', '--strategy', '--strategy-option', '--into-name'])
 
-// tokens = một đoạn lệnh. Trả { dir, targets } nếu là `git [-C p] merge ... <branch>...`, ngược lại null.
-function parseGitMerge(tokens, cwd) {
+// tokens = một đoạn lệnh. Trả { dir, sub, rest } nếu là `git [-C p] <sub> ...`, ngược lại null.
+function parseGitSub(tokens, cwd) {
   let i = 0
   while (/^[A-Za-z_]\w*=/.test(tokens[i] ?? '')) i++
   if (!/(^|[\\/])git(\.exe)?$/i.test(tokens[i] ?? '')) return null
@@ -227,8 +239,13 @@ function parseGitMerge(tokens, cwd) {
     else if (tokens[i] === '-c') i += 2
     else i++
   }
-  if (tokens[i] !== 'merge') return null
-  const rest = tokens.slice(i + 1)
+  return tokens[i] ? { dir, sub: tokens[i], rest: tokens.slice(i + 1) } : null
+}
+
+// g = kết quả parseGitSub. Trả { dir, targets } nếu là `git [-C p] merge ... <branch>...`, ngược lại null.
+function parseGitMerge(g) {
+  if (g.sub !== 'merge') return null
+  const { dir, rest } = g
   if (rest.some((t) => /^--(abort|continue|quit)$/.test(t))) return null
   const targets = []
   let onlyPositional = false
@@ -251,35 +268,293 @@ function tryGateState(info, base, head) {
   }
 }
 
+// ---------- quét secret trước git commit / git push ----------
+
+const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+const SCAN_LIMIT = 20 * 1024 * 1024
+const ALLOW_MARK = 'flow-gate: allow-secret'
+// Tên mẫu ↔ regex (mỗi dòng chỉ lấy khớp đầu tiên của từng mẫu). url-credential: bỏ mật khẩu dạng placeholder ($VAR, {{x}}, <pw>);
+// lookbehind để chỉ thử từ đầu mỗi cụm scheme (tránh O(n^2) với dòng dài toàn [a-z0-9]).
+const SECRET_PATTERNS = [
+  ['private-key', /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
+  ['aws', /AKIA[0-9A-Z]{16}/],
+  ['github', /gh[pousr]_[A-Za-z0-9]{36,}/],
+  ['github', /github_pat_[A-Za-z0-9_]{60,}/],
+  ['anthropic', /sk-ant-[A-Za-z0-9_-]{20,}/],
+  ['openai', /sk-(?:proj-)?[A-Za-z0-9_-]{32,}/],
+  ['xai', /xai-[A-Za-z0-9]{40,}/],
+  ['google', /AIza[0-9A-Za-z_-]{35}/],
+  ['slack', /xox[baprs]-[A-Za-z0-9-]{10,}/],
+  ['jwt', /eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/],
+  ['url-credential', /(?<![a-z0-9+.-])[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^@\s/$<{][^@\s/]{7,}@/i],
+]
+
+function isSensitiveFile(file) {
+  const n = path.posix.basename(file).toLowerCase()
+  if (n === '.env') return true
+  if (n.startsWith('.env.')) return !/\.(example|sample|template)$/.test(n)
+  if (/^id_(rsa|ed25519)/.test(n)) return !n.endsWith('.pub') // khoá công khai không phải secret
+  return n.endsWith('.pem') || n === '.dev.vars' || n === 'credentials.json'
+}
+
+// Các khớp secret trong một dòng: [{ name, value }] với value đã che (4 ký tự đầu + …).
+function scanLine(text) {
+  const hits = []
+  for (const [name, re] of SECRET_PATTERNS) {
+    const m = re.exec(text)
+    if (!m) continue
+    const end = m.index + m[0].length
+    if (hits.some((h) => m.index < h.end && h.index < end)) continue // cùng một token đã được mẫu khác báo (sk-ant-… vs openai)
+    hits.push({ name, index: m.index, end, value: `${m[0].slice(0, 4)}…` })
+  }
+  return hits
+}
+
+// Duyệt `git diff -U0` (đã --no-prefix): trả { findings: [{file, line, name, value}], allowed: Set<file có dòng allow> }.
+function scanPatch(patch) {
+  const findings = []
+  const allowed = new Set()
+  let file = null
+  let line = 0
+  let inHunk = false
+  for (const l of patch.split('\n')) {
+    if (l.startsWith('diff --git ')) { inHunk = false; file = null; continue }
+    if (l.startsWith('@@ ')) { line = Number(/\+(\d+)/.exec(l)?.[1] ?? 0); inHunk = true; continue }
+    if (!inHunk) {
+      if (l.startsWith('+++ ')) { const f = l.slice(4).replace(/\t$/, ''); file = f === '/dev/null' ? null : f }
+      continue
+    }
+    if (l[0] !== '+' || file === null) continue
+    const text = l.slice(1)
+    const lineNo = line++
+    if (text.includes(ALLOW_MARK)) { allowed.add(file); continue }
+    for (const h of scanLine(text)) findings.push({ file, line: lineNo, name: h.name, value: h.value })
+  }
+  return { findings, allowed }
+}
+
+// scan = { cmd: 'diff' | 'log', args, paths? }. diff: so sánh theo args (['--cached'], ['HEAD']…). log: từng commit không-merge
+// trong phạm vi args (['<base>..<sha>'] hoặc ['<sha>']), nên token thêm ở commit A rồi xoá ở commit B vẫn bị thấy.
+// Trả { findings, truncated } (lỗi git ⇒ rỗng; truncated = output vượt SCAN_LIMIT, phần sau không được quét).
+function runScan(dir, { cmd, args, paths = [] }) {
+  const common = ['-c', 'core.quotepath=off', cmd, '--no-color', '--no-ext-diff', '--no-textconv', '--no-prefix']
+  const logOnly = cmd === 'log' ? ['--no-merges', '--no-show-signature', '--format='] : []
+  const tail = [...args, '--', ...paths]
+  const patch = gitCapped(dir, [...common, ...logOnly, ...(cmd === 'log' ? ['-p'] : []), '-U0', ...tail], SCAN_LIMIT)
+  if (patch === null) return { findings: [], truncated: false }
+  const { findings, allowed } = scanPatch(patch.text)
+  const names = gitCapped(dir, [...common, ...logOnly, '--name-only', '-z', '--diff-filter=ACMR', ...tail], SCAN_LIMIT)
+  for (const f of (names?.text ?? '').split('\0')) {
+    // dòng allow trong chính file đó là lối thoát cho file nhạy cảm bị báo nhầm
+    if (f && isSensitiveFile(f) && !allowed.has(f)) findings.push({ file: f, line: null, name: 'file nhạy cảm', value: null })
+  }
+  return { findings, truncated: patch.truncated || (names?.truncated ?? false) }
+}
+
+const revOf = (info, ref) => (git(info.dir, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]) ?? '').trim()
+
+const COMMIT_VALUE_FLAGS = new Set([
+  '-m', '-F', '-C', '-c', '-t', '--message', '--file', '--reuse-message', '--reedit-message', '--template',
+  '--author', '--date', '--cleanup', '--fixup', '--squash', '--trailer',
+])
+
+// rest = đối số sau `git commit`. Trả { dryRun, all, include, fromFile, paths }:
+// all = -a/--all/-am; include = -i/--include; paths = pathspec (kể cả sau `--`); fromFile = --pathspec-from-file (không biết path).
+function parseCommitFlags(rest) {
+  const c = { dryRun: false, all: false, include: false, fromFile: false, paths: [] }
+  for (let j = 0; j < rest.length; j++) {
+    const t = rest[j]
+    if (t === '--') { c.paths.push(...rest.slice(j + 1)); break }
+    if (t === '--dry-run') c.dryRun = true
+    else if (t === '--all') c.all = true
+    else if (t === '--include') c.include = true
+    else if (t.startsWith('--pathspec-from-file')) { c.fromFile = true; if (t === '--pathspec-from-file') j++ }
+    else if (COMMIT_VALUE_FLAGS.has(t)) j++
+    else if (/^-[A-Za-z]/.test(t)) { // cụm cờ ngắn như -am; từ cờ nhận giá trị trở đi là giá trị
+      const cluster = t.slice(1)
+      for (let k = 0; k < cluster.length; k++) {
+        if (cluster[k] === 'a') c.all = true
+        if (cluster[k] === 'i') c.include = true
+        if ('mFCct'.includes(cluster[k])) { if (k === cluster.length - 1) j++; break }
+        if ('uS'.includes(cluster[k])) break // -uall, -S<keyid>: phần còn lại là giá trị đính kèm
+      }
+    } else if (!t.startsWith('-')) c.paths.push(t)
+  }
+  return c
+}
+
+// Commit sẽ chứa gì: mặc định = index (--cached); -a = working tree so với HEAD (không cộng index cũ);
+// pathspec/--only = bản working tree của các path đó so với HEAD; --include = index + bản working tree của path. HEAD chưa có ⇒ cây rỗng.
+function commitScans(info, c) {
+  if (!c.all && !c.fromFile && c.paths.length === 0) return [{ cmd: 'diff', args: ['--cached'] }]
+  const head = revOf(info, 'HEAD') ? 'HEAD' : EMPTY_TREE
+  if (c.all || c.fromFile) return [{ cmd: 'diff', args: [head] }]
+  const work = { cmd: 'diff', args: [head], paths: c.paths }
+  return c.include ? [{ cmd: 'diff', args: ['--cached'] }, work] : [work]
+}
+
+const PUSH_VALUE_FLAGS = new Set(['-o', '--push-option', '--receive-pack', '--exec', '--recurse-submodules'])
+
+// rest = đối số sau `git push`. Trả { skip, all, mirror, tags, repo, positional } (skip = dry-run/xoá ref: không gửi commit nào).
+function parsePushArgs(rest) {
+  const p = { skip: false, all: false, mirror: false, tags: false, repo: null, positional: [] }
+  let onlyPositional = false
+  for (let j = 0; j < rest.length; j++) {
+    const t = rest[j]
+    if (!onlyPositional && t === '--') onlyPositional = true
+    else if (onlyPositional || !t.startsWith('-')) p.positional.push(t)
+    else if (t === '--dry-run' || t === '-n' || t === '--delete' || t === '-d') p.skip = true
+    else if (t === '--all' || t === '--branches') p.all = true
+    else if (t === '--mirror') p.mirror = true
+    else if (t === '--tags') p.tags = true
+    else if (t === '--repo') p.repo = rest[++j] ?? null
+    else if (t.startsWith('--repo=')) p.repo = t.slice(7)
+    else if (PUSH_VALUE_FLAGS.has(t)) j++
+  }
+  return p
+}
+
+// Các ref sẽ được gửi: [{ src, name }]. name = tên nhánh phía remote (dùng tra refs/remotes/<remote>/<name>), có thể null.
+// Không refspec ⇒ HEAD; --all ⇒ mọi nhánh local; --tags/--mirror không có nguồn riêng (pushScans quét theo ref); `:dst` (xoá) bỏ qua.
+// Có --repo thì mọi positional là refspec (remote = --repo); không thì positional đầu là remote.
+function pushSources(info, p) {
+  const branchName = (ref) => ref.replace(/^refs\/heads\//, '')
+  const forEachRef = (pattern) => (git(info.dir, ['for-each-ref', '--format=%(refname)', pattern]) ?? '').split(/\r?\n/).filter(Boolean)
+  const cur = info.branch && info.branch !== 'HEAD' ? info.branch : null
+  const specs = p.repo !== null ? p.positional : p.positional.slice(1)
+  const out = []
+  if (p.mirror) return out
+  if (specs.length === 0) {
+    if (p.all) for (const ref of forEachRef('refs/heads')) out.push({ src: ref, name: branchName(ref) })
+    else if (!p.tags) out.push({ src: 'HEAD', name: cur })
+    return out
+  }
+  for (let i = 0; i < specs.length; i++) {
+    let s = specs[i]
+    if (s === 'tag' && i + 1 < specs.length) s = `refs/tags/${specs[++i]}`
+    s = s.replace(/^\+/, '')
+    const colon = s.indexOf(':')
+    const src = colon < 0 ? s : s.slice(0, colon)
+    const dst = colon < 0 ? '' : s.slice(colon + 1)
+    if (!src) continue
+    if (/[*?[]/.test(src)) { for (const ref of forEachRef(src)) out.push({ src: ref, name: branchName(ref) }); continue }
+    out.push({ src, name: dst ? branchName(dst) : src === 'HEAD' ? cur : branchName(src) })
+  }
+  return out
+}
+
+// Mỗi ref gửi đi ⇒ một lần quét `git log -p` các commit chưa có ở remote: base = refs/remotes/<remote>/<tên nhánh> nếu có,
+// không thì merge-base với origin/<nhánh chính>, không thì toàn bộ lịch sử của ref (cây rỗng).
+// --tags ⇒ thêm một lần quét mọi refs/tags/*; --mirror ⇒ mọi ref (--all: heads, tags, ref khác): cả hai chỉ lấy commit
+// không thuộc remote-tracking nào của remote (`--not --remotes=<remote>`).
+function pushScans(info, p) {
+  const remoteArg = p.repo ?? p.positional[0]
+  const mainRef = `refs/remotes/origin/${mainBranch(info)}`
+  const cfgRemote = (name) => (name ? (git(info.dir, ['config', '--get', `branch.${name}.remote`]) ?? '').trim() : '')
+  const scans = new Map()
+  if (p.tags || p.mirror) {
+    const cur = info.branch && info.branch !== 'HEAD' ? info.branch : null
+    const args = [p.mirror ? '--all' : '--tags', '--not', `--remotes=${remoteArg ?? (cfgRemote(cur) || 'origin')}`]
+    scans.set(args.join(' '), { cmd: 'log', args })
+  }
+  for (const { src, name } of pushSources(info, p)) {
+    const sha = revOf(info, src)
+    if (!sha) continue
+    const remote = remoteArg ?? cfgRemote(name)
+    const base = (name && revOf(info, `refs/remotes/${remote || 'origin'}/${name}`)) ||
+      (git(info.dir, ['merge-base', sha, mainRef]) ?? '').trim()
+    const range = base ? `${base}..${sha}` : sha
+    scans.set(range, { cmd: 'log', args: [range] })
+  }
+  return [...scans.values()]
+}
+
+// g = parseGitSub của `git commit|push`. Trả deny hoặc null. Không bao giờ đưa giá trị secret vào lý do (chỉ 4 ký tự đầu).
+// Diff bị cắt ở SCAN_LIMIT ⇒ cũng deny (không coi phần chưa quét là sạch).
+function gateSecrets(g) {
+  const info = repoInfo(g.dir)
+  if (!info) return null
+  const verb = g.sub
+  let scans
+  if (verb === 'commit') {
+    const c = parseCommitFlags(g.rest)
+    if (c.dryRun) return null
+    scans = commitScans(info, c)
+  } else {
+    const p = parsePushArgs(g.rest)
+    if (p.skip) return null // không gửi commit nào
+    scans = pushScans(info, p)
+  }
+  const lines = new Set()
+  let truncated = false
+  for (const scan of scans) {
+    const r = runScan(info.dir, scan)
+    truncated ||= r.truncated
+    for (const f of r.findings) lines.add(f.line === null ? `${f.file} — ${f.name}` : `${f.file}:${f.line} — ${f.name} (${f.value})`)
+  }
+  if (lines.size === 0 && !truncated) return null
+  const reason = []
+  if (lines.size > 0) {
+    const list = [...lines]
+    const shown = list.slice(0, 10).join('; ') + (list.length > 10 ? `; …và ${list.length - 10} mục nữa` : '')
+    reason.push(
+      `Phát hiện secret trong phần sắp ${verb}: ${shown}. Gỡ secret khỏi thay đổi và dùng biến môi trường. ` +
+      `Nếu báo nhầm thì thêm comment "${ALLOW_MARK}" vào dòng đó (file nhạy cảm: vào một dòng của file).`,
+    )
+  }
+  if (truncated) {
+    reason.push(
+      `Diff quá lớn để quét hết (vượt ${SCAN_LIMIT / 1048576} MB, chỉ quét phần đầu) nên không coi là sạch. ` +
+      `User tự chạy lệnh ${verb} nếu chắc không có secret.`,
+    )
+  }
+  return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason.join(' ') } }
+}
+
+function gateMerge(m) {
+  const info = repoInfo(m.dir)
+  if (!info) return null
+  const base = mainBranch(info)
+  if (info.branch !== base) return null
+  const lacking = m.targets
+    .map((target) => ({ target, st: tryGateState(info, base, target) }))
+    .filter(({ st }) => st && st.missing.length > 0)
+  if (lacking.length === 0) return null
+  const detail = lacking
+    .map(({ target, st }) => `${target}: thiếu ${st.missing.join(', ')}` + (st.naOnUi ? ' (diff có file UI nhưng qa ghi N/A)' : '') + ` (patch-id=${st.pid})`)
+    .join('; ')
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason:
+        `Chưa đủ dấu để gộp vào ${base} — ${detail}. ` +
+        'Chạy trong worktree của nhánh: node ~/.claude/hooks/flow-gate.mjs stamp review <review.json> ' +
+        'và node ~/.claude/hooks/flow-gate.mjs stamp qa <qa.md> (skill flow-review / flow-qa tạo hai file này).',
+    },
+  }
+}
+
 function hookBash(input) {
   const cmd = input.tool_input?.command
-  if (typeof cmd !== 'string' || !cmd.includes('merge')) return null
+  if (typeof cmd !== 'string' || !/merge|commit|push/.test(cmd)) return null
   let cwd = path.resolve(toNative(input.cwd || process.cwd()))
   for (const toks of tokenize(cmd)) {
     if (toks[0] === 'cd' && toks[1] && !/^[-~$]/.test(toks[1])) { cwd = path.resolve(cwd, toNative(toks[1])); continue }
-    const m = parseGitMerge(toks, cwd)
-    if (!m) continue
-    const info = repoInfo(m.dir)
-    if (!info) continue
-    const base = mainBranch(info)
-    if (info.branch !== base) continue
-    const lacking = m.targets
-      .map((target) => ({ target, st: tryGateState(info, base, target) }))
-      .filter(({ st }) => st && st.missing.length > 0)
-    if (lacking.length === 0) continue
-    const detail = lacking
-      .map(({ target, st }) => `${target}: thiếu ${st.missing.join(', ')}` + (st.naOnUi ? ' (diff có file UI nhưng qa ghi N/A)' : '') + ` (patch-id=${st.pid})`)
-      .join('; ')
-    return {
-      hookSpecificOutput: {
-        hookEventName: 'PreToolUse',
-        permissionDecision: 'deny',
-        permissionDecisionReason:
-          `Chưa đủ dấu để gộp vào ${base} — ${detail}. ` +
-          'Chạy trong worktree của nhánh: node ~/.claude/hooks/flow-gate.mjs stamp review <review.json> ' +
-          'và node ~/.claude/hooks/flow-gate.mjs stamp qa <qa.md> (skill flow-review / flow-qa tạo hai file này).',
-      },
+    const g = parseGitSub(toks, cwd)
+    if (!g) continue
+    let out = null
+    if (g.sub === 'merge') {
+      const m = parseGitMerge(g)
+      if (m) out = gateMerge(m)
+    } else if (g.sub === 'commit' || g.sub === 'push') {
+      try {
+        out = gateSecrets(g)
+      } catch (e) {
+        log(`gateSecrets ${g.sub}: ${e?.stack ?? e}`) // lỗi nội bộ: cho qua, vẫn xét các đoạn lệnh sau
+      }
     }
+    if (out) return out
   }
   return null
 }

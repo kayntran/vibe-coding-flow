@@ -484,3 +484,396 @@ describe('stamp & status', () => {
     assert.ok(pidOf(fx))
   })
 })
+
+// ---------- bash: quét secret trước git commit / git push (Làn A, flow-v3) ----------
+// Token mẫu ghép lúc chạy để chính file test này không chứa secret nguyên văn (tránh tự bị cổng chặn khi commit).
+
+describe('bash secret scan', () => {
+  const GHP = 'ghp_' + 'a'.repeat(36)
+  const SAMPLES = [
+    ['private-key', '-----BEGIN ' + 'RSA PRIVATE KEY-----'],
+    ['aws', 'AKIA' + 'IOSFODNN7EXAMPLE'],
+    ['github', GHP],
+    ['github', 'github_pat_' + 'b'.repeat(60)],
+    ['anthropic', 'sk-ant-' + 'c'.repeat(24)],
+    ['openai', 'sk-proj-' + 'd'.repeat(40)],
+    ['xai', 'xai-' + 'e'.repeat(40)],
+    ['google', 'AIza' + 'f'.repeat(35)],
+    ['slack', 'xoxb-' + '1234567890-abcdef'],
+    ['jwt', 'eyJ' + 'hbGciOiJIUzI1' + '.eyJ' + 'zdWIiOiIxMjM0' + '.' + 'SflKxwRJSMeKKF2QT4'],
+    ['url-credential', 'postgres://' + 'admin:hunter22pass@db.example.com/app'],
+  ]
+  const sh = (fx, cwd, command) => hook(fx, 'bash', bashIn(cwd, command))
+  const stage = (dir, rel, content) => { write(dir, rel, content); git(dir, 'add', '--', rel) }
+  const withSecret = `ok\nconst t = "${GHP}"\n`
+
+  function addRemote(fx) {
+    const bare = path.join(fx.root, 'remote.git')
+    git(fx.root, 'init', '--bare', '-b', 'main', bare)
+    git(fx.main, 'remote', 'add', 'origin', bare)
+  }
+
+  test('commit có token github bị chặn; lý do có file:dòng + tên mẫu, không chứa token', () => {
+    const fx = fixture()
+    stage(fx.main, 'cfg.js', withSecret)
+    const reason = assertDeny(sh(fx, fx.main, 'git commit -m "thêm cấu hình"'))
+    assert.match(reason, /cfg\.js:2 — github \(ghp_…\)/)
+    assert.ok(!reason.includes(GHP.slice(0, 8)), 'lý do để lộ quá 4 ký tự đầu của token')
+    assert.match(reason, /flow-gate: allow-secret/)
+  })
+
+  test('commit sạch / không có gì staged cho qua; secret chỉ ở commit cũ không bị quét lại', () => {
+    const fx = fixture()
+    assertPass(sh(fx, fx.main, 'git commit -m x')) // không có gì staged
+    stage(fx.main, 'clean.js', 'const a = 1\nconst b = process.env.API_KEY\n')
+    assertPass(sh(fx, fx.main, 'git commit -m x'))
+    commit(fx.main, 'old.js', withSecret, 'secret cũ')
+    stage(fx.main, 'clean2.js', 'const c = 2\n')
+    assertPass(sh(fx, fx.main, 'git commit -m x')) // chỉ quét dòng THÊM của phần staged
+  })
+
+  test('mọi mẫu secret được nhận đúng tên + số dòng', () => {
+    const fx = fixture()
+    stage(fx.main, 'p1.txt', SAMPLES.slice(0, 6).map(([, s]) => `x = ${s}`).join('\n') + '\n')
+    const r1 = assertDeny(sh(fx, fx.main, 'git commit -m x'))
+    SAMPLES.slice(0, 6).forEach(([name], i) => assert.ok(r1.includes(`p1.txt:${i + 1} — ${name}`), `thiếu p1.txt:${i + 1} — ${name}: ${r1}`))
+    git(fx.main, 'reset', '-q')
+    stage(fx.main, 'p2.txt', SAMPLES.slice(6).map(([, s]) => `x = ${s}`).join('\n') + '\n')
+    const r2 = assertDeny(sh(fx, fx.main, 'git commit -m x'))
+    SAMPLES.slice(6).forEach(([name], i) => assert.ok(r2.includes(`p2.txt:${i + 1} — ${name}`), `thiếu p2.txt:${i + 1} — ${name}: ${r2}`))
+    for (const [, s] of SAMPLES) assert.ok(!r1.includes(s) && !r2.includes(s))
+  })
+
+  test('sk-ant chỉ báo anthropic, không báo trùng openai; nhiều hơn 10 mục thì rút gọn', () => {
+    const fx = fixture()
+    stage(fx.main, 'k.txt', 'k = ' + 'sk-ant-' + 'c'.repeat(40) + '\n')
+    const reason = assertDeny(sh(fx, fx.main, 'git commit -m x'))
+    assert.match(reason, /k\.txt:1 — anthropic/)
+    assert.doesNotMatch(reason, /openai/)
+    git(fx.main, 'reset', '-q')
+    stage(fx.main, 'many.txt', Array.from({ length: 12 }, () => `t = ${GHP}`).join('\n') + '\n')
+    assert.match(assertDeny(sh(fx, fx.main, 'git commit -m x')), /…và 2 mục nữa/)
+  })
+
+  test('-a / --all / -am quét cả thay đổi tracked chưa stage; không có cờ thì không quét', () => {
+    const fx = fixture()
+    write(fx.main, 'a.txt', fs.readFileSync(path.join(fx.main, 'a.txt'), 'utf8') + `const t = "${GHP}"\n`) // unstaged
+    assertPass(sh(fx, fx.main, 'git commit -m x'))
+    for (const c of ['git commit -am x', 'git commit -a -m x', 'git commit --all -m x', 'git commit -m x -a', 'git commit -sam x']) {
+      assert.match(assertDeny(sh(fx, fx.main, c)), /a\.txt:21 — github/, c)
+    }
+    assertPass(sh(fx, fx.main, 'git commit -m "-a ghi chú"')) // -a nằm trong giá trị của -m
+    assertPass(sh(fx, fx.main, 'git commit -m -a'))
+  })
+
+  test('--dry-run bỏ qua; unborn HEAD (commit đầu tiên) vẫn quét', () => {
+    const fx = fixture()
+    stage(fx.main, 'cfg.js', withSecret)
+    assertPass(sh(fx, fx.main, 'git commit --dry-run -m x'))
+    const fresh = path.join(fx.root, 'fresh')
+    fs.mkdirSync(fresh)
+    git(fresh, 'init', '-b', 'main')
+    stage(fresh, 'cfg.js', withSecret)
+    assert.match(assertDeny(sh(fx, fresh, 'git commit -m first')), /cfg\.js:2 — github/)
+  })
+
+  test('.env bị chặn, .env.example/.sample/.template và khoá công khai cho qua', () => {
+    const fx = fixture()
+    for (const f of ['.env.example', '.env.sample', '.env.template', 'keys/id_rsa.pub', 'README.md']) stage(fx.main, f, 'FOO=bar\n')
+    assertPass(sh(fx, fx.main, 'git commit -m x'))
+    const flagged = ['.env', 'app/.env.production', 'keys/id_rsa', 'keys/id_ed25519', 'tls/server.pem', '.dev.vars', 'credentials.json']
+    for (const f of flagged) stage(fx.main, f, 'FOO=bar\n')
+    const reason = assertDeny(sh(fx, fx.main, 'git commit -m x'))
+    for (const f of flagged) assert.ok(reason.includes(`${f} — file nhạy cảm`), `thiếu ${f}: ${reason}`)
+    for (const f of ['.env.example', '.env.sample', '.env.template', 'id_rsa.pub', 'README.md']) assert.ok(!reason.includes(f), `không được báo ${f}: ${reason}`)
+  })
+
+  test('dòng flow-gate: allow-secret bỏ qua đúng dòng đó; file .env có dòng allow cho qua', () => {
+    const fx = fixture()
+    stage(fx.main, 'cfg.js', `a = "${GHP}" // flow-gate: allow-secret\nb = "${GHP}"\n`)
+    const reason = assertDeny(sh(fx, fx.main, 'git commit -m x'))
+    assert.match(reason, /cfg\.js:2 — github/)
+    assert.doesNotMatch(reason, /cfg\.js:1 /)
+    git(fx.main, 'reset', '-q')
+    stage(fx.main, 'ok.js', `a = "${GHP}" // flow-gate: allow-secret\n`)
+    stage(fx.main, '.env', '# flow-gate: allow-secret\nFOO=bar\n')
+    assertPass(sh(fx, fx.main, 'git commit -m x'))
+  })
+
+  test('url-credential bị chặn; mật khẩu placeholder hoặc ngắn cho qua', () => {
+    const fx = fixture()
+    stage(fx.main, 'ok.yml', ['postgres://', 'user:${DB_PASS}@db/app'].join('') + '\n' + 'a://' + 'u:pw@h\n' + 'https://example.com/a:b@c\n')
+    assertPass(sh(fx, fx.main, 'git commit -m x'))
+    stage(fx.main, 'bad.yml', 'url: ' + 'https://' + 'deploy:Xk9mP2qLr8@git.example.com/r.git\n')
+    assert.match(assertDeny(sh(fx, fx.main, 'git commit -m x')), /bad\.yml:1 — url-credential/)
+  })
+
+  test('nhận lệnh trong chuỗi: cd, -C, ; ; bỏ qua nhắc trong chuỗi/comment', () => {
+    const fx = fixture()
+    stage(fx.main, 'cfg.js', withSecret)
+    const main = fx.main.replace(/\\/g, '/')
+    assertDeny(sh(fx, fx.root, `cd "${main}" && git commit -m x`))
+    assertDeny(sh(fx, fx.root, `git -C "${main}" commit -m x`))
+    assertDeny(sh(fx, fx.main, 'echo ok; git commit -m "gộp" # ghi chú'))
+    assertPass(sh(fx, fx.main, 'echo "git commit -m x"'))
+    assertPass(sh(fx, fx.main, '# git commit -m x'))
+    assertPass(sh(fx, fx.main, 'git log --grep commit'))
+    assertPass(sh(fx, fx.main, "cat <<'EOF'\ngit commit -m x\nEOF"))
+  })
+
+  test('push chỉ quét commit chưa có trên upstream', () => {
+    const fx = fixture()
+    addRemote(fx)
+    commit(fx.main, 'old.js', withSecret, 'secret cũ')
+    git(fx.main, 'push', '-u', 'origin', 'main')
+    commit(fx.main, 'clean.js', 'ok\n', 'sạch')
+    assertPass(sh(fx, fx.main, 'git push')) // secret cũ đã nằm trên upstream
+    assertPass(sh(fx, fx.main, 'git push origin main'))
+    commit(fx.main, 'new.js', withSecret, 'secret mới')
+    for (const c of ['git push', 'git push origin main', 'git -C . push --force-with-lease']) {
+      const reason = assertDeny(sh(fx, fx.main, c))
+      assert.match(reason, /sắp push/)
+      assert.match(reason, /new\.js:2 — github/)
+      assert.doesNotMatch(reason, /old\.js/)
+    }
+    assertPass(sh(fx, fx.main, 'git push --dry-run'))
+    assertPass(sh(fx, fx.main, 'git push origin --delete topic'))
+  })
+
+  test('push repo không upstream/remote: quét toàn bộ HEAD', () => {
+    const fx = fixture()
+    commit(fx.main, 'old.js', withSecret, 'secret cũ')
+    commit(fx.main, 'clean.js', 'ok\n', 'sạch')
+    assert.match(assertDeny(sh(fx, fx.main, 'git push origin main')), /old\.js:2 — github/)
+  })
+
+  test('push nhánh không upstream: base = origin/<nhánh chính>', () => {
+    const fx = fixture()
+    addRemote(fx)
+    commit(fx.main, 'old.js', withSecret, 'secret cũ')
+    git(fx.main, 'push', 'origin', 'main') // không -u: có origin/main nhưng feat không có upstream
+    git(fx.wt, 'rebase', 'main')
+    commit(fx.wt, 'new.js', withSecret, 'secret mới')
+    const reason = assertDeny(sh(fx, fx.wt, 'git push origin feat'))
+    assert.match(reason, /new\.js:2 — github/)
+    assert.doesNotMatch(reason, /old\.js/)
+  })
+
+  test('lỗi git (không phải repo, repo chưa có commit, .git hỏng) ⇒ cho qua', () => {
+    const fx = fixture()
+    const empty = path.join(fx.root, 'empty')
+    const broken = path.join(fx.root, 'broken')
+    fs.mkdirSync(empty)
+    git(empty, 'init', '-b', 'main')
+    fs.mkdirSync(path.join(broken, '.git'), { recursive: true })
+    for (const cwd of [fx.root, empty, broken, path.join(fx.root, 'khong-co')]) {
+      assertPass(sh(fx, cwd, 'git commit -m x'))
+      assertPass(sh(fx, cwd, 'git push'))
+    }
+  })
+
+  test('diff vượt 20 MB bị cắt ⇒ deny "quá lớn" (không coi là sạch); secret trong phần đã quét vẫn được liệt kê', () => {
+    const fx = fixture()
+    const pad = 'x'.repeat(99) + '\n'
+    stage(fx.main, 'big.txt', pad.repeat(215000)) // ~21,5 MB, sạch
+    const r1 = assertDeny(sh(fx, fx.main, 'git commit -m x'))
+    assert.match(r1, /quá lớn/)
+    assert.doesNotMatch(r1, /github/)
+    git(fx.main, 'reset', '-q')
+    stage(fx.main, 'big2.txt', `t = "${GHP}"\n` + pad.repeat(215000))
+    const r2 = assertDeny(sh(fx, fx.main, 'git commit -m x'))
+    assert.match(r2, /big2\.txt:1 — github/)
+    assert.match(r2, /quá lớn/)
+  })
+
+  test('diff dưới giới hạn (vài MB) vẫn quét hết, secret ở cuối file được thấy', () => {
+    const fx = fixture()
+    stage(fx.main, 'mid.txt', ('x'.repeat(99) + '\n').repeat(55000) + `t = "${GHP}"\n`) // ~5,5 MB, secret ở cuối
+    assert.match(assertDeny(sh(fx, fx.main, 'git commit -m x')), /mid\.txt:55001 — github/)
+  })
+
+  // ----- review Codex: commit -a / pathspec -----
+
+  test('commit -a quét bản sẽ commit (diff HEAD): token đã stage rồi xoá khỏi working tree ⇒ qua; không -a thì index vẫn bị quét', () => {
+    const fx = fixture()
+    stage(fx.main, 'cfg.js', withSecret)
+    write(fx.main, 'cfg.js', 'ok\n') // xoá token ở working tree, chưa stage
+    assertPass(sh(fx, fx.main, 'git commit -am x'))
+    assertPass(sh(fx, fx.main, 'git commit -a -m x'))
+    assert.match(assertDeny(sh(fx, fx.main, 'git commit -m x')), /cfg\.js:2 — github/)
+  })
+
+  test('commit kèm pathspec/--only chỉ quét bản working tree của path đó; --include cộng thêm index', () => {
+    const fx = fixture()
+    stage(fx.main, 'b.js', withSecret) // token đã stage ở file khác
+    assertPass(sh(fx, fx.main, 'git commit -m x a.txt')) // a.txt không đổi; index của b.js bị bỏ qua khi commit theo path
+    assert.match(assertDeny(sh(fx, fx.main, 'git commit -i -m x a.txt')), /b\.js:2 — github/)
+    write(fx.main, 'a.txt', fs.readFileSync(path.join(fx.main, 'a.txt'), 'utf8') + `const t = "${GHP}"\n`) // token chưa stage ở file tracked
+    for (const c of ['git commit -m x a.txt', 'git commit -m x -- a.txt', 'git commit --only -m x a.txt', 'git commit -om x a.txt', 'git commit a.txt -m x']) {
+      const reason = assertDeny(sh(fx, fx.main, c))
+      assert.match(reason, /a\.txt:21 — github/, c)
+      assert.doesNotMatch(reason, /b\.js/, c)
+    }
+    assertDeny(sh(fx, fx.main, 'git commit -i -m x a.txt'))
+  })
+
+  test('-uall / --untracked-files=all không phải -a', () => {
+    const fx = fixture()
+    write(fx.main, 'a.txt', fs.readFileSync(path.join(fx.main, 'a.txt'), 'utf8') + `const t = "${GHP}"\n`)
+    assertPass(sh(fx, fx.main, 'git commit -uall -m x'))
+    assertPass(sh(fx, fx.main, 'git commit --untracked-files=all -m x'))
+  })
+
+  test('HEAD chưa có + -a: so với cây rỗng, vẫn quét', () => {
+    const fx = fixture()
+    const fresh = path.join(fx.root, 'fresh')
+    fs.mkdirSync(fresh)
+    git(fresh, 'init', '-b', 'main')
+    stage(fresh, 'cfg.js', withSecret)
+    assert.match(assertDeny(sh(fx, fresh, 'git commit -am first')), /cfg\.js:2 — github/)
+  })
+
+  // ----- review Codex: push quét từng commit + đúng ref được gửi -----
+
+  test('push quét TỪNG commit: A thêm token, B xoá token ⇒ vẫn chặn (kể cả file nhạy cảm bị xoá sau)', () => {
+    const fx = fixture()
+    addRemote(fx)
+    git(fx.main, 'push', '-u', 'origin', 'main')
+    commit(fx.main, 'tmp.js', withSecret, 'A thêm token')
+    commit(fx.main, 'tmp.js', 'ok\n', 'B xoá token') // diff cuối sạch
+    assert.match(assertDeny(sh(fx, fx.main, 'git push')), /tmp\.js:2 — github/)
+    git(fx.main, 'reset', '-q', '--hard', 'origin/main')
+    commit(fx.main, '.env', 'FOO=bar\n', 'A thêm .env')
+    git(fx.main, 'rm', '-q', '.env')
+    git(fx.main, 'commit', '-m', 'B xoá .env')
+    assert.match(assertDeny(sh(fx, fx.main, 'git push')), /\.env — file nhạy cảm/)
+  })
+
+  test('push không remote: quét lịch sử từng commit kể cả commit gốc', () => {
+    const fx = fixture()
+    const fresh = path.join(fx.root, 'fresh')
+    fs.mkdirSync(fresh)
+    git(fresh, 'init', '-b', 'main')
+    commit(fresh, 'root.js', withSecret, 'commit gốc có token')
+    commit(fresh, 'root.js', 'ok\n', 'xoá')
+    assert.match(assertDeny(sh(fx, fresh, 'git push origin main')), /root\.js:2 — github/)
+  })
+
+  test('push theo refspec: quét nhánh được gửi, không phải HEAD', () => {
+    const fx = fixture()
+    commit(fx.wt, 'new.js', withSecret, 'secret trên feat') // feat bẩn; main sạch
+    // đang ở main sạch nhưng gửi feat ⇒ chặn
+    for (const c of ['git push origin feat', 'git push origin +feat:refs/heads/x', 'git push origin main feat', 'git push -o ci.skip origin feat', 'git push --force origin refs/heads/feat']) {
+      assert.match(assertDeny(sh(fx, fx.main, c)), /new\.js:2 — github/, c)
+    }
+    // HEAD (main) sạch nên các lệnh gửi main/HEAD cho qua; src sạch dù dst trùng tên nhánh bẩn
+    for (const c of ['git push', 'git push origin main', 'git push origin HEAD', 'git push origin main:feat', 'git push origin :feat', 'git push origin khong-ton-tai']) {
+      assertPass(sh(fx, fx.main, c))
+    }
+    // HEAD (feat) bẩn: gửi main thì qua; không refspec / HEAD / feat:main thì chặn
+    assertPass(sh(fx, fx.wt, 'git push origin main'))
+    for (const c of ['git push', 'git push origin HEAD', 'git push origin feat:main', 'git push origin HEAD:refs/heads/y']) {
+      assert.match(assertDeny(sh(fx, fx.wt, c)), /new\.js:2 — github/, c)
+    }
+  })
+
+  test('push --all / --mirror quét mọi nhánh local; --tags không quét HEAD (chỉ tag)', () => {
+    const fx = fixture()
+    commit(fx.wt, 'new.js', withSecret, 'secret trên feat')
+    for (const c of ['git push --all origin', 'git push origin --mirror']) assert.match(assertDeny(sh(fx, fx.main, c)), /new\.js:2 — github/, c)
+    assertPass(sh(fx, fx.wt, 'git push --tags')) // HEAD bẩn nhưng chỉ gửi tag, chưa có tag nào
+    assertPass(sh(fx, fx.wt, 'git push origin --tags'))
+    assert.match(assertDeny(sh(fx, fx.wt, 'git push origin feat --tags')), /new\.js:2/) // refspec + --tags: vẫn quét refspec
+  })
+
+  // ----- review Codex vòng 2: --repo, --tags, --mirror -----
+
+  test('push --repo: mọi positional là refspec, remote = --repo', () => {
+    const fx = fixture()
+    commit(fx.wt, 'new.js', withSecret, 'secret trên feat') // feat bẩn; main sạch
+    for (const c of ['git push --repo=origin feat', 'git push --repo origin feat', 'git push --repo origin main feat']) {
+      assert.match(assertDeny(sh(fx, fx.main, c)), /new\.js:2 — github/, c)
+    }
+    assertPass(sh(fx, fx.main, 'git push --repo=origin main')) // gửi main sạch
+    assertPass(sh(fx, fx.main, 'git push --repo origin')) // không refspec ⇒ HEAD (main) sạch
+    assert.match(assertDeny(sh(fx, fx.wt, 'git push --repo origin')), /new\.js:2/) // HEAD = feat bẩn
+  })
+
+  test('push --repo: base theo refs/remotes/<--repo>/<nhánh>', () => {
+    const fx = fixture()
+    addRemote(fx)
+    commit(fx.wt, 'new.js', withSecret, 'secret trên feat')
+    git(fx.wt, 'push', 'origin', 'feat') // origin/feat đã có new.js
+    commit(fx.wt, 'clean.js', 'ok\n', 'sạch')
+    assertPass(sh(fx, fx.wt, 'git push --repo=origin feat'))
+    assertPass(sh(fx, fx.wt, 'git push --repo origin feat'))
+    commit(fx.wt, 'new2.js', withSecret, 'secret mới')
+    const reason = assertDeny(sh(fx, fx.wt, 'git push --repo origin feat'))
+    assert.match(reason, /new2\.js:2/)
+    assert.doesNotMatch(reason, /new\.js:2/)
+  })
+
+  test('push --tags quét commit của mọi tag (nhẹ lẫn có chú thích); tag trỏ commit đã có trên remote thì qua', () => {
+    const fx = fixture()
+    addRemote(fx)
+    git(fx.main, 'tag', 'v0') // trỏ commit sạch
+    assertPass(sh(fx, fx.main, 'git push origin --tags'))
+    commit(fx.main, 'old.js', withSecret, 'secret cũ')
+    git(fx.main, 'tag', '-a', 'v1', '-m', 'x')
+    git(fx.main, 'push', 'origin', 'main', 'v1') // commit có token đã nằm trên origin/main
+    assertPass(sh(fx, fx.main, 'git push origin --tags'))
+    commit(fx.wt, 'new.js', withSecret, 'secret trên feat') // HEAD main vẫn sạch
+    git(fx.main, 'tag', 'v2', 'feat') // tag nhẹ
+    git(fx.main, 'tag', '-a', 'v3', '-m', 'x', 'feat') // tag có chú thích
+    for (const c of ['git push origin --tags', 'git push --tags', 'git push --tags origin', 'git push --repo=origin --tags']) {
+      const reason = assertDeny(sh(fx, fx.main, c))
+      assert.match(reason, /new\.js:2 — github/, c)
+      assert.doesNotMatch(reason, /old\.js/, c)
+    }
+  })
+
+  test('push --mirror quét mọi ref (cả tag và ref lạ trỏ commit không thuộc nhánh nào); --all không quét tag; mirror sạch thì qua', () => {
+    const fx = fixture()
+    addRemote(fx)
+    git(fx.main, 'tag', 'v0')
+    assertPass(sh(fx, fx.main, 'git push --mirror origin'))
+    git(fx.wt, 'checkout', '-q', '--detach')
+    commit(fx.wt, 'tagged.js', withSecret, 'secret chỉ có ở tag')
+    git(fx.wt, 'tag', 'v9')
+    git(fx.wt, 'checkout', '-q', 'feat')
+    for (const c of ['git push --mirror origin', 'git push origin --mirror']) assert.match(assertDeny(sh(fx, fx.main, c)), /tagged\.js:2 — github/, c)
+    assertPass(sh(fx, fx.main, 'git push --all origin')) // --all chỉ gửi nhánh, các nhánh đều sạch
+    git(fx.wt, 'tag', '-d', 'v9')
+    assertPass(sh(fx, fx.main, 'git push --mirror origin'))
+    git(fx.wt, 'checkout', '-q', '--detach')
+    commit(fx.wt, 'other.js', withSecret, 'secret ở ref lạ')
+    git(fx.wt, 'update-ref', 'refs/other/x', 'HEAD')
+    git(fx.wt, 'checkout', '-q', 'feat')
+    assert.match(assertDeny(sh(fx, fx.main, 'git push --mirror origin')), /other\.js:2 — github/)
+  })
+
+  test('push: base riêng cho từng nhánh = refs/remotes/<remote>/<nhánh>', () => {
+    const fx = fixture()
+    addRemote(fx)
+    commit(fx.main, 'old.js', withSecret, 'secret cũ')
+    git(fx.main, 'push', 'origin', 'main')
+    git(fx.wt, 'rebase', 'main')
+    commit(fx.wt, 'new.js', withSecret, 'secret mới trên feat')
+    git(fx.wt, 'push', 'origin', 'feat') // origin/feat có new.js
+    commit(fx.wt, 'clean.js', 'ok\n', 'sạch')
+    assertPass(sh(fx, fx.wt, 'git push origin feat')) // chỉ commit sạch chưa gửi
+    assertPass(sh(fx, fx.main, 'git push origin feat')) // gửi từ thư mục khác: vẫn theo origin/feat
+    commit(fx.wt, 'new2.js', withSecret, 'secret mới nữa')
+    const reason = assertDeny(sh(fx, fx.wt, 'git push origin feat'))
+    assert.match(reason, /new2\.js:2 — github/)
+    assert.doesNotMatch(reason, /new\.js:2|old\.js/)
+  })
+
+  test('merge vẫn được gác song song với quét secret', () => {
+    const fx = fixture()
+    commit(fx.wt, 'feat.go', 'package x\n', 'feat')
+    stage(fx.main, 'cfg.js', withSecret)
+    assertDeny(sh(fx, fx.main, 'git merge feat'))
+    assert.match(assertDeny(sh(fx, fx.main, 'git merge feat && git commit -m x')), /Chưa đủ dấu/)
+  })
+})

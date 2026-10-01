@@ -1,6 +1,6 @@
 ---
 name: flow-merge
-description: Pha 9 của flow — gộp nhánh worktree (hoặc nhiều làn song song) vào nhánh chính sau khi user đồng ý: rebase, squash, test đủ bộ, merge --ff-only, push, dọn worktree. Dùng khi user gật gộp.
+description: Gộp nhánh worktree (một nhánh hoặc nhiều làn song song) vào nhánh chính — rebase, squash, test đủ bộ, merge --ff-only, push, dọn worktree, đóng sổ tiến độ. Dùng khi user đã gật gộp, hoặc nói "gộp đi", "merge", "push lên", "xong rồi đẩy lên". KHÔNG tự gộp khi user chưa đồng ý rõ ràng trong chat.
 ---
 
 # Flow — gộp
@@ -15,10 +15,13 @@ Chỉ chạy khi user đã gật trong chat. Nhánh chính tên `master`/khác �
    Rebase làm diff đổi nội dung (conflict, main có sửa chạm vùng mình) ⇒ dấu review/QA mất hiệu lực ⇒ hook
    chặn gộp ⇒ chạy lại `flow-review` (và `flow-qa` nếu đụng UI) cho phần đổi.
 3. `ExitWorktree` `action: "keep"` → về thư mục chính, soi lại `git worktree list` + file các phiên khác đang đổi,
-   rồi `git merge --ff-only <branch>` → `git push origin main` (nếu có remote) →
-   `git worktree remove <path> && git branch -d <branch>`.
-4. `merge --ff-only` bị từ chối ⇒ không ép, không stash hộ, không đụng file dở của phiên khác. Main có commit mới ⇒
-   `EnterWorktree` `path` quay lại, làm lại bước 1–3; trùng file dở ⇒ hỏi user.
+   rồi `git merge --ff-only <branch>`.
+4. **Trước khi push:** `git log --oneline origin/main..main`. Ngoài commit của mình còn commit khác chưa push (của phiên
+   khác/việc cũ) ⇒ liệt kê cho user, hỏi có push kèm không — push là đẩy tất cả. Rồi `git push origin main` (nếu có
+   remote) → `git worktree remove <path> && git branch -d <branch>`.
+5. Có `progress.md` ⇒ đổi `Trạng thái: xong`, ghi commit gộp (hook sẽ thôi nạp sổ này).
+6. `merge --ff-only` bị từ chối ⇒ không ép, không stash hộ, không đụng file dở của phiên khác. Main có commit mới ⇒
+   `EnterWorktree` `path` quay lại, làm lại bước 1–5; trùng file dở ⇒ hỏi user.
 
 ## Nhiều làn song song
 1. Thứ tự theo phụ thuộc: contract/type → backend/service → frontend → test → docs.

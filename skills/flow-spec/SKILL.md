@@ -1,6 +1,6 @@
 ---
 name: flow-spec
-description: Pha 1–3 của flow — phỏng vấn ý tưởng, research prior art song song, viết SPEC, plan kỹ thuật + ADR + chia làn, review plan đa provider. Dùng khi bắt đầu một tính năng/ý tưởng cỡ M hoặc L (nhiều file, quyết định kiến trúc, schema, tính năng mới), trước khi sửa code.
+description: Từ ý tưởng tới plan đã duyệt — phỏng vấn, research repo/thư viện có sẵn song song, viết SPEC, dò edge case, plan kỹ thuật + ADR + chia làn song song, review plan bằng model khác, mở sổ tiến độ. Dùng khi user nói kiểu "tôi có ý tưởng…", "làm tính năng…", "thêm chức năng…", "muốn app làm được…", "xây module…", hoặc việc đụng schema/nhiều module (cỡ M/L), trước khi sửa code. KHÔNG dùng cho sửa nhỏ tả được bằng một câu (cỡ S), sửa bug (dùng debugger), hay câu hỏi thuần.
 ---
 
 # Flow — từ ý tưởng tới plan đã duyệt
@@ -20,7 +20,12 @@ Cỡ S (tả diff bằng một câu, 1–2 file) ⇒ KHÔNG dùng skill này; v�
    - Acceptance criteria dạng `KHI <tình huống> THÌ HỆ THỐNG PHẢI <hành vi>` — mỗi dòng phải dịch thẳng thành test.
    - Ngoài phạm vi. Yêu cầu phi chức năng (hiệu năng, bảo mật, offline, i18n…) chỉ khi có thật.
    - Chỗ chưa rõ đánh `[CẦN LÀM RÕ]` — còn dấu này thì chưa sang pha 2.
-4. **Cổng 1:** user duyệt SPEC.
+4. **Dò edge case (cỡ L):** quét theo từng chiều — dữ liệu biên/rỗng/khổng lồ, Unicode tiếng Việt, đồng thời/bấm
+   hai lần, mất mạng/timeout, quyền & người dùng khác, trạng thái dở dang/refresh, thời gian & múi giờ, quy mô dữ liệu,
+   bảo mật/input độc, khôi phục sau lỗi, tương thích bản cũ/dữ liệu cũ, truy cập bằng bàn phím/màn hẹp. Lặp tới khi hai
+   vòng liên tiếp không thêm gì. Mỗi edge case giữ lại ⇒ một acceptance criteria hoặc một dòng "ngoài phạm vi".
+   Có thể giao `researcher` gom thêm edge case người khác từng gặp với bài tương tự.
+5. **Cổng 1:** user duyệt SPEC.
 
 ## Pha 2 — Plan kỹ thuật (plan mode)
 
@@ -57,4 +62,22 @@ grok -p "<cùng nội dung>" -m grok-4.7 --agent design-doc-reviewer --permissio
 Grok lỗi ⇒ bỏ qua, báo user một dòng. Codex lỗi ⇒ Agent `code-reviewer` review plan.
 
 Hợp nhất: kiểm từng mục vào SPEC/PLAN/code; sửa plan; mục bác bỏ ghi một dòng lý do cuối PLAN.md.
-**Cổng 2:** user duyệt plan (ExitPlanMode) ⇒ sang thi công theo WORKERS.md.
+**Cổng 2:** user duyệt plan (ExitPlanMode) ⇒ mở sổ tiến độ ⇒ thi công theo skill `flow-team`.
+
+## Sổ tiến độ — `progress.md` cạnh SPEC.md
+
+Hook SessionStart nạp lại sổ đang dở mỗi khi mở phiên mới hoặc nén ngữ cảnh, nên sổ phải đủ để người khác làm tiếp
+mà không cần hội thoại cũ. Captain cập nhật mỗi lần đổi pha, xong một làn, hoặc có quyết định mới. Ngắn, ≤ 40 dòng:
+
+```
+# Tiến độ: <chủ đề>
+Trạng thái: đang làm            ← đổi thành "xong" khi đã gộp; hook bỏ qua sổ đã xong
+Bước tiếp theo: <một câu, đủ cụ thể để làm ngay>   ← để ở đầu: hook chỉ nạp 2.000 ký tự đầu
+Pha: <số + tên>
+Nhánh / worktree: <tên nhánh, đường worktree>
+Đã chốt: <các quyết định user đã duyệt, mỗi dòng một ý — không hỏi lại>
+Làn:
+- [x] A <tên> — <worker> — gộp ở <commit>
+- [ ] B <tên> — <worker> — <đang làm / chờ gì>
+Finding còn mở: <id/tóm tắt hoặc "không">
+```

@@ -26,3 +26,4 @@
 /plans/*
 !/plans/flow-v2.md
 !/plans/flow-v2-hooks-spec.md
+!/plans/flow-v3-hooks-spec.md

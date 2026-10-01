@@ -1,6 +1,6 @@
 ---
 name: flow-qa
-description: Pha 5–7 của flow — kiểm cơ học (lint/typecheck/test), test thực tế như người dùng bằng qa-tester, debug và sửa lỗi. Dùng sau khi code xong trong worktree, trước review code; bắt buộc khi diff đụng UI/app vì hook chặn gộp nếu thiếu dấu QA.
+description: Kiểm và sửa — chạy lint/typecheck/test, tự mở app dùng thử như người thật (Playwright), debug tới nguyên nhân gốc rồi sửa bằng test đỏ, đóng dấu QA. Dùng khi code xong trong worktree (tự chạy, trước review), hoặc khi user nói kiểu "chạy thử", "test giúp", "kiểm tra xem chạy chưa", "bị lỗi", "không chạy", "CI đỏ", "xem log". Bắt buộc khi diff đụng UI/app vì hook chặn gộp nếu thiếu dấu QA. KHÔNG dùng để review code (dùng flow-review).
 ---
 
 # Flow — kiểm, test thực tế, debug
@@ -27,4 +27,6 @@ Agent `test-runner` chạy đủ bộ (lint, typecheck, unit, integration, build
 2. Captain kiểm kết luận vào code. Rồi Agent `coder` (`isolation: "worktree"` nếu đang ở nhánh có làn khác) —
    brief: viết test đỏ theo đề xuất của debugger TRƯỚC, sửa đúng tầng, accept = test đó + bộ liên quan xanh.
    Bug từ QA: codify thành Playwright spec đỏ; nếu tái hiện được ở tầng unit/integration thì thêm test ở tầng đó.
-3. Quay pha 5. Cùng một lỗi sau 2 vòng sửa vẫn đỏ ⇒ leo thang theo WORKERS.md; sau 3 vòng ⇒ dừng, báo user.
+3. Quay pha 5. Cùng một lỗi sau 2 vòng sửa vẫn đỏ ⇒ leo thang theo skill `flow-team`. Sau 3 vòng ⇒ **dừng vá**:
+   nhiều khả năng sai ở thiết kế chứ không ở dòng code. Captain xem lại kiến trúc/giả định quanh lỗi, báo user
+   kèm 2–3 hướng thiết kế lại, không thử vá lần thứ tư.

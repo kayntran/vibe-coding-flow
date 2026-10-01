@@ -1,6 +1,6 @@
 ---
 name: flow-review
-description: Pha 8 của flow — review code tự động bằng Codex gpt-6.1-sol (chất lượng/tiêu chuẩn/hiệu năng + bảo mật, song song), kiểm từng finding bằng test đỏ, sửa, đóng dấu review. Dùng khi nhánh trong worktree đã xanh test và QA, trước khi hỏi user gộp; hook chặn gộp nếu thiếu dấu review.
+description: Review code tự động bằng Codex gpt-6.1-sol — hai lượt song song (đúng đắn/tiêu chuẩn/hiệu năng + bảo mật), kiểm từng finding bằng test đỏ, sửa, đóng dấu review. Tự chạy khi nhánh đã xanh test và QA, trước khi hỏi user gộp (hook chặn gộp nếu thiếu dấu). Cũng dùng khi user nói "review", "soát code", "kiểm bảo mật", "code này ổn chưa". KHÔNG dùng cho review plan (nằm trong flow-spec).
 ---
 
 # Flow — review code
