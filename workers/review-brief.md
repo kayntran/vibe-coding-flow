@@ -14,9 +14,11 @@ Soát theo thứ tự ưu tiên:
 5. Vá tạm bị cấm: try/catch nuốt lỗi, sleep chờ cho kịp, @ts-ignore/ép kiểu, hardcode qua case lỗi.
 6. Hiệu năng: truy vấn N+1, vòng lặp gọi I/O, thiếu phân trang/giới hạn, tải cả bảng vào bộ nhớ, render lại
    thừa ở vòng nóng, rò bộ nhớ/listener. Chỉ báo khi chỉ ra được dữ liệu cỡ nào thì chậm/hỏng.
-7. Bảo trì & tiêu chuẩn: vi phạm quy ước/kiến trúc dự án đã ghi (CLAUDE.md, ADR, rules), lặp logic đã có hàm
+7. Tính năng anh em: diff thêm/đổi thành viên của một registry/danh sách dùng chung (provider, model, gói, cài đặt…)
+   mà một tính năng khác cũng dùng danh sách đó nhưng không được cập nhật, hoặc không có test đối chiếu bắt chỗ sót.
+8. Bảo trì & tiêu chuẩn: vi phạm quy ước/kiến trúc dự án đã ghi (CLAUDE.md, ADR, rules), lặp logic đã có hàm
    sẵn, phụ thuộc vòng, abstraction thừa cho thứ dùng một lần. Không áp khẩu vị cá nhân.
-8. Test: hành vi mới không có test, test chỉ kiểm mock, test luôn xanh kể cả khi code sai.
+9. Test: hành vi mới không có test, test chỉ kiểm mock, test luôn xanh kể cả khi code sai.
 Bỏ qua: style, đặt tên, format — trừ khi gây bug. Không đề xuất tính năng mới.
 
 Đầu ra — TỐI ĐA 10 finding, xếp nặng → nhẹ, mỗi finding đúng khuôn:

@@ -20,7 +20,8 @@ Chỉ chạy khi user đã gật trong chat. Nhánh chính tên `master`/khác �
 4. **Trước khi push:** `git log --oneline origin/main..main`. Ngoài commit của mình còn commit khác chưa push (của phiên
    khác/việc cũ) ⇒ liệt kê cho user, hỏi có push kèm không — push là đẩy tất cả. Rồi `git push origin main` (nếu có
    remote) → `git worktree remove <path> && git branch -d <branch>` → `node ~/.claude/hooks/wt-env.mjs release <path>`.
-5. Có `progress.md` ⇒ đổi `Trạng thái: xong`, ghi commit gộp (hook sẽ thôi nạp sổ này).
+5. Có `progress.md` ⇒ đổi `Trạng thái: xong`, ghi commit gộp (hook sẽ thôi nạp sổ này). Việc có chạy
+   `flow-impact` ⇒ cập nhật mục tương ứng trong `docs/feature-map.md` (registry · tính năng tiêu thụ · file test đối chiếu).
 6. `merge --ff-only` bị từ chối ⇒ không ép, không stash hộ, không đụng file dở của phiên khác. Main có commit mới ⇒
    `EnterWorktree` `path` quay lại, làm lại bước 1–5; trùng file dở ⇒ hỏi user.
 

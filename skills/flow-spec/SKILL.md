@@ -20,12 +20,14 @@ Cỡ S (tả diff bằng một câu, 1–2 file) ⇒ KHÔNG dùng skill này; v�
    - Acceptance criteria dạng `KHI <tình huống> THÌ HỆ THỐNG PHẢI <hành vi>` — mỗi dòng phải dịch thẳng thành test.
    - Ngoài phạm vi. Yêu cầu phi chức năng (hiệu năng, bảo mật, offline, i18n…) chỉ khi có thật.
    - Chỗ chưa rõ đánh `[CẦN LÀM RÕ]` — còn dấu này thì chưa sang pha 2.
-4. **Dò edge case (cỡ L):** quét theo từng chiều — dữ liệu biên/rỗng/khổng lồ, Unicode tiếng Việt, đồng thời/bấm
+4. **Bản đồ ảnh hưởng:** việc chạm thứ dùng chung (provider, model, gói, cài đặt, tool AI agent…) ⇒ chạy skill
+   `flow-impact` — kết quả (làm luôn / để sau / không áp dụng) ghi vào SPEC, test đối chiếu thành task trong PLAN.
+5. **Dò edge case (cỡ L):** quét theo từng chiều — dữ liệu biên/rỗng/khổng lồ, Unicode tiếng Việt, đồng thời/bấm
    hai lần, mất mạng/timeout, quyền & người dùng khác, trạng thái dở dang/refresh, thời gian & múi giờ, quy mô dữ liệu,
    bảo mật/input độc, khôi phục sau lỗi, tương thích bản cũ/dữ liệu cũ, truy cập bằng bàn phím/màn hẹp. Lặp tới khi hai
    vòng liên tiếp không thêm gì. Mỗi edge case giữ lại ⇒ một acceptance criteria hoặc một dòng "ngoài phạm vi".
    Có thể giao `researcher` gom thêm edge case người khác từng gặp với bài tương tự.
-5. **Cổng 1:** user duyệt SPEC.
+6. **Cổng 1:** user duyệt SPEC.
 
 ## Pha 2 — Plan kỹ thuật (plan mode)
 
@@ -64,7 +66,7 @@ Chạy nền trong MỘT message (Bash `run_in_background`, ghi file, luôn `< /
 ```bash
 codex exec --sandbox read-only -m gpt-6.1-sol -c model_reasoning_effort="high" -C "<gốc repo>" \
   -o "<scratchpad>/plan-review-codex.md" "Review plan: <đường SPEC.md> và <đường PLAN.md>. Kiểm chéo SPEC↔PLAN.
-Chỉ báo: lỗi logic, yêu cầu bị sót, contract mâu thuẫn, làn giao file, rủi ro mở rộng/bảo trì/bảo mật/hiệu năng.
+Chỉ báo: lỗi logic, yêu cầu bị sót, tính năng anh em dùng chung registry/danh sách mà plan quên cập nhật hoặc thiếu test đối chiếu, contract mâu thuẫn, làn giao file, rủi ro mở rộng/bảo trì/bảo mật/hiệu năng.
 CẤM đề xuất thêm tính năng. Tối đa 10 mục, mỗi mục: mức, vấn đề, bằng chứng, hướng sửa." < /dev/null
 ```
 Cỡ L: lượt thứ hai bằng Grok đang TẠM TẮT (2026-10-01 — Grok CLI `-p` treo khi gọi công cụ; xem `agents/researcher.md`).

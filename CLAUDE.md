@@ -57,6 +57,7 @@ AGENTS.md, `.claude/rules/`) thắng phần này.
 | User nói (đại ý) | Làm |
 |---|---|
 | ý tưởng mới, làm tính năng, thêm chức năng, "tôi muốn app làm được…" | cỡ M/L ⇒ skill `flow-spec` |
+| thêm/sửa thứ DÙNG CHUNG: provider, model AI, gói/quyền, cài đặt, tool của AI agent, ngôn ngữ… | skill `flow-impact` (kể cả việc cỡ S) — tìm tính năng anh em, hỏi user, gắn test đối chiếu |
 | có ai làm chưa, tìm repo/thư viện, tham khảo, ý tưởng hay hơn | agent `researcher` |
 | lỗi, bug, crash, không chạy, CI đỏ, đọc log | agent `debugger` ⇒ `coder` sửa (skill `flow-qa`) |
 | chạy thử, test thử, kiểm tra như người dùng | skill `flow-qa` |
