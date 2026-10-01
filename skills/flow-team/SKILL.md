@@ -16,8 +16,8 @@ description: Đội hình worker và cách giao việc — chọn worker nào (r
 | Kiểm cơ học | `test-runner` (Haiku 4.5) | lint/typecheck/test/build, trả CHỈ phần đỏ | đoán nguyên nhân, sửa code |
 | Test thực tế | `qa-tester` (Sonnet high) | chạy app, lái Playwright như người dùng theo QA charter | sửa code |
 | Debug | `debugger` (Sonnet xhigh, hỏi thêm **Codex**) | test đỏ, CI đỏ, log server, stack trace ⇒ nguyên nhân gốc | sửa code |
-| Review plan | **Codex gpt-6.1-sol high** (cỡ L: 2 lượt song song) | sau khi viết PLAN.md | — |
-| Review code + bảo mật + hiệu năng | **Codex gpt-6.1-sol high ×2** | trước mỗi lần gộp (skill `flow-review`) | — |
+| Review plan | **Codex gpt-6.1-sol medium**, 1 lượt — CHỈ việc cỡ L | sau khi viết PLAN.md | cỡ S/M (captain tự soát) |
+| Review code + bảo mật + hiệu năng | **Codex gpt-6.1-sol**, mức theo rủi ro (thường: 1 lượt medium · nhạy cảm: 2 lượt high) | MỘT lần cho cả tính năng, trước khi gộp (skill `flow-review`) | sau từng giai đoạn/làn |
 | Review dự phòng | `code-reviewer` (Opus 5.5 medium) | CHỈ khi Codex lỗi/không có | — |
 
 - **agy** (Antigravity CLI) CHỈ dùng cho research, KHÔNG dùng review. Model: `claude-opus-4-6-thinking`; hết lượt dùng ⇒

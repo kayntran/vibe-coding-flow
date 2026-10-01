@@ -51,6 +51,8 @@ Viết `PLAN.md` cạnh SPEC.md, mọi path phải kiểm có thật trong code:
   - Contract/type dùng chung là một làn riêng không phụ thuộc ai (wave 1); các làn dùng nó `depends_on` làn đó.
   - File nóng (lockfile, migration, config gốc, i18n chung, registry) thuộc đúng một làn hoặc captain gom cuối.
   - Mỗi task có test của nó; mỗi làn có `accept`.
+  - Plan chỉ có **MỘT** bước "review code" (skill `flow-review`), ở cuối, sau khi các làn đã gộp vào nhánh
+    tích hợp — không review sau từng giai đoạn/làn.
   - **Kiểm bằng máy, bắt buộc trước cổng 2:** `node ~/.claude/hooks/lane-check.mjs plan <PLAN.md>` — báo làn trùng file
     (`OVERLAP`), file nóng hai chủ (`HOT`), phụ thuộc sai/vòng, rồi in các **wave**. Exit 1 ⇒ sửa bảng tới khi sạch.
     Hai làn cùng đụng một symbol (vd A `replace` còn B `extend` cùng `PaymentService`) git không thấy được ⇒ captain
@@ -59,21 +61,25 @@ Viết `PLAN.md` cạnh SPEC.md, mọi path phải kiểm có thật trong code:
 - **Kế hoạch test**: unit/integration/e2e cần thêm + **QA charter** (từ acceptance criteria: vai, trạng thái đầu,
   dữ liệu, bằng chứng cần có) cho pha 6.
 
-## Pha 3 — Review plan (song song, chỉ đọc)
+## Pha 3 — Review plan
 
-Chạy nền trong MỘT message (Bash `run_in_background`, ghi file, luôn `< /dev/null`):
+**Cỡ S/M: KHÔNG gọi Codex.** Captain tự soát 4 câu, ghi một dòng kết quả cuối PLAN.md: (1) mọi acceptance criteria của
+SPEC có task phủ? (2) tính năng anh em (`flow-impact`) đã vào plan hoặc ghi "để sau"? (3) `lane-check plan` sạch?
+(4) có quyết định khó đảo ngược nào thiếu ADR?
+
+**Cỡ L: MỘT lượt Codex, mức `medium`, chỉ tìm lỗi thiết kế khó sửa về sau** (Bash `run_in_background`, ghi file,
+luôn `< /dev/null`):
 
 ```bash
-codex exec --sandbox read-only -m gpt-6.1-sol -c model_reasoning_effort="high" -C "<gốc repo>" \
+codex exec --sandbox read-only -m gpt-6.1-sol -c model_reasoning_effort="medium" -C "<gốc repo>" \
   -o "<scratchpad>/plan-review-codex.md" "Review plan: <đường SPEC.md> và <đường PLAN.md>. Kiểm chéo SPEC↔PLAN.
-Chỉ báo: lỗi logic, yêu cầu bị sót, tính năng anh em dùng chung registry/danh sách mà plan quên cập nhật hoặc thiếu test đối chiếu, contract mâu thuẫn, làn giao file, rủi ro mở rộng/bảo trì/bảo mật/hiệu năng.
-CẤM đề xuất thêm tính năng. Tối đa 10 mục, mỗi mục: mức, vấn đề, bằng chứng, hướng sửa." < /dev/null
+Chỉ báo lỗi thiết kế KHÓ SỬA SAU khi đã code: sai kiến trúc/contract, yêu cầu bị sót, tính năng anh em dùng chung
+registry/danh sách mà plan quên hoặc thiếu test đối chiếu, làn giao file, rủi ro bảo mật/dữ liệu.
+KHÔNG báo câu chữ, đặt tên, chi tiết code. CẤM đề xuất thêm tính năng. Tối đa 7 mục: mức, vấn đề, bằng chứng, hướng sửa." < /dev/null
 ```
-Cỡ L: lượt thứ hai bằng Grok đang TẠM TẮT (2026-10-01 — Grok CLI `-p` treo khi gọi công cụ; xem `agents/researcher.md`).
-Thay bằng lượt Codex thứ hai chạy song song cùng brief (hai lượt hay ra finding khác nhau). agy không dùng review.
-Codex lỗi ⇒ Agent `code-reviewer` review plan.
+agy/Grok không dùng review. Codex lỗi ⇒ Agent `code-reviewer` review plan.
 
-Hợp nhất: kiểm từng mục vào SPEC/PLAN/code; sửa plan; mục bác bỏ ghi một dòng lý do cuối PLAN.md.
+Hợp nhất (cỡ L): kiểm từng mục vào SPEC/PLAN/code; sửa plan; mục bác bỏ ghi một dòng lý do cuối PLAN.md.
 **Cổng 2:** user duyệt plan (ExitPlanMode) ⇒ mở sổ tiến độ ⇒ thi công theo skill `flow-team`.
 
 ## Sổ tiến độ — `progress.md` cạnh SPEC.md

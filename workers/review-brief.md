@@ -19,7 +19,11 @@ Soát theo thứ tự ưu tiên:
 8. Bảo trì & tiêu chuẩn: vi phạm quy ước/kiến trúc dự án đã ghi (CLAUDE.md, ADR, rules), lặp logic đã có hàm
    sẵn, phụ thuộc vòng, abstraction thừa cho thứ dùng một lần. Không áp khẩu vị cá nhân.
 9. Test: hành vi mới không có test, test chỉ kiểm mock, test luôn xanh kể cả khi code sai.
-Bỏ qua: style, đặt tên, format — trừ khi gây bug. Không đề xuất tính năng mới.
+Bỏ qua: style, đặt tên, format — trừ khi gây bug. Không đề xuất tính năng mới. Bỏ qua thứ lint/typecheck/test/quét
+secret đã bắt (đã chạy xanh trước khi gọi bạn).
+
+Phạm vi đọc: CHỈ diff + hàm/chỗ gọi trực tiếp tới phần bị đổi (và hàm phần bị đổi gọi tới). Không khám phá phần
+khác của repo. Diff < 200 dòng ⇒ tối đa 5 finding.
 
 Đầu ra — TỐI ĐA 10 finding, xếp nặng → nhẹ, mỗi finding đúng khuôn:
 

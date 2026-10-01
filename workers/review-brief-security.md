@@ -15,6 +15,9 @@ output của LLM) tới nơi dùng nguy hiểm. Soát:
 6. Phụ thuộc: package mới thêm có CVE đã biết hoặc tên gần giống package phổ biến (typosquat).
 7. Licence/khoá bản quyền (nếu dự án có): kiểm ở client có thể vượt, so sánh không hằng thời gian.
 
+Phạm vi đọc: CHỈ diff + đường dữ liệu đi vào/ra phần bị đổi. Không khám phá phần khác của repo. Bỏ qua thứ quét
+secret/lint đã bắt. Diff < 200 dòng ⇒ tối đa 5 finding.
+
 Đầu ra — TỐI ĐA 10 finding, xếp nặng → nhẹ. Mỗi finding phải có kịch bản tấn công cụ thể (kẻ tấn công gửi gì
 → được gì) và path:line nơi dữ liệu vào lẫn nơi dùng. Không chỉ ra được kịch bản ⇒ không báo.
 Không tìm thấy gì ⇒ "0 finding" kèm các luồng dữ liệu đã lần.
