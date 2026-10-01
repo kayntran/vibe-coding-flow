@@ -29,10 +29,16 @@ Cần: Claude Code, Node, git, `gh`; Codex CLI ≥ 0.159 (`npm i -g @openai/code
 cd ~/.claude
 git init -b main
 git remote add origin https://github.com/kayntran/vibe-coding-flow.git
-git fetch origin && git checkout -f -t origin/main   # ghi đè các file cùng tên, không đụng file khác
+git fetch origin
+git show origin/main:install.mjs > /tmp/kit-install.mjs && node /tmp/kit-install.mjs backup   # sao lưu file trùng tên
+git checkout -f -t origin/main                       # ghi đè các file cùng tên (đã sao lưu), không đụng file khác
 node ~/.claude/install.mjs                           # ghép 7 hook vào settings.json của máy này
 node --test ~/.claude/hooks/*.test.mjs
 ```
+
+Sau khi cài: so các file `*.before-kit-*` với bản kit, chép phần riêng của máy (nếu có) trở lại, rồi xoá bản sao lưu.
+Cập nhật kit về sau: `git -C ~/.claude pull` — git gộp thay đổi, trùng dòng thì báo conflict chứ không ghi đè im lặng.
+Luật riêng từng dự án nằm trong repo dự án (`CLAUDE.md`, `AGENTS.md`, `.claude/rules/`), kit không bao giờ đụng tới.
 
 Báo cáo MCP bất cứ lúc nào: `node ~/.claude/hooks/mcp-usage.mjs report` (mặc định 30 ngày gần nhất).
 
