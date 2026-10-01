@@ -77,7 +77,7 @@ Chỉ báo lỗi thiết kế KHÓ SỬA SAU khi đã code: sai kiến trúc/con
 registry/danh sách mà plan quên hoặc thiếu test đối chiếu, làn giao file, rủi ro bảo mật/dữ liệu.
 KHÔNG báo câu chữ, đặt tên, chi tiết code. CẤM đề xuất thêm tính năng. Tối đa 7 mục: mức, vấn đề, bằng chứng, hướng sửa." < /dev/null
 ```
-agy/Grok không dùng review. Codex lỗi ⇒ Agent `code-reviewer` review plan.
+agy/Grok không dùng review plan. Codex lỗi ⇒ Agent `code-reviewer` review plan.
 
 Hợp nhất (cỡ L): kiểm từng mục vào SPEC/PLAN/code; sửa plan; mục bác bỏ ghi một dòng lý do cuối PLAN.md.
 **Cổng 2:** user duyệt plan (ExitPlanMode) ⇒ mở sổ tiến độ ⇒ thi công theo skill `flow-team`.

@@ -15,13 +15,16 @@ skill tự bật theo câu user nói, hook ép các cổng. Thiết kế gốc: 
 | `hooks/session-start.mjs` | Mở phiên / sau khi nén ngữ cảnh: tự nạp sổ `progress.md` đang dở; nhắc báo cáo MCP sau 30 ngày |
 | `hooks/lane-check.mjs` | Chạy song song: `plan` kiểm bảng làn trong PLAN.md (trùng file, file nóng, phụ thuộc, chia wave) · `audit` bắt worker sửa ngoài phạm vi (cả file chưa commit) · `conflicts` dò xung đột giữa các nhánh làn |
 | `hooks/wt-env.mjs` | Cấp cửa sổ 20 port riêng cho mỗi worktree (`alloc`/`release`/`list`/`prune`), có khoá chống cấp trùng |
+| `hooks/grok.mjs` | Gọi Grok CLI không nạp MCP/hook/skill của Claude Code và Cursor (nguyên nhân treo) |
+| `hooks/review-ext.mjs` | Gọi Grok 4.7 / Gemini 3.8 Flash review chỉ-đọc, ra JSON đúng schema (tắt cấu hình Claude/Cursor mà Grok tự nạp) |
 | `hooks/strix-scan.mjs` | Bọc Strix (pentest bằng AI): chỉ cho quét thư mục trên máy hoặc app ở localhost, tắt telemetry |
 | `hooks/mcp-usage.mjs` | Ghi mỗi lần gọi MCP vào `~/.claude/logs/mcp-usage.jsonl`; `report` liệt kê MCP không dùng để tắt bớt |
-| `workers/` | Brief + JSON schema cho review Codex (chất lượng, bảo mật) |
+| `workers/` | Brief + JSON schema cho review (chất lượng, bảo mật) — dùng chung cho Codex, Grok, Gemini |
 | `WORKERS.md`, `WORKTREE.md` | Chỉ còn trỏ đường sang skill (dự án cũ còn nhắc tới) |
 
-Model ngoài Claude: Codex `gpt-6.1-sol` (review, ý kiến debug) · Grok `grok-4.7` (tạm tắt: CLI treo khi gọi công cụ web) ·
-agy `claude-opus-4-6-thinking` → `gemini-3.1-pro-high` khi hết lượt (CHỈ research, thêm góc nhìn).
+Model ngoài Claude: Codex `gpt-6.1-sol` (review nhạy cảm, ý kiến debug) · Grok `grok-4.7` high (review thường + lượt
+thứ hai; gọi qua `hooks/review-ext.mjs`) · agy: `gemini-3.8-flash-high` (lượt review dự phòng/thứ ba),
+`claude-opus-4-6-thinking` → `gemini-3.1-pro-high` cho research. Bài thử chọn model: `skills/flow-review/SKILL.md` §1.
 
 ## Cài trên máy mới
 

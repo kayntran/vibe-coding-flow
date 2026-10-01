@@ -9,7 +9,7 @@ description: Đội hình worker và cách giao việc — chọn worker nào (r
 
 | Vai | Ai | Giao khi | Không giao |
 |---|---|---|---|
-| Research prior art | `researcher` (Sonnet high) — tự tìm GitHub + gọi thêm **agy** để có thêm góc nhìn (Grok tạm tắt: treo khi gọi web) | ý tưởng cỡ M/L, dò edge case cỡ L | quyết định |
+| Research prior art | `researcher` (Sonnet high) — tự tìm GitHub + gọi thêm **Grok 4.7** + **agy** để có thêm góc nhìn | ý tưởng cỡ M/L, dò edge case cỡ L | quyết định |
 | Đọc thô / tra docs | `recon` (Sonnet high) | đọc >30KB trong repo, tra API/CVE, trả kết luận `path:line` | quyết định |
 | Code có mẫu | `coder-lite` (Sonnet high) | i18n, docs, sửa lặp, test theo spec rõ, lint/type, bug hẹp có test tái hiện | logic mới, schema, đồng thời, bảo mật |
 | Code khó | `coder` (Sonnet xhigh) | service, SQL/transaction/schema, khoá đồng thời, bảo mật, logic mới | việc chép lặp |
@@ -17,8 +17,8 @@ description: Đội hình worker và cách giao việc — chọn worker nào (r
 | Test thực tế | `qa-tester` (Sonnet high) | chạy app, lái Playwright như người dùng theo QA charter | sửa code |
 | Debug | `debugger` (Sonnet xhigh, hỏi thêm **Codex**) | test đỏ, CI đỏ, log server, stack trace ⇒ nguyên nhân gốc | sửa code |
 | Review plan | **Codex gpt-6.1-sol medium**, 1 lượt — CHỈ việc cỡ L | sau khi viết PLAN.md | cỡ S/M (captain tự soát) |
-| Review code + bảo mật + hiệu năng | **Codex gpt-6.1-sol**, mức theo rủi ro (thường: 1 lượt medium · nhạy cảm: 2 lượt high) | MỘT lần cho cả tính năng, trước khi gộp (skill `flow-review`) | sau từng giai đoạn/làn |
-| Review dự phòng | `code-reviewer` (Opus 5.5 medium) | CHỈ khi Codex lỗi/không có | — |
+| Review code + bảo mật + hiệu năng | theo rủi ro (thường: **Grok 4.7** · nhạy cảm: **Codex high** + Grok · tiền/dữ liệu: + **Gemini 3.8 Flash**), qua `review-ext.mjs` / `codex exec` | MỘT lần cho cả tính năng, trước khi gộp (skill `flow-review`) | sau từng giai đoạn/làn |
+| Review dự phòng | Codex → Grok → Gemini Flash → `code-reviewer` (Opus 5.5 medium) | lượt nào lỗi thì sang model kế chưa dùng | — |
 
 - **agy** (Antigravity CLI) CHỈ dùng cho research, KHÔNG dùng review. Model: `claude-opus-4-6-thinking`; hết lượt dùng ⇒
   `gemini-3.1-pro-high`.
