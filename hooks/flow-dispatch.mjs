@@ -125,6 +125,7 @@ function newestOpenProgress(top) {
 
 // Sổ để nhắc: sổ chưa xong ghi đúng nhánh hiện tại (openProgress của lib, quét MỌI thư mục, cùng cách chọn với session-start). Nhánh không
 // xác định (detached HEAD…) hoặc không sổ nào nhận ⇒ newestOpenProgress, y như session-start rơi về sổ sửa gần nhất.
+// Riêng nhánh chính (main/master): commit ở đó là gộp/sửa vặt, không phải việc của sổ sửa gần nhất ⇒ không đoán.
 function pickProgress(dir, top) {
   const branch = (git(dir, ['symbolic-ref', '--short', '-q', 'HEAD']) ?? '').trim()
   if (branch) {
@@ -134,6 +135,7 @@ function pickProgress(dir, top) {
     } catch (e) {
       log(`openProgress lỗi (${e.code ?? e.name})`)
     }
+    if (branch === 'main' || branch === 'master') return null
   }
   return newestOpenProgress(top)
 }

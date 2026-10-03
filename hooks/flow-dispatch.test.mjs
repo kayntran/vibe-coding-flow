@@ -204,6 +204,7 @@ const PROGRESS = 'docs/specs/feat/progress.md'
 function repoWithProgress(note = OPEN_NOTE) {
   const fx = repoWithPlan()
   commit(fx.repo, PROGRESS, note, 'sổ')
+  git(fx.repo, 'checkout', '-q', '-b', 'feat/x') // nhánh tính năng chưa sổ nào nhận ⇒ rơi về sổ sửa gần nhất (trên main thì không đoán)
   return { ...fx, progress: path.join(fx.repo, PROGRESS), gates: path.join(fx.repo, '.git', 'flow-gates') }
 }
 
@@ -407,12 +408,23 @@ describe('stop: chọn sổ theo nhánh, cùng sổ với session-start', () => 
 
   test('sổ kiểu cũ không ghi nhánh, hoặc nhánh chưa sổ nào nhận: cả hai rơi về sổ chưa xong sửa gần nhất', () => {
     const fx = repoWithSheets([{ name: A, ageSec: 7200 }, { name: B, ageSec: 3600 }])
+    git(fx.repo, 'checkout', '-b', 'feat/cu')
     assert.equal(sessionSheets(fx)[0], sheetRel(B))
     assert.equal(nudgedSheet(fx), sheetRel(B))
     const fx2 = repoWithSheets([{ name: A, branch: 'feat/a', ageSec: 7200 }, { name: B, branch: 'feat/b', ageSec: 3600 }])
     git(fx2.repo, 'checkout', '-b', 'fix/khac') // không sổ nào ghi nhánh này
     assert.equal(sessionSheets(fx2)[0], sheetRel(B))
     assert.equal(nudgedSheet(fx2), sheetRel(B))
+  })
+
+  test('đang ở nhánh chính (main/master) mà không sổ nào nhận nhánh ⇒ không đoán sổ để nhắc (commit trên main là gộp/sửa vặt, không phải việc của sổ sửa gần nhất); sổ ghi rõ nhánh main thì vẫn nhắc', () => {
+    for (const main of ['main', 'master']) {
+      const fx = repoWithSheets([{ name: A, branch: 'feat/a', ageSec: 7200 }, { name: B, ageSec: 3600 }])
+      if (main !== 'main') git(fx.repo, 'branch', '-m', 'main', main)
+      assert.equal(nudgedSheet(fx), null)
+    }
+    const fx = repoWithSheets([{ name: A, branch: 'main', ageSec: 7200 }, { name: B, ageSec: 3600 }])
+    assert.equal(nudgedSheet(fx), sheetRel(A))
   })
 
   test('nhánh không xác định (detached HEAD) ⇒ không đoán theo nhánh: cả hai rơi về sổ sửa gần nhất', () => {
