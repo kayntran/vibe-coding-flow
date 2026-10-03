@@ -1,6 +1,6 @@
 ---
 name: flow-merge
-description: Gộp nhánh worktree (một nhánh hoặc nhiều làn song song) vào nhánh chính — rebase, squash, test đủ bộ, merge --ff-only, push, dọn worktree, đóng sổ tiến độ. Dùng khi user đã gật gộp, hoặc nói "gộp đi", "merge", "push lên", "xong rồi đẩy lên". KHÔNG tự gộp khi user chưa đồng ý rõ ràng trong chat.
+description: Gộp nhánh worktree (một nhánh hoặc nhiều làn song song) vào nhánh chính — rebase, squash, test đủ bộ, merge --ff-only, đóng sổ tiến độ + cất sổ chốt, push, dọn worktree. Dùng khi user đã gật gộp, hoặc nói "gộp đi", "merge", "push lên", "xong rồi đẩy lên". KHÔNG tự gộp khi user chưa đồng ý rõ ràng trong chat.
 ---
 
 # Flow — gộp
@@ -17,13 +17,19 @@ Chỉ chạy khi user đã gật trong chat. Nhánh chính tên `master`/khác �
    chặn gộp ⇒ chạy lại `flow-review` (và `flow-qa` nếu đụng UI) cho phần đổi.
 3. `ExitWorktree` `action: "keep"` → về thư mục chính, soi lại `git worktree list` + file các phiên khác đang đổi,
    rồi `git merge --ff-only <branch>`.
-4. **Trước khi push:** `git log --oneline origin/main..main`. Ngoài commit của mình còn commit khác chưa push (của phiên
+4. **Đóng sổ (sau gộp, trước push):** có `docs/specs/<YYYY-MM-DD>-<slug>/progress.md` ⇒ chạy
+   `node ~/.claude/hooks/lib/so-chot.mjs xong <projectRoot> <YYYY-MM-DD>-<slug>` — ghi `Trạng thái: xong` + `Xong ngày`
+   vào progress.md (hook thôi nạp sổ này), cất kho các quyết định ✅ phạm vi tính năng (điều `chung` và điều ⚠️ chờ xem lại giữ nguyên) và sinh
+   lại INDEX/ROADMAP. Dùng lệnh này, KHÔNG sửa progress.md bằng Edit: thư mục chính bị hook chặn sửa thẳng. Việc có chạy `flow-impact` ⇒ cập nhật mục tương ứng trong
+   `docs/feature-map.md` (registry · tính năng tiêu thụ · file test đối chiếu). Rồi commit phần đóng sổ.
+5. **Trước khi push:** `git log --oneline origin/main..main`. Ngoài commit của mình còn commit khác chưa push (của phiên
    khác/việc cũ) ⇒ liệt kê cho user, hỏi có push kèm không — push là đẩy tất cả. Rồi `git push origin main` (nếu có
    remote) → `git worktree remove <path> && git branch -d <branch>` → `node ~/.claude/hooks/wt-env.mjs release <path>`.
-5. Có `progress.md` ⇒ đổi `Trạng thái: xong`, ghi commit gộp (hook sẽ thôi nạp sổ này). Việc có chạy
-   `flow-impact` ⇒ cập nhật mục tương ứng trong `docs/feature-map.md` (registry · tính năng tiêu thụ · file test đối chiếu).
-6. `merge --ff-only` bị từ chối ⇒ không ép, không stash hộ, không đụng file dở của phiên khác. Main có commit mới ⇒
-   `EnterWorktree` `path` quay lại, làm lại bước 1–5; trùng file dở ⇒ hỏi user.
+6. Thứ tự cố định: gộp → `so-chot.mjs xong` → commit → push → dọn worktree. Bị ngắt
+   giữa chừng ⇒ chạy lại từ bước 4: `xong` idempotent, không tạo thay đổi trùng (đã `xong` thì không ghi lại, không có
+   thay đổi thì không commit).
+7. `merge --ff-only` bị từ chối ⇒ không ép, không stash hộ, không đụng file dở của phiên khác. Main có commit mới ⇒
+   `EnterWorktree` `path` quay lại, làm lại bước 1–6; trùng file dở ⇒ hỏi user.
 
 ## Nhiều làn song song
 1. Mỗi làn đã qua `lane-check audit` (không có file ngoài scope) — xem skill `flow-team`.
@@ -33,7 +39,7 @@ Chỉ chạy khi user đã gật trong chat. Nhánh chính tên `master`/khác �
 3. Gộp từng làn vào **nhánh tích hợp** của tính năng (không vào main) theo thứ tự đó, kết hợp thứ tự phụ thuộc
    (contract → backend → frontend → test → docs), chạy test giữa mỗi lần gộp.
 4. Trên nhánh tích hợp: test đủ bộ + `flow-qa` các luồng chính + `flow-review` MỘT lần cho cả nhánh.
-5. Rồi gộp nhánh tích hợp vào main theo mục "Một nhánh". Xong: `node ~/.claude/hooks/wt-env.mjs release <đường worktree>` cho từng worktree đã xoá (hoặc `prune`).
+5. Rồi gộp nhánh tích hợp vào main theo mục "Một nhánh" (gồm bước đóng sổ). Xong: `node ~/.claude/hooks/wt-env.mjs release <đường worktree>` cho từng worktree đã xoá (hoặc `prune`).
 
 ## Sau push
 CI đỏ ⇒ Agent `debugger` với run id (`gh run view <id> --log-failed`) ⇒ sửa trên nhánh mới theo flow.

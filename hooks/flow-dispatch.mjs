@@ -1,7 +1,8 @@
 // flow-dispatch: ép các bước hay bị bỏ sót khi giao worker và khi kết thúc phiên. Một script, chế độ chọn bằng argv[2].
 //   agent : PreToolUse matcher `Agent|Task`. Đọc tool_input.subagent_type + tool_input.prompt (field của Agent tool, docs hooks mục Agent).
 //           coder/coder-lite có `lane=` ⇒ đòi `plan=` rồi chạy `lane-check.mjs plan <plan>`; qa-tester ⇒ đòi PORT_BASE=<n> hoặc port=<n>.
-//   stop  : Stop. Sổ docs/specs/*/progress.md chưa "xong" mà commit HEAD mới hơn sổ ⇒ block MỘT lần cho mỗi HEAD.
+//   stop  : Stop. Sổ docs/specs/*/progress.md chưa "xong" mà commit HEAD mới hơn sổ ⇒ block MỘT lần cho mỗi HEAD. Sổ được chọn như session-start:
+//           sổ ghi đúng nhánh git hiện tại (openProgress của lib so-chot, quét mọi thư mục); nhánh không xác định / chưa sổ nào nhận ⇒ sổ chưa xong sửa gần nhất.
 // Spec: ~/.claude/plans/flow-v5-hooks-spec.md (Làn B). Docs: https://code.claude.com/docs/en/hooks
 // Lỗi nội bộ luôn CHO QUA (exit 0, không in gì) và ghi một dòng vào flow-dispatch.log.
 import { spawnSync } from 'node:child_process'
@@ -9,12 +10,13 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { briefPlan, briefWord } from './lib/brief.mjs'
+import { openProgress } from './lib/so-chot.mjs'
 
 const HOOK_DIR = path.dirname(fileURLToPath(import.meta.url))
 const LOG_FILE = process.env.FLOW_DISPATCH_LOG || path.join(HOOK_DIR, 'flow-dispatch.log')
 const LANE_CHECK = path.join(HOOK_DIR, 'lane-check.mjs')
 const QA_PORT_RE = /\b(PORT_BASE|port)\s*=\s*\d{2,5}\b/i
-const MAX_DIRS = 50 // số thư mục docs/specs/* tối đa được xét (như session-start)
+const MAX_DIRS = 50 // số thư mục docs/specs/* tối đa được xét khi không sổ nào nhận nhánh (như session-start)
 const MAX_READ = 64 * 1024 // chỉ đọc từng này byte đầu mỗi progress.md
 const MAX_REASON = 3000
 // Dòng `Trạng thái: xong` (chấp nhận markdown bao quanh như `- **Trạng thái:** xong`), không phân biệt hoa thường. Giống session-start.
@@ -84,7 +86,7 @@ function readHead(file) {
   }
 }
 
-// Sổ docs/specs/*/progress.md chưa "xong" sửa gần nhất: { rel, mtimeMs } hoặc null. Cùng luật an toàn như session-start:
+// Sổ docs/specs/*/progress.md chưa "xong" sửa gần nhất (đường lui khi không sổ nào nhận nhánh): { rel, mtimeMs } hoặc null. Cùng luật an toàn như session-start:
 // chỉ nhận file thường (lstat) có realpath nằm trong <toplevel>/docs/specs, tối đa MAX_DIRS thư mục, đọc MAX_READ byte đầu.
 function newestOpenProgress(top) {
   const specs = path.join(top, 'docs', 'specs')
@@ -121,6 +123,21 @@ function newestOpenProgress(top) {
   return null
 }
 
+// Sổ để nhắc: sổ chưa xong ghi đúng nhánh hiện tại (openProgress của lib, quét MỌI thư mục, cùng cách chọn với session-start). Nhánh không
+// xác định (detached HEAD…) hoặc không sổ nào nhận ⇒ newestOpenProgress, y như session-start rơi về sổ sửa gần nhất.
+function pickProgress(dir, top) {
+  const branch = (git(dir, ['symbolic-ref', '--short', '-q', 'HEAD']) ?? '').trim()
+  if (branch) {
+    try {
+      const hit = openProgress(top, branch)
+      if (hit) return { rel: hit.rel, mtimeMs: hit.mtimeMs }
+    } catch (e) {
+      log(`openProgress lỗi (${e.code ?? e.name})`)
+    }
+  }
+  return newestOpenProgress(top)
+}
+
 function hookStop(input) {
   if (input.stop_hook_active) return null
   const dir = input.cwd || process.cwd()
@@ -128,12 +145,12 @@ function hookStop(input) {
   if (!out) return null
   const [top, common] = out.split(/\r?\n/)
   if (!top || !common) return null
-  const prog = newestOpenProgress(path.resolve(top))
-  if (!prog) return null
   const head = (git(dir, ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']) ?? '').trim()
   if (!/^[0-9a-f]{40,64}$/.test(head)) return null
   const marker = path.join(path.resolve(dir, common), 'flow-gates', `progress-nudged-${head}`)
-  if (fs.existsSync(marker)) return null
+  if (fs.existsSync(marker)) return null // đã nhắc cho HEAD này: khỏi quét sổ (pickProgress đọc nhiều file, mà Stop chạy ở mọi lượt)
+  const prog = pickProgress(dir, path.resolve(top))
+  if (!prog) return null
   const ct = Number((git(dir, ['log', '-1', '--format=%ct', head]) ?? '').trim())
   // So theo giây (%ct không có phần lẻ): sổ chỉ coi là mới hơn commit khi mtime ở giây SAU giây commit. Cùng giây mà commit không sửa sổ ⇒ coi như sổ cũ.
   if (!Number.isFinite(ct) || ct <= 0 || Math.floor(prog.mtimeMs / 1000) > ct) return null

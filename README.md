@@ -50,6 +50,15 @@ Báo cáo MCP bất cứ lúc nào: `node ~/.claude/hooks/mcp-usage.mjs report` 
 
 Repo muốn sửa thẳng trên nhánh chính (không worktree) ⇒ tạo `.claude/allow-direct-edit` trong repo đó.
 
+## v6 — sổ chốt, roadmap, ý tưởng
+
+Quyết định của dự án lưu thành file nhỏ trong repo dự án (`.claude/so-chot/`, mỗi quyết định một file, mục lục `INDEX.md`
+tự sinh); `docs/ROADMAP.md` tự sinh từ `docs/specs/*/progress.md`; ý tưởng người dùng nói ra ghi thêm vào `docs/IDEAS.md`.
+Tính năng gộp xong thì bước gộp tự cất các quyết định ✅ của nó (điều ⚠️ ở lại tới khi user xem). Hook `session-start` chỉ đọc và nạp trong trần 8.500 ký tự;
+mọi định dạng nằm ở `hooks/lib/so-chot.mjs` (cũng là CLI: `gen|excerpt|ghi|tim|y-tuong|da-xem|huy|close`). Dự án cũ chuyển
+bằng `hooks/lib/legacy-migrate.mjs` (`plan` · `apply` · `verify`). Thiết kế: [plans/flow-v6-so-chot/](plans/flow-v6-so-chot/PLAN.md),
+quyết định định dạng: [ADR-0001](plans/flow-v6-so-chot/ADR-0001-nguon-su-that.md).
+
 ## Hạn chế đã biết của hook
 
 Hook chặn việc **quên** flow, không chặn việc cố tình lách. Các dạng lệnh sau lọt cổng gộp: `bash -c "git merge x"`,

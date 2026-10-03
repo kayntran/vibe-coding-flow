@@ -7,15 +7,23 @@ description: Từ ý tưởng tới plan đã duyệt — phỏng vấn, researc
 
 Cỡ S (tả diff bằng một câu, 1–2 file) ⇒ KHÔNG dùng skill này; vào worktree làm luôn.
 
+## Thư mục tính năng (cỡ M/L)
+
+Mọi tài liệu của một tính năng nằm trong `docs/specs/<YYYY-MM-DD>-<slug>/`: `SPEC.md` · `PLAN.md` · `progress.md` ·
+`research.md` · `notes/` (ghi chú phụ). Không rải ở chỗ khác. ADR khó đảo ngược đặt cạnh (xem Pha 2).
+
 ## Pha 1 — Phỏng vấn + research (song song)
 
+0. **Rà ý tưởng trùng:** đọc `docs/IDEAS.md` (nếu có), tìm ý tưởng trùng với việc sắp làm. Chỉ coi là một khi khớp
+   chắc chắn; mơ hồ ⇒ hỏi user. Làm ý tưởng nào ⇒ ghi thêm dòng trỏ về đúng mã đó:
+   `node ~/.claude/hooks/lib/so-chot.mjs y-tuong <projectRoot> '{"ma":"y-xxxxxx","lam":"<YYYY-MM-DD>-<slug>"}'`.
 1. Gửi trong MỘT message:
    - AskUserQuestion: ≤5 câu/vòng, mỗi câu có đáp án khuyến nghị đứng đầu. Hỏi mục tiêu, người dùng, phạm vi,
      ràng buộc, thế nào là "xong".
    - Cỡ M/L: Agent `researcher` chạy nền — brief: ý tưởng, stack, ràng buộc licence, đường ghi
-     `docs/specs/<yyyy-mm-dd>-<chủ-đề>/research.md`.
+     `docs/specs/<YYYY-MM-DD>-<slug>/research.md`.
 2. Nhận research ⇒ kể user những gì đáng giá (repo dùng lại được, ý tưởng hay hơn) trước khi chốt spec.
-3. Viết `docs/specs/<yyyy-mm-dd>-<chủ-đề>/SPEC.md`:
+3. Viết `docs/specs/<YYYY-MM-DD>-<slug>/SPEC.md`:
    - Mục tiêu (1–3 câu), người dùng, user story.
    - Acceptance criteria dạng `KHI <tình huống> THÌ HỆ THỐNG PHẢI <hành vi>` — mỗi dòng phải dịch thẳng thành test.
    - Ngoài phạm vi. Yêu cầu phi chức năng (hiệu năng, bảo mật, offline, i18n…) chỉ khi có thật.
@@ -93,9 +101,13 @@ Trạng thái: đang làm            ← đổi thành "xong" khi đã gộp; ho
 Bước tiếp theo: <một câu, đủ cụ thể để làm ngay>   ← để ở đầu: hook chỉ nạp 2.000 ký tự đầu
 Pha: <số + tên>
 Nhánh / worktree: <tên nhánh, đường worktree>
-Đã chốt: <các quyết định user đã duyệt, mỗi dòng một ý — không hỏi lại>
+Đã chốt: xem .claude/so-chot/INDEX.md (phạm vi chung + <YYYY-MM-DD>-<slug>) — quyết định mới ghi vào sổ chốt, không chép vào đây
 Làn:
 - [x] A <tên> — <worker> — gộp ở <commit>
 - [ ] B <tên> — <worker> — <đang làm / chờ gì>
 Finding còn mở: <id/tóm tắt hoặc "không">
 ```
+
+Quyết định user vừa duyệt ⇒ ghi sổ chốt (`mcp__so-chot__ghi_chot`, hoặc `node ~/.claude/hooks/lib/so-chot.mjs ghi
+<projectRoot> <json>`), không ghi vào progress.md. Sổ kiểu cũ có "Đã chốt:" nhiều dòng vẫn được nạp bình thường.
+Bước gộp (skill `flow-merge`) tự ghi `Trạng thái: xong` + `Xong ngày: <YYYY-MM-DD>`.

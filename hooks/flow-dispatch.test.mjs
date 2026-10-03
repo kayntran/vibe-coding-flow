@@ -226,6 +226,23 @@ describe('stop: nhắc cập nhật sổ tiến độ', () => {
     assertBlock(stop(fx, fx.repo))
   })
 
+  test('R8 HEAD đã được nhắc (có marker) ⇒ không quét sổ nữa; chưa có marker mới quét', () => {
+    const fx = repoWithProgress()
+    ago(fx.progress, 3600)
+    commit(fx.repo, 'src/a.txt', 'a2\n', 'đổi a')
+    assertBlock(stop(fx, fx.repo)) // ghi marker cho HEAD này
+    // Bẫy: progress.md là thư mục. Hễ có quét sổ (newestOpenProgress) là có dòng log "bỏ qua progress.md không phải file thường".
+    fs.mkdirSync(path.join(fx.repo, 'docs/specs/zzz/progress.md'), { recursive: true })
+    const trapped = () => fs.existsSync(fx.log) && /bỏ qua progress\.md không phải file thường/.test(fs.readFileSync(fx.log, 'utf8'))
+    commit(fx.repo, 'src/b.txt', 'b2\n', 'đổi b') // HEAD mới, chưa marker
+    fs.rmSync(fx.log, { force: true })
+    assertBlock(stop(fx, fx.repo))
+    assert.ok(trapped(), 'đối chứng: chưa có marker thì phải quét sổ')
+    fs.rmSync(fx.log, { force: true })
+    assertPass(stop(fx, fx.repo)) // cùng HEAD: đã nhắc
+    assert.ok(!trapped(), 'đã có marker ⇒ không được quét sổ (mỗi lượt dừng không tốn đọc mọi progress.md)')
+  })
+
   test('chạy từ thư mục con của repo cũng nhắc, marker nằm ở git-common-dir', () => {
     const fx = repoWithProgress()
     ago(fx.progress, 3600)
@@ -327,5 +344,101 @@ describe('stop: nhắc cập nhật sổ tiến độ', () => {
     assertPass(stop(fx, path.join(fx.root, 'khong-co')))
     assertPass(run(fx, 'stop', 'không phải json'))
     assertPass(run(fx, 'stop', ''))
+  })
+})
+
+// ---------- stop: chọn sổ theo nhánh, đối chiếu với session-start (SPEC v6 AC22b) ----------
+
+const SESSION_START = path.join(path.dirname(SCRIPT), 'session-start.mjs')
+const sheetRel = (name) => `docs/specs/${name}/progress.md`
+const sheetText = (name, branch) => `# Tiến độ: ${name}\nTrạng thái: đang làm\n${branch ? `Nhánh / worktree: ${branch}, C:/wt/${name}\n` : ''}Pha 2\n`
+
+// Repo (main) với các sổ đã commit, mtime lùi về quá khứ theo ageSec (âm = tương lai); name sắp xếp theo thứ tự xuất hiện.
+function repoWithSheets(specs) {
+  const fx = repoWithPlan()
+  for (const s of specs) write(fx.repo, sheetRel(s.name), s.text ?? sheetText(s.name, s.branch))
+  git(fx.repo, 'add', '-A')
+  git(fx.repo, 'commit', '-m', 'sổ')
+  for (const s of specs) ago(path.join(fx.repo, sheetRel(s.name)), s.ageSec)
+  return fx
+}
+
+// Các sổ session-start nạp, theo thứ tự (HOME giả: không đụng ~/.claude thật).
+function sessionSheets(fx) {
+  const home = path.join(fx.root, 'home')
+  fs.mkdirSync(home, { recursive: true })
+  const r = spawnSync(process.execPath, [SESSION_START], {
+    input: JSON.stringify({ hook_event_name: 'SessionStart', source: 'startup', cwd: fx.repo }), encoding: 'utf8', cwd: fx.root,
+    env: { ...ENV, HOME: home, USERPROFILE: home, MCP_USAGE_LOG: path.join(fx.root, 'khong-co.jsonl') },
+  })
+  assert.equal(r.status, 0, r.stderr)
+  const ctx = r.stdout.trim() ? JSON.parse(r.stdout).hookSpecificOutput.additionalContext : ''
+  return [...ctx.matchAll(/^--- (docs\/specs\/\S+\/progress\.md) ---$/gm)].map((m) => m[1])
+}
+
+// Sổ flow-dispatch nhắc sau một commit mới (HEAD mới ⇒ marker mới); null nếu không nhắc.
+function nudgedSheet(fx) {
+  commit(fx.repo, 'src/a.txt', `a ${Math.random()}\n`, 'đổi a')
+  const r = stop(fx, fx.repo)
+  if (r.json?.decision !== 'block') { assertPass(r); return null }
+  return /sổ (\S+) chưa cập nhật/.exec(r.json.reason)[1]
+}
+
+describe('stop: chọn sổ theo nhánh, cùng sổ với session-start', () => {
+  const A = '2026-10-01-a'
+  const B = '2026-10-02-b'
+
+  test('hai tính năng mở ở hai nhánh: mỗi nhánh nhắc đúng sổ của mình dù sổ kia mới hơn; session-start nạp đúng sổ đó', () => {
+    const fx = repoWithSheets([{ name: A, branch: 'feat/a', ageSec: 7200 }, { name: B, branch: 'feat/b', ageSec: 3600 }])
+    git(fx.repo, 'checkout', '-b', 'feat/a')
+    assert.deepEqual(sessionSheets(fx), [sheetRel(A)])
+    assert.equal(nudgedSheet(fx), sheetRel(A))
+    git(fx.repo, 'checkout', '-b', 'feat/b', 'main')
+    assert.deepEqual(sessionSheets(fx), [sheetRel(B)])
+    assert.equal(nudgedSheet(fx), sheetRel(B))
+  })
+
+  test('sổ của tính năng khác vừa cập nhật không che sổ cũ của nhánh này (trước đây: chọn sổ mới nhất ⇒ không nhắc)', () => {
+    const fx = repoWithSheets([{ name: A, branch: 'feat/a', ageSec: 7200 }, { name: B, branch: 'feat/b', ageSec: -60 }])
+    git(fx.repo, 'checkout', '-b', 'feat/a')
+    assert.equal(sessionSheets(fx)[0], sheetRel(A))
+    assert.equal(nudgedSheet(fx), sheetRel(A))
+  })
+
+  test('sổ kiểu cũ không ghi nhánh, hoặc nhánh chưa sổ nào nhận: cả hai rơi về sổ chưa xong sửa gần nhất', () => {
+    const fx = repoWithSheets([{ name: A, ageSec: 7200 }, { name: B, ageSec: 3600 }])
+    assert.equal(sessionSheets(fx)[0], sheetRel(B))
+    assert.equal(nudgedSheet(fx), sheetRel(B))
+    const fx2 = repoWithSheets([{ name: A, branch: 'feat/a', ageSec: 7200 }, { name: B, branch: 'feat/b', ageSec: 3600 }])
+    git(fx2.repo, 'checkout', '-b', 'fix/khac') // không sổ nào ghi nhánh này
+    assert.equal(sessionSheets(fx2)[0], sheetRel(B))
+    assert.equal(nudgedSheet(fx2), sheetRel(B))
+  })
+
+  test('nhánh không xác định (detached HEAD) ⇒ không đoán theo nhánh: cả hai rơi về sổ sửa gần nhất', () => {
+    const fx = repoWithSheets([{ name: A, branch: 'feat/a', ageSec: 7200 }, { name: B, branch: 'feat/b', ageSec: 3600 }])
+    git(fx.repo, 'checkout', '--detach', 'HEAD')
+    assert.equal(sessionSheets(fx)[0], sheetRel(B))
+    assert.equal(nudgedSheet(fx), sheetRel(B))
+  })
+
+  test('sổ nằm ngoài 50 thư mục mới nhất vẫn được chọn theo nhánh (không giới hạn 50); nhánh khác thì rơi về sổ mới nhất', () => {
+    const OLD = '2020-01-01-old'
+    const done = Array.from({ length: 55 }, (_, i) => ({ name: `d${String(i).padStart(2, '0')}`, text: 'Trạng thái: xong\n', ageSec: 7200 }))
+    const specs = [...done, { name: OLD, branch: 'feat/old', ageSec: 90000 }, { name: 'zz-new', ageSec: 3600 }]
+    const fx = repoWithSheets(specs)
+    git(fx.repo, 'checkout', '-b', 'feat/old')
+    assert.deepEqual(sessionSheets(fx), [sheetRel(OLD)])
+    assert.equal(nudgedSheet(fx), sheetRel(OLD))
+    git(fx.repo, 'checkout', '-b', 'khac', 'main')
+    assert.equal(sessionSheets(fx)[0], sheetRel('zz-new'))
+    assert.equal(nudgedSheet(fx), sheetRel('zz-new'))
+  })
+
+  test('sổ nhận nhánh đã "xong" thì không được chọn', () => {
+    const fx = repoWithSheets([{ name: A, text: '# T\nTrạng thái: xong\nNhánh / worktree: feat/a\n', ageSec: 7200 }])
+    git(fx.repo, 'checkout', '-b', 'feat/a')
+    assert.deepEqual(sessionSheets(fx), [])
+    assert.equal(nudgedSheet(fx), null)
   })
 })
