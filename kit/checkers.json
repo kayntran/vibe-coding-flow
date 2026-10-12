@@ -1,5 +1,5 @@
 {
-  "$comment": "Danh sách checker của hooks/flow-check.mjs (AC-11/43). stack: web | extension | go | wails | all. cmd = tên công cụ (mảng = ứng viên theo thứ tự; tìm trong node_modules/.bin rồi PATH) hoặc internal = checker viết sẵn trong flow-check.mjs. args: {kit} = thư mục kit. detect = khi nào áp dụng (xem hooks/lib/stack.mjs; không khớp ⇒ BỎ QUA). requires = gói npm phải có trong package.json. passOn = {exit:[mã đạt], match: regex phải thấy trong output}. install = lệnh cài chính thức (chuỗi hoặc {win32, posix}); thiếu công cụ ⇒ THIẾU, không cài ngầm. hint = lời dặn sửa khi không đạt. Test đối chiếu: hooks/flow-check.test.mjs (thiếu checker bắt buộc ⇒ đỏ).",
+  "$comment": "Danh sách checker của hooks/flow-check.mjs (AC-11/43). stack: web | extension | go | wails | all. cmd = tên công cụ (mảng = ứng viên theo thứ tự; tìm trong node_modules/.bin rồi PATH) hoặc internal = checker viết sẵn trong flow-check.mjs. args: {kit} = thư mục kit. detect = khi nào áp dụng (xem hooks/lib/stack.mjs; không khớp ⇒ BỎ QUA). requires = gói npm phải có trong package.json. passOn = {exit:[mã đạt], match: regex phải thấy trong output}. install = lệnh cài chính thức (chuỗi hoặc {win32, posix}); thiếu công cụ ⇒ THIẾU, không cài ngầm. hint = lời dặn sửa khi không đạt. plan = tên hàm trong PLANNERS của flow-check.mjs quyết định lần này chạy gì (đối số tính từ docs/arch.json, git, docs/arch-baseline.json). quietSkip = không áp dụng thì không hiện dòng BỎ QUA. Test đối chiếu: hooks/flow-check.test.mjs (thiếu checker bắt buộc ⇒ đỏ).",
   "version": 1,
   "checkers": [
     {
@@ -166,6 +166,7 @@
       "title": "Kiểm lỗi Go (golangci-lint)",
       "cmd": "golangci-lint",
       "args": ["run", "./..."],
+      "plan": "golangci-baseline",
       "required": true,
       "timeoutMs": 300000,
       "install": { "win32": "scoop install main/golangci-lint", "posix": "brew install golangci-lint" },
@@ -229,6 +230,81 @@
       "install": "npm i -g @ast-grep/cli",
       "docs": "https://ast-grep.github.io/guide/quick-start.html#installation",
       "hint": "Sửa chỗ luật SAST báo (mỗi luật có lời dặn sửa ngay dưới dòng báo); đừng tắt luật."
+    },
+    {
+      "id": "arch-sync",
+      "stack": "all",
+      "title": "Kiến trúc khớp thư mục và Codemap",
+      "internal": "arch-sync",
+      "detect": { "files": ["docs/arch.json"] },
+      "quietSkip": true,
+      "required": true,
+      "hint": "Cập nhật docs/arch.json, thư mục code và Codemap trong docs/ARCHITECTURE.md cho khớp nhau (mỗi module một mục và một dòng Codemap); đừng xoá module hay sửa luật để lách."
+    },
+    {
+      "id": "arch-size",
+      "stack": "all",
+      "title": "File code không quá dài",
+      "internal": "arch-size",
+      "detect": { "files": ["docs/arch.json"] },
+      "quietSkip": true,
+      "required": true,
+      "hint": "Tách file quá dài thành các file nhỏ, mỗi file một việc; đừng nâng limits.fileLines trong docs/arch.json, nới luật phải hỏi người dùng."
+    },
+    {
+      "id": "depcruise",
+      "stack": "all",
+      "title": "Ranh giới module web (dependency-cruiser)",
+      "cmd": "depcruise",
+      "plan": "depcruise",
+      "detect": { "files": ["docs/arch.json"] },
+      "quietSkip": true,
+      "required": true,
+      "timeoutMs": 300000,
+      "install": "npm i -D dependency-cruiser@^18 typescript@^6",
+      "docs": "https://github.com/sverweij/dependency-cruiser",
+      "hint": "Sửa import theo lời dặn dưới từng luật bị vi phạm (chuyển phần dùng chung xuống shared, hoặc đi qua hàm của module kia thay vì import thẳng); vi phạm cũ đã chốt trong docs/arch-baseline.json không tính. Đừng sửa tay .dependency-cruiser.cjs hay mayDependOn, nới luật phải hỏi người dùng."
+    },
+    {
+      "id": "go-arch-lint",
+      "stack": "all",
+      "title": "Ranh giới module Go (go-arch-lint)",
+      "cmd": "go-arch-lint",
+      "plan": "go-arch-lint",
+      "detect": { "files": ["docs/arch.json"] },
+      "quietSkip": true,
+      "required": true,
+      "timeoutMs": 300000,
+      "install": "go install github.com/fe3dback/go-arch-lint@latest",
+      "docs": "https://github.com/fe3dback/go-arch-lint",
+      "hint": "Sửa import cho đúng hướng phụ thuộc trong docs/arch.json (vd domain không được import store hay transport); vi phạm cũ đã chốt trong docs/arch-baseline.json không tính. Đừng sửa tay .go-arch-lint.yml, nới luật phải hỏi người dùng."
+    },
+    {
+      "id": "oasdiff",
+      "stack": "all",
+      "title": "API không bị đổi làm hỏng bên đang dùng (oasdiff)",
+      "cmd": "oasdiff",
+      "plan": "oasdiff",
+      "detect": { "files": ["openapi.yaml", "openapi.yml", "openapi.json", "docs/openapi.yaml", "docs/openapi.yml", "docs/openapi.json", "api/openapi.yaml", "api/openapi.yml", "api/openapi.json"] },
+      "quietSkip": true,
+      "required": true,
+      "timeoutMs": 120000,
+      "install": { "win32": "go install github.com/oasdiff/oasdiff@latest", "posix": "brew install oasdiff" },
+      "docs": "https://github.com/oasdiff/oasdiff",
+      "hint": "Thay đổi OpenAPI đang làm hỏng bên gọi API (xoá hoặc đổi tên đường dẫn/trường, đổi kiểu dữ liệu). Giữ tương thích: thêm trường mới thay vì sửa hay xoá trường cũ, hoặc ra phiên bản API mới; nếu bắt buộc phá thì hỏi người dùng trước."
+    },
+    {
+      "id": "squawk",
+      "stack": "all",
+      "title": "Migration SQL an toàn (squawk)",
+      "cmd": "squawk",
+      "plan": "squawk",
+      "quietSkip": true,
+      "required": true,
+      "timeoutMs": 120000,
+      "install": "npm i -g squawk-cli",
+      "docs": "https://squawkhq.com/docs/",
+      "hint": "Viết lại migration theo lời squawk báo (vd thêm cột NOT NULL phải có DEFAULT, tạo index bằng CONCURRENTLY, tách bước đổi kiểu cột); đừng tắt luật bằng comment squawk-ignore. Kit đã bỏ sẵn 3 luật hình thức (require-lock-timeout, require-statement-timeout, prefer-robust-stmts — không phải khoá bảng hay mất dữ liệu); mọi luật nguy hiểm vẫn bật."
     }
   ]
 }

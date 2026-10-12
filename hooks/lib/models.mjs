@@ -256,15 +256,23 @@ function saveCache(o, host, entries, at) {
   } catch (e) { return `không ghi được cache model: ${e.message}` }
 }
 
+// Codex ghi lại models_cache.json mỗi lần khởi động: đọc trúng lúc đang ghi ⇒ JSON hỏng ⇒ đợi rồi đọc lại (tối đa ~1 s).
+// Trả null ở đây khiến model = null và CLI rơi về model mặc định trong config.toml — có thể là bản tài khoản không còn dùng được.
 function readCodexFile(o) {
   const file = path.join((o.env ?? process.env).CODEX_HOME || path.join(homeOf(o), '.codex'), 'models_cache.json')
-  try {
-    const data = JSON.parse(fs.readFileSync(file, 'utf8'))
-    const entries = parseCodexCatalog(data)
-    if (!entries.length) return null
-    const at = Date.parse(data.fetched_at)
-    return { entries, at: Number.isFinite(at) ? at : fs.statSync(file).mtimeMs }
-  } catch { return null }
+  for (let i = 0; i < 6; i++) {
+    try {
+      const data = JSON.parse(fs.readFileSync(file, 'utf8'))
+      const entries = parseCodexCatalog(data)
+      if (!entries.length) return null
+      const at = Date.parse(data.fetched_at)
+      return { entries, at: Number.isFinite(at) ? at : fs.statSync(file).mtimeMs }
+    } catch (e) {
+      if (e?.code === 'ENOENT') return null
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200)
+    }
+  }
+  return null
 }
 
 // -> { entries, origin: 'live'|'file'|'cache'|'stale'|'none', warnings }. Thất bại ⇒ danh sách đã lưu mới nhất (stale) rồi mới tới 'none'.

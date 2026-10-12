@@ -6,7 +6,8 @@ import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import * as K from './lib/kho.mjs'
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'flow-gate.mjs')
 const ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')))
@@ -264,7 +265,8 @@ describe('bash merge', () => {
     assertDeny(hook(fx, 'bash', bashIn(fx.main, 'echo ok # bước 1\ngit merge feat')))
     assertPass(hook(fx, 'bash', bashIn(fx.main, '# git merge feat')))
     assertPass(hook(fx, 'bash', bashIn(fx.main, 'echo ok # git merge feat')))
-    assertPass(hook(fx, 'bash', bashIn(fx.main, 'git merge feat#1'))) // nhánh feat#1 không tồn tại
+    // nhánh feat#1 không tồn tại ⇒ không so được diff để kiểm luật ⇒ chặn (fail closed); lý do nêu đúng "feat#1" nên # giữa tên không bị đọc là comment
+    assert.match(assertDeny(hook(fx, 'bash', bashIn(fx.main, 'git merge feat#1'))), /feat#1/)
   })
 
   test('thân heredoc không phải lệnh; lệnh thật sau/cùng dòng heredoc vẫn bị bắt', () => {
@@ -2463,4 +2465,533 @@ describe('xoá cả thư mục qua lệnh shell ⇒ chặn, dặn tạo thư m�
       assert.equal(r.json?.hookSpecificOutput?.permissionDecision, undefined, r.stdout)
     })
   }
+})
+
+// ======================================================================================================
+// Đợt 2 (làn C): cổng gộp chống lách — file luật, dòng tắt luật, chép repo "chỉ học" ([j21n], AC-45, AC-37)
+// ======================================================================================================
+
+describe('đợt 2: cổng gộp chống lách (file luật, dòng tắt luật, chép repo chỉ-học)', () => {
+  const claudeSh = (fx, cwd, command, env) => hook(fx, 'bash', bashIn(cwd, command), env)
+  const codexSh = (fx, cwd, command, env) => hook(fx, 'bash', codexIn(cwd, 'Bash', { command }), env)
+  const devinSh = (fx, cwd, command, env) => hook(fx, 'bash', devinIn(cwd, 'exec', { command }), env)
+  const MERGE = 'git merge feat'
+
+  // Nhánh feat (worktree wt) có một commit chạm các file trong `feat` ({ đường dẫn: nội dung | null = xoá }); `main` = file đã có ở nhánh chính
+  // trước khi feat tách ra. Đóng đủ review + qa + test, nên chỉ còn cổng chống lách quyết định.
+  function ruleFx({ main = {}, feat = {} } = {}) {
+    const fx = fixture()
+    if (Object.keys(main).length > 0) {
+      for (const [rel, text] of Object.entries(main)) write(fx.main, rel, text)
+      git(fx.main, 'add', '-A')
+      git(fx.main, 'commit', '-m', 'file có sẵn')
+      git(fx.wt, 'merge', '--ff-only', 'main')
+    }
+    for (const [rel, text] of Object.entries(feat)) {
+      if (text === null) git(fx.wt, 'rm', '-q', '--', rel)
+      else write(fx.wt, rel, text)
+    }
+    git(fx.wt, 'add', '-A')
+    git(fx.wt, 'commit', '-m', 'feat')
+    stampBoth(fx)
+    return fx
+  }
+
+  const RULE_SETS = [
+    ['docs/arch.json', 'docs/arch-baseline.json', '.dependency-cruiser.cjs', '.dependency-cruiser-known-violations.json', '.go-arch-lint.yml', '.golangci.yml', '.golangci.yaml', 'kit/rules/no-foo.yml'],
+    ['eslint.config.js', 'eslint.config.mjs', '.eslintrc.json', '.eslintrc', 'biome.json', 'biome.jsonc', 'sgconfig.yml', 'web/eslint.config.ts'],
+  ]
+  for (const files of RULE_SETS) {
+    test(`thêm file luật (${files[0]}, ${files[4]}…) ⇒ Claude: ask liệt kê từng file; Codex/Devin: deny, user tự chạy lệnh gộp`, () => {
+      const fx = ruleFx({ feat: Object.fromEntries(files.map((f) => [f, '{}\n'])) })
+      const ask = assertAsk(claudeSh(fx, fx.main, MERGE))
+      assertPlainOpening(ask)
+      for (const f of files) assert.ok(ask.includes(f), `${f} phải có trong lời hỏi: ${ask}`)
+      for (const sh of [codexSh, devinSh]) {
+        const reason = assertDeny(sh(fx, fx.main, MERGE))
+        assertPlainOpening(reason)
+        assert.match(reason.split(/\.\s|\n/)[0], /chính bạn chạy lệnh/)
+        for (const f of files) assert.ok(reason.includes(f), `${f} phải có trong lý do: ${reason}`)
+        assert.match(reason, /\ngit merge feat\s*$/, 'in đúng lệnh gộp ở dòng cuối để user chép')
+      }
+    })
+  }
+
+  // Review đợt 2 (Codex :790, Grok :679): cấu hình điều khiển cổng/checker cũng là file luật; @ts-nocheck / squawk-ignore / # type: ignore cũng tắt luật.
+  test('thêm .claude/flow.json (miễn test, uiPattern, trustedDepSources, prodRefs) và kit/checkers.json ⇒ Claude: ask liệt kê từng file; Codex/Devin: deny', () => {
+    const files = ['.claude/flow.json', 'kit/checkers.json']
+    const fx = ruleFx({ feat: Object.fromEntries(files.map((f) => [f, '{}\n'])) })
+    const ask = assertAsk(claudeSh(fx, fx.main, MERGE))
+    assertPlainOpening(ask)
+    for (const f of files) assert.ok(ask.includes(f), `${f} phải có trong lời hỏi: ${ask}`)
+    for (const sh of [codexSh, devinSh]) {
+      const reason = assertDeny(sh(fx, fx.main, MERGE))
+      assertPlainOpening(reason)
+      assert.match(reason.split(/\.\s|\n/)[0], /chính bạn chạy lệnh/)
+      for (const f of files) assert.ok(reason.includes(f), `${f} phải có trong lý do: ${reason}`)
+      assert.match(reason, /\ngit merge feat\s*$/)
+    }
+  })
+
+  for (const [file, before, after] of [
+    ['.claude/flow.json', '{"tests":"auto"}\n', '{"tests":"none"}\n'],
+    ['kit/checkers.json', '{"checkers":[{"id":"sast-ast-grep"}]}\n', '{"checkers":[]}\n'],
+  ]) {
+    test(`sửa ${file} có sẵn / xoá nó ⇒ ask`, () => {
+      const main = { [file]: before, 'x.js': 'a\n' }
+      const edit = ruleFx({ main, feat: { [file]: after } })
+      assert.match(assertAsk(claudeSh(edit, edit.main, MERGE)), new RegExp(`sửa.*${file.replace(/[.]/g, '\\.')}`))
+      const del = ruleFx({ main, feat: { [file]: null } })
+      assert.match(assertAsk(claudeSh(del, del.main, MERGE)), new RegExp(`xoá.*${file.replace(/[.]/g, '\\.')}`))
+      assertDeny(codexSh(edit, edit.main, MERGE))
+    })
+  }
+
+  test('thêm @ts-nocheck / squawk-ignore / # type: ignore ⇒ Claude: ask kèm file:dòng; Codex/Devin: deny', () => {
+    const fx = ruleFx({ feat: {
+      'src/n.ts': '// @ts-nocheck\nconst n: number = "x"\n',
+      'src/n.js': 'let ok = 1\n/* @ts-nocheck */\n',
+      'db/001.sql': 'select 1;\n-- squawk-ignore ban-drop-column\nalter table t drop column c;\n',
+      'db/002.sql': '-- squawk-ignore-file\nalter table t add column d int;\n',
+      'app/p.py': 'x: int = "s"  # type: ignore\n',
+      'app/q.py': 'import foo  # type: ignore[import]\n',
+    } })
+    const ask = assertAsk(claudeSh(fx, fx.main, MERGE))
+    assertPlainOpening(ask)
+    for (const at of ['src/n.ts:1', 'src/n.js:2', 'db/001.sql:2', 'db/002.sql:1', 'app/p.py:1', 'app/q.py:1']) assert.ok(ask.includes(at), `${at} phải có trong lời hỏi: ${ask}`)
+    for (const what of ['@ts-nocheck', 'squawk-ignore', '# type: ignore']) assert.ok(ask.includes(`(${what})`), `${what} phải được gọi tên: ${ask}`)
+    for (const sh of [codexSh, devinSh]) {
+      const reason = assertDeny(sh(fx, fx.main, MERGE))
+      assertPlainOpening(reason)
+      assert.ok(reason.includes('src/n.ts:1') && reason.includes('app/q.py:1'))
+    }
+  })
+
+  test('nhắc @ts-nocheck / squawk-ignore / # type: ignore trong tài liệu .md, hoặc XOÁ chúng ⇒ qua, không hỏi', () => {
+    const fx = ruleFx({ feat: { 'docs/note.md': 'Đừng dùng @ts-nocheck, -- squawk-ignore hay # type: ignore.\n' } })
+    assertPass(claudeSh(fx, fx.main, MERGE))
+    const del = ruleFx({ main: { 'src/old.ts': '// @ts-nocheck\nlet a = 1\n', 'app/o.py': 'a = 1  # type: ignore\n' }, feat: { 'src/old.ts': 'let a = 1\n', 'app/o.py': 'a = 1\n' } })
+    assertPass(claudeSh(del, del.main, MERGE))
+    assertPass(codexSh(del, del.main, MERGE))
+  })
+
+  test('sửa / xoá / đổi tên đi file luật có sẵn ⇒ ask', () => {
+    const main = { 'eslint.config.js': 'export default []\n', 'biome.json': '{}\n', 'x.js': 'a\n' }
+    const edit = ruleFx({ main, feat: { 'eslint.config.js': 'export default [{ rules: {} }]\n' } })
+    assert.match(assertAsk(claudeSh(edit, edit.main, MERGE)), /sửa.*eslint\.config\.js/)
+    const del = ruleFx({ main, feat: { 'biome.json': null } })
+    assert.match(assertAsk(claudeSh(del, del.main, MERGE)), /xoá.*biome\.json/)
+    const mv = ruleFx({ main, feat: { 'eslint.config.js': null, 'eslint.old.js': 'export default []\n' } })
+    assert.match(assertAsk(claudeSh(mv, mv.main, MERGE)), /xoá.*eslint\.config\.js/)
+  })
+
+  test('nới trần cỡ file trong docs/arch.json ⇒ lời hỏi nêu trần cũ và mới; siết thì nói siết (vẫn hỏi)', () => {
+    const arch = (n) => JSON.stringify({ version: 1, parts: [{ name: 'web', stack: 'web', root: 'src', limits: { fileLines: n, fnLines: 60 } }] }, null, 2) + '\n'
+    const loose = ruleFx({ main: { 'docs/arch.json': arch(400) }, feat: { 'docs/arch.json': arch(600) } })
+    assert.match(assertAsk(claudeSh(loose, loose.main, MERGE)), /nới trần cỡ file.*400.*600/)
+    const tight = ruleFx({ main: { 'docs/arch.json': arch(400) }, feat: { 'docs/arch.json': arch(300) } })
+    assert.match(assertAsk(claudeSh(tight, tight.main, MERGE)), /siết trần cỡ file.*400.*300/)
+  })
+
+  test('thêm dòng tắt luật ⇒ ask kèm file:dòng; mọi loại tắt luật đều bị bắt; Codex/Devin deny', () => {
+    const fx = ruleFx({ feat: {
+      'src/a.ts': '// eslint-disable-next-line no-console\nconsole.log(1)\n',
+      'src/b.ts': 'const b = 1\n// @ts-ignore\nconst c: number = "x"\n',
+      'src/c.ts': '/* @ts-expect-error */\nconst c: number = "x"\n',
+      'src/d.go': 'package d\n\n//nolint:errcheck\nfunc d() {}\n',
+      'src/e.ts': '// biome-ignore lint/suspicious/noExplicitAny: cần any\nlet e: any\n',
+      'src/f.py': 'import os  # noqa: F401\n',
+      'src/g.ts': 'let g = 1\n// ast-grep-ignore\n',
+    } })
+    const ask = assertAsk(claudeSh(fx, fx.main, MERGE))
+    assertPlainOpening(ask)
+    for (const at of ['src/a.ts:1', 'src/b.ts:2', 'src/c.ts:1', 'src/d.go:3', 'src/e.ts:1', 'src/f.py:1', 'src/g.ts:2']) assert.ok(ask.includes(at), `${at} phải có trong lời hỏi: ${ask}`)
+    assert.match(ask, /tắt luật/)
+    for (const sh of [codexSh, devinSh]) {
+      const reason = assertDeny(sh(fx, fx.main, MERGE))
+      assertPlainOpening(reason)
+      assert.ok(reason.includes('src/a.ts:1') && reason.includes('src/g.ts:2'))
+    }
+  })
+
+  test('tắt luật có kèm lý do, nhắc trong tài liệu .md, hoặc XOÁ dòng tắt luật ⇒ qua như cũ, không hỏi', () => {
+    const fx = ruleFx({ feat: {
+      'src/ok.ts': '// @ts-expect-error: mock thiếu trường id\nconst x: number = "x"\n',
+      'docs/note.md': 'Đừng dùng // eslint-disable hay @ts-ignore.\n',
+    } })
+    assertPass(claudeSh(fx, fx.main, MERGE))
+    assertPass(codexSh(fx, fx.main, MERGE))
+    const del = ruleFx({ main: { 'src/old.ts': '// eslint-disable-next-line\nlet a = 1\n// @ts-ignore\nlet b = 2\n' }, feat: { 'src/old.ts': 'let a = 1\nlet b = 2\n' } })
+    assertPass(claudeSh(del, del.main, MERGE))
+    assertPass(codexSh(del, del.main, MERGE))
+  })
+
+  test('không lách được: dòng thêm bắt đầu bằng "++ " không làm đọc nhầm tên file; .gitattributes -diff không giấu được diff', () => {
+    const fx = ruleFx({ feat: { 'src/h.ts': 'let h = 1\n++ eslint-disable\n' } })
+    assert.match(assertAsk(claudeSh(fx, fx.main, MERGE)), /src\/h\.ts:2/)
+    const attr = ruleFx({ main: { '.gitattributes': '*.ts -diff\n' }, feat: { 'src/i.ts': '// eslint-disable\nlet i = 1\n' } })
+    assert.match(assertAsk(claudeSh(attr, attr.main, MERGE)), /src\/i\.ts:1/)
+  })
+
+  // QA B3: mọi đường đưa commit của nhánh khác vào nhánh chính (không chỉ `git merge`) đều qua đúng cổng gộp: dấu review/qa/test, nới luật, chép chỉ-học.
+  const ENTRY_COMMANDS = [
+    'git pull . TARGET', 'git pull --no-rebase . TARGET', 'git pull --rebase . TARGET', 'git pull --ff-only --no-edit . refs/heads/TARGET',
+    'git cherry-pick TARGET', 'git cherry-pick -x TARGET', 'git cherry-pick main..TARGET',
+    'git rebase TARGET', 'git rebase --onto TARGET main',
+    'git fetch . TARGET:main', 'git fetch --update-head-ok . +TARGET:refs/heads/main',
+    'git push . TARGET:main', 'git push . TARGET:refs/heads/main',
+    'git branch -f main TARGET', 'git branch --force main TARGET', 'git branch -C TARGET main',
+    'git update-ref refs/heads/main TARGET', 'git update-ref -m dua-vao refs/heads/main TARGET',
+    'git checkout -B main TARGET', 'git switch -C main TARGET', 'git switch --force-create main TARGET',
+  ]
+  // mỗi lệnh một đại diện (Codex/Devin chạy nhánh xử lý giống nhau nên không cần đủ biến thể: mỗi hook chạy ~0,8 s)
+  const ENTRY_FORMS = [
+    'git pull --rebase . TARGET', 'git cherry-pick -x TARGET', 'git rebase --onto TARGET main', 'git fetch --update-head-ok . +TARGET:refs/heads/main', 'git push . TARGET:refs/heads/main',
+    'git branch -C TARGET main', 'git update-ref -m dua-vao refs/heads/main TARGET', 'git checkout -B main TARGET', 'git switch --force-create main TARGET',
+  ]
+  const entry = (cmd, target) => cmd.replaceAll('TARGET', target)
+
+  test('B3: nhánh chưa đóng dấu đưa vào main bằng pull/cherry-pick/rebase/fetch/push/branch -f/update-ref/checkout -B/switch -C ⇒ deny thiếu dấu (mọi host)', () => {
+    const fx = ruleFx({ feat: { 'src/ok.go': 'package ok\n' } })
+    addBranch(fx, 'bare') // không có dấu nào
+    for (const c of ENTRY_COMMANDS) {
+      const cmd = entry(c, 'bare')
+      for (const sh of ENTRY_FORMS.includes(c) ? [claudeSh, codexSh, devinSh] : [claudeSh]) {
+        const reason = assertDeny(sh(fx, fx.main, cmd))
+        assertPlainOpening(reason, cmd)
+        assert.match(reason, /bare: thiếu review, qa, test/, cmd)
+      }
+    }
+  })
+
+  test('B3: đủ dấu nhưng nhánh nới luật ⇒ Claude: ask kèm file; Codex/Devin: deny và in đúng lệnh user tự chạy ở dòng cuối', () => {
+    const fx = ruleFx({ feat: { 'eslint.config.js': 'export default []\n' } })
+    for (const c of ENTRY_COMMANDS) {
+      const cmd = entry(c, 'feat')
+      const ask = assertAsk(claudeSh(fx, fx.main, cmd))
+      assertPlainOpening(ask, cmd)
+      assert.match(ask, /eslint\.config\.js/, cmd)
+      for (const sh of ENTRY_FORMS.includes(c) ? [codexSh] : []) {
+        const reason = assertDeny(sh(fx, fx.main, cmd))
+        assertPlainOpening(reason, cmd)
+        assert.ok(reason.trimEnd().endsWith(`\n${cmd}`), `${cmd}: dòng cuối phải là lệnh gốc, nhận: ${reason.slice(-80)}`)
+      }
+    }
+    const reason = assertDeny(devinSh(fx, fx.main, 'git cherry-pick feat'))
+    assert.ok(reason.trimEnd().endsWith('\ngit cherry-pick feat'), reason.slice(-80))
+  })
+
+  test('B3: đủ dấu và sạch ⇒ qua như cũ, kể cả khi lệnh chạy từ worktree của nhánh khác (đích vẫn là main)', () => {
+    const fx = ruleFx({ feat: { 'src/ok.go': 'package ok\n' } })
+    for (const c of ENTRY_COMMANDS) assertPass(claudeSh(fx, fx.main, entry(c, 'feat')))
+    // cổng theo ĐÍCH: nhánh đang đứng là feat nhưng ref bị đổi là main ⇒ vẫn kiểm
+    addBranch(fx, 'bare')
+    for (const c of ['git fetch . TARGET:main', 'git push . TARGET:main', 'git branch -f main TARGET', 'git update-ref refs/heads/main TARGET', 'git checkout -B main TARGET', 'git switch -C main TARGET']) {
+      assertPass(claudeSh(fx, fx.wt, entry(c, 'feat')))
+      assert.match(assertDeny(claudeSh(fx, fx.wt, entry(c, 'bare'))), /bare: thiếu/, c)
+    }
+  })
+
+  test('B3: pull/cherry-pick/rebase chỉ gác khi đang đứng ở main; ở nhánh khác ⇒ qua', () => {
+    const fx = ruleFx({ feat: { 'src/ok.go': 'package ok\n' } })
+    addBranch(fx, 'bare')
+    for (const c of ['git pull . bare', 'git cherry-pick bare', 'git rebase bare', 'git rebase --onto bare main']) assertPass(claudeSh(fx, fx.wt, c))
+  })
+
+  test('B3: lệnh bình thường không vướng — pull/fetch từ remote nhánh chính, đổi ref nhánh khác, tiếp tục/huỷ cherry-pick/rebase', () => {
+    const fx = ruleFx({ feat: { 'src/ok.go': 'package ok\n' } })
+    addBranch(fx, 'bare')
+    for (const c of [
+      'git pull', 'git pull origin', 'git pull origin main', 'git pull --rebase origin master', 'git pull --ff-only origin refs/heads/main', 'git pull . main',
+      'git fetch', 'git fetch origin', 'git fetch --all --prune', 'git fetch origin main:main', 'git fetch . bare', 'git fetch . bare:other',
+      'git push . bare:other', 'git push origin bare', 'git update-ref refs/heads/other bare', 'git update-ref -d refs/heads/other',
+      'git branch other bare', 'git branch -f other bare', 'git branch -C bare other', 'git checkout -b fresh bare', 'git checkout -B other bare', 'git switch -c fresh bare', 'git switch -C other bare',
+      'git cherry-pick --continue', 'git cherry-pick --abort', 'git cherry-pick --quit', 'git rebase --abort', 'git rebase --continue', 'git rebase', 'git rebase bare other',
+    ]) assertPass(claudeSh(fx, fx.main, c))
+  })
+
+  test('B3: pull/fetch từ remote một nhánh KHÁC main (nội dung chưa biết khi chưa fetch) ⇒ deny, dặn fetch rồi merge', () => {
+    const fx = ruleFx({ feat: { 'src/ok.go': 'package ok\n' } })
+    for (const c of ['git pull origin feat', 'git pull origin refs/heads/feat', 'git pull --rebase origin feat', 'git pull https://example.com/x.git feat', 'git fetch origin feat:main', 'git fetch origin +feat:refs/heads/main']) {
+      for (const sh of [claudeSh, codexSh, devinSh]) {
+        const reason = assertDeny(sh(fx, fx.main, c))
+        assertPlainOpening(reason, c)
+        assert.match(reason, /git fetch/, c)
+        assert.match(reason, /git merge/, c)
+      }
+    }
+  })
+
+  test('B3: không xác định được nhánh/commit sắp đưa vào ⇒ deny (fail closed)', () => {
+    const fx = ruleFx({ feat: { 'src/ok.go': 'package ok\n' } })
+    for (const [c, shown] of [
+      ['git pull . ghost', 'ghost'], ['git cherry-pick ghost', 'ghost'], ['git rebase ghost', 'ghost'], ['git fetch . ghost:main', 'ghost'],
+      ['git branch -f main ghost', 'ghost'], ['git update-ref refs/heads/main ghost', 'ghost'], ['git checkout -B main ghost', 'ghost'], ['git cherry-pick $SHA', 'SHA'],
+    ]) {
+      for (const sh of [claudeSh, codexSh]) {
+        const reason = assertDeny(sh(fx, fx.main, c))
+        assertPlainOpening(reason, c)
+        assert.match(reason, new RegExp(shown), c)
+      }
+    }
+    assert.match(assertDeny(claudeSh(fx, fx.main, 'git update-ref --stdin')), /stdin/)
+    assertPass(claudeSh(fx, fx.main, 'git update-ref -d refs/heads/other'))
+  })
+
+  test('B3: đổi ref bằng HEAD hoặc không chỉ nguồn — `update-ref HEAD x` đứng ở main, `checkout -B main` / `branch -f main` mặc định lấy HEAD', () => {
+    const fx = ruleFx({ feat: { 'eslint.config.js': 'export default []\n' } })
+    addBranch(fx, 'bare')
+    assert.match(assertDeny(claudeSh(fx, fx.main, 'git update-ref HEAD bare')), /bare: thiếu/)
+    assertPass(claudeSh(fx, fx.wt, 'git update-ref HEAD bare')) // HEAD ở đây là feat, không phải main
+    assert.match(assertAsk(claudeSh(fx, fx.wt, 'git checkout -B main')), /eslint\.config\.js/) // main sẽ thành feat (HEAD của worktree)
+    assert.match(assertAsk(claudeSh(fx, fx.wt, 'git branch -f main')), /eslint\.config\.js/)
+    assertPass(claudeSh(fx, fx.main, 'git checkout -B main')) // HEAD = main: không đổi gì
+  })
+
+  // Review lượt 2 (Grok, review-delta.json): cùng một cổng cho mọi cách viết — từ worktree khác, cụm cờ ngắn, refspec nguồn rỗng, remote là chính repo này.
+  test('B3b: pull/fetch có refspec ĐÍCH main chạy từ worktree khác (không đứng ở main) vẫn qua cổng gộp', () => {
+    const fx = ruleFx({ feat: { 'eslint.config.js': 'export default []\n' } })
+    addBranch(fx, 'bare')
+    for (const c of ['git pull . bare:main', 'git pull --no-rebase . +bare:refs/heads/main', 'git pull --rebase . bare:refs/heads/main']) {
+      assert.match(assertDeny(claudeSh(fx, fx.wt, c)), /bare: thiếu review, qa, test/, c)
+    }
+    const c = 'git pull . feat:main'
+    assert.match(assertAsk(claudeSh(fx, fx.wt, c)), /eslint\.config\.js/)
+    assert.ok(assertDeny(codexSh(fx, fx.wt, c)).trimEnd().endsWith(`\n${c}`))
+    assert.match(assertDeny(claudeSh(fx, fx.wt, 'git pull origin feat:main')), /git fetch/) // remote khác: nội dung chưa biết
+    assertPass(claudeSh(fx, fx.wt, 'git pull origin main:main')) // đồng bộ main với main của remote
+    assertPass(claudeSh(fx, fx.wt, 'git pull . bare:other')) // đích không phải main, đang không ở main: main không đổi
+    const clean = ruleFx({ feat: { 'src/ok.go': 'package ok\n' } })
+    assertPass(claudeSh(clean, clean.wt, 'git pull . feat:main'))
+  })
+
+  test('B3b: rebase <upstream> main chạy từ nơi khác main cũng qua cổng (rebase nhánh khác thì không)', () => {
+    const fx = ruleFx({ feat: { 'src/ok.go': 'package ok\n' } })
+    addBranch(fx, 'bare')
+    for (const [cwd, c] of [[fx.wt, 'git rebase bare main'], [fx.main, 'git rebase bare main'], [fx.wt, 'git rebase --onto bare feat main'], [fx.wt, 'git rebase -f bare main']]) {
+      assert.match(assertDeny(claudeSh(fx, cwd, c)), /bare: thiếu/, c)
+    }
+    assertPass(claudeSh(fx, fx.wt, 'git rebase feat main')) // đích đủ dấu, sạch
+    assertPass(claudeSh(fx, fx.wt, 'git rebase bare feat')) // dời nhánh feat, không phải main
+  })
+
+  test('B3b: cụm cờ ngắn -fB / -fBmain / -qC / -qCmain vẫn nhận ra là đặt lại nhánh main', () => {
+    const fx = ruleFx({ feat: { 'src/ok.go': 'package ok\n' } })
+    addBranch(fx, 'bare')
+    for (const c of ['git checkout -fB main bare', 'git checkout -fBmain bare', 'git checkout -Bmain bare', 'git checkout -qfB main bare', 'git switch -qC main bare', 'git switch -qCmain bare', 'git switch -fC main bare']) {
+      assert.match(assertDeny(claudeSh(fx, fx.main, c)), /bare: thiếu/, c)
+    }
+    for (const c of ['git checkout -fb fresh bare', 'git checkout -fB other bare', 'git checkout -f feat', 'git switch -qc fresh bare', 'git switch -qCother bare', 'git switch -d bare']) {
+      assertPass(claudeSh(fx, fx.main, c))
+    }
+  })
+
+  test('B3b: pull/fetch refspec nguồn rỗng đích main (`:main`, `:refs/heads/main`) ⇒ deny, như push :main', () => {
+    const fx = ruleFx({ feat: { 'src/ok.go': 'package ok\n' } })
+    for (const c of ['git pull . :main', 'git pull . :refs/heads/main', 'git pull . +:main', 'git fetch . :main', 'git fetch origin :refs/heads/main']) {
+      for (const sh of [claudeSh, codexSh]) {
+        const reason = assertDeny(sh(fx, fx.main, c))
+        assertPlainOpening(reason, c)
+        assert.match(reason, /nhánh chính/, c)
+      }
+    }
+    assert.match(assertDeny(claudeSh(fx, fx.wt, 'git pull . :main')), /nhánh chính/) // chạy từ worktree khác cũng vậy
+    for (const c of ['git pull . :other', 'git fetch . :other', 'git fetch origin']) assertPass(claudeSh(fx, fx.main, c))
+  })
+
+  test('B3b: push/pull/fetch vào CHÍNH repo này viết bằng ./, .\\, đường dẫn, .git, worktree khác, file://, tên remote trỏ vào repo ⇒ luôn qua cổng gộp', () => {
+    const fx = ruleFx({ feat: { 'eslint.config.js': 'export default []\n' } })
+    addBranch(fx, 'bare')
+    git(fx.main, 'remote', 'add', 'self', fx.main)
+    const fwd = (p) => p.replace(/\\/g, '/')
+    for (const r of ['./', '.\\', fwd(fx.main), fwd(path.join(fx.main, '.git')), fwd(fx.wt), pathToFileURL(fx.main).href, 'self']) {
+      const c = `git push ${r} TARGET:main`
+      assert.match(assertDeny(claudeSh(fx, fx.main, entry(c, 'bare'))), /bare: thiếu review/, c)
+      assert.match(assertAsk(claudeSh(fx, fx.main, entry(c, 'feat'))), /eslint\.config\.js/, c)
+    }
+    assert.match(assertDeny(claudeSh(fx, fx.main, 'git pull ./ bare')), /bare: thiếu/)
+    assert.match(assertDeny(claudeSh(fx, fx.wt, `git fetch ${fwd(fx.main)} bare:main`)), /bare: thiếu/)
+    // repo KHÁC (đường dẫn không phải repo này) vẫn là push thường lên nhánh chính: hộp hỏi push
+    assert.match(assertAsk(claudeSh(fx, fx.main, `git push ${fwd(fx.root)} bare:main`)), /Sắp push/)
+    const clean = ruleFx({ feat: { 'src/ok.go': 'package ok\n' } })
+    assertPass(claudeSh(clean, clean.main, 'git push ./ feat:main'))
+  })
+
+  test('Q4: đứng ở main (HEAD = main), thay đổi chỉ có trên nhánh sắp gộp vẫn bị thấy, kể cả khi main đã đi tiếp', () => {
+    const fx = ruleFx({ feat: { 'eslint.config.js': 'export default []\n' } })
+    commit(fx.main, 'main-only.txt', 'x\n', 'main đi tiếp')
+    assert.equal(git(fx.main, 'diff', '--name-only', 'main...HEAD').trim(), '', 'diff base...HEAD khi HEAD = main là rỗng — cách kiểm cũ không thấy gì')
+    assert.match(assertAsk(claudeSh(fx, fx.main, MERGE)), /eslint\.config\.js/)
+  })
+
+  test('không có gì đáng hỏi ⇒ như cũ (qua); thiếu dấu vẫn deny trước, kể cả khi nhánh cũng nới luật', () => {
+    const clean = ruleFx({ feat: { 'src/ok.go': 'package ok\n' } })
+    assertPass(claudeSh(clean, clean.main, MERGE))
+    assertPass(codexSh(clean, clean.main, MERGE))
+    const fx = fixture()
+    commit(fx.wt, 'eslint.config.js', 'export default []\n', 'feat') // chưa đóng dấu
+    const reason = assertDeny(claudeSh(fx, fx.main, MERGE))
+    assert.match(reason, /thiếu review, qa/)
+    assert.doesNotMatch(reason, /eslint/)
+  })
+
+  test('nhiều nhánh: ask nêu đúng nhánh có nới luật; thiếu dấu ở nhánh khác ⇒ deny thắng ask', () => {
+    const fx = ruleFx({ feat: { 'eslint.config.js': 'export default []\n' } })
+    const wtB = addBranch(fx, 'featB')
+    stampBoth(fx, { cwd: wtB })
+    const ask = assertAsk(claudeSh(fx, fx.main, 'git merge featB feat'))
+    assert.match(ask, /\(nhánh feat\)/)
+    assert.doesNotMatch(ask, /\(nhánh featB\)/)
+    addBranch(fx, 'featC') // chưa có dấu
+    assert.match(assertDeny(claudeSh(fx, fx.main, 'git merge feat featC')), /featC: thiếu/)
+  })
+
+  test('nhánh đích không tìm được / không chung lịch sử với nhánh chính ⇒ deny (fail closed), mở đầu đời thường, mọi host', () => {
+    const fx = ruleFx({ feat: { 'a.go': 'package a\n' } })
+    git(fx.main, 'branch', 'orphan', git(fx.main, 'commit-tree', '4b825dc642cb6eb9a060e54bf8d69288fbee4904', '-m', 'orphan').trim())
+    for (const c of ['git merge nope', 'git merge feat nope', 'git merge $BRANCH', 'git merge -m "gộp" ghost', 'git merge orphan', 'git merge --cleanup strip ghost']) {
+      for (const sh of [claudeSh, codexSh, devinSh]) {
+        const reason = assertDeny(sh(fx, fx.main, c))
+        assertPlainOpening(reason, c)
+        assert.match(reason, /nope|BRANCH|ghost|orphan/, c)
+      }
+    }
+    assertPass(claudeSh(fx, fx.main, MERGE)) // nhánh đủ dấu và sạch vẫn qua
+  })
+
+  test('tên nhánh có ký tự shell ⇒ Codex deny nhưng KHÔNG in dòng lệnh gộp và không in lại tên lạ', () => {
+    const fx = ruleFx({ feat: { 'eslint.config.js': 'export default []\n' } })
+    git(fx.main, 'branch', 'a;b', 'feat')
+    const reason = assertDeny(codexSh(fx, fx.main, "git merge 'a;b'"))
+    assertPlainOpening(reason)
+    assert.doesNotMatch(reason, /(^|\n)\s*git merge\b/)
+    assert.ok(!reason.includes('a;b'), reason)
+    assert.match(reason, /terminal/i)
+    assert.match(assertAsk(claudeSh(fx, fx.main, "git merge 'a;b'")), /eslint\.config\.js/)
+    // B3: cùng quy tắc cho các đường khác — lệnh có token lạ thì không in lại để user chép
+    const other = assertDeny(codexSh(fx, fx.main, "git cherry-pick 'a;b'"))
+    assertPlainOpening(other)
+    assert.doesNotMatch(other, /(^|\n)\s*git cherry-pick\b/)
+    assert.ok(!other.includes('a;b'), other)
+  })
+
+  // ---------- chép repo "chỉ học" (chiHocMatches của lib/kho.mjs) ----------
+
+  const ENGINE = `export function planRoute(graph, start, goal) {
+  const open = new Map()
+  const closed = new Set()
+  open.set(start, { cost: 0, parent: null })
+  while (open.size > 0) {
+    let best = null
+    for (const [node, info] of open) {
+      if (best === null || info.cost < open.get(best).cost) best = node
+    }
+    const current = open.get(best)
+    open.delete(best)
+    closed.add(best)
+    if (best === goal) return buildPath(closed, best)
+    for (const next of graph.neighbours(best)) {
+      if (closed.has(next)) continue
+      const cost = current.cost + graph.weight(best, next)
+      const known = open.get(next)
+      if (!known || cost < known.cost) open.set(next, { cost, parent: best })
+    }
+  }
+  return null
+}
+`
+  // ENGINE nhưng đổi hết tên, đổi khoảng trắng/thụt lề, thêm comment.
+  const DISGUISED = `// helper tự viết
+export function findPath(g, a, b) {
+\tconst frontier = new Map();   /* tập mở */
+\tconst seen = new Set();
+\tfrontier.set(a, {cost: 0, parent: null});
+\twhile (frontier.size > 0) {
+\t\tlet pick = null;
+\t\tfor (const [n, meta] of frontier) {
+\t\t\tif (pick === null || meta.cost < frontier.get(pick).cost) pick = n;
+\t\t}
+\t\tconst cur = frontier.get(pick);
+\t\tfrontier.delete(pick);
+\t\tseen.add(pick);
+\t\tif (pick === b) return makePath(seen, pick);
+\t\tfor (const nx of g.neighbours(pick)) {
+\t\t\tif (seen.has(nx)) continue;
+\t\t\tconst c2 = cur.cost + g.weight(pick, nx);
+\t\t\tconst old = frontier.get(nx);
+\t\t\tif (!old || c2 < old.cost) frontier.set(nx, {cost: c2, parent: pick});
+\t\t}
+\t}
+\treturn null;
+}
+`
+  const UNRELATED = `export function formatReceipt(order, locale) {
+  const lines = []
+  let total = 0
+  for (const item of order.items) {
+    const price = item.qty * item.unit
+    total += price
+    lines.push(item.name.padEnd(20) + String(price).padStart(8))
+  }
+  lines.push('TOTAL'.padEnd(20) + new Intl.NumberFormat(locale).format(total))
+  return lines.join('\\n')
+}
+`
+
+  // Dự án có thẻ repo chỉ-học (licence GPL ⇒ ép chi-hoc) trỏ vào repo cục bộ; lay=true ⇒ đã tải bản sao vào cache. feat thêm `adds`, đủ dấu.
+  function hocFx(adds, { lay = true, licence = 'GPL-3.0' } = {}) {
+    const fx = fixture()
+    const cache = path.join(fx.root, 'cache-chi-hoc')
+    const remote = path.join(fx.root, 'remote')
+    fs.mkdirSync(cache)
+    fs.mkdirSync(remote)
+    git(remote, 'init', '-b', 'main')
+    commit(remote, 'src/engine.js', ENGINE, 'engine')
+    const opts = { cacheDir: cache, choPhepLocal: true }
+    const card = K.moi(fx.main, { loai: 'repo', repo: remote, licence, commit: git(remote, 'rev-parse', 'HEAD').trim(), ket_luan: 'Tìm đường A*' }, opts)
+    if (lay) K.lay(fx.main, card.slug, opts)
+    git(fx.main, 'add', '-A')
+    git(fx.main, 'commit', '-m', 'thẻ repo')
+    for (const [rel, text] of Object.entries(adds)) write(fx.wt, rel, text)
+    git(fx.wt, 'add', '-A')
+    git(fx.wt, 'commit', '-m', 'feat')
+    stampBoth(fx)
+    return { fx, slug: card.slug, env: { FLOW_CHI_HOC_DIR: cache } }
+  }
+
+  test('đoạn chép (đã đổi tên biến, khoảng trắng) từ repo chỉ-học ⇒ deny kèm file:dòng + thẻ, mọi host', () => {
+    const { fx, slug, env } = hocFx({ 'src/route.js': DISGUISED })
+    for (const sh of [claudeSh, codexSh, devinSh]) {
+      const reason = assertDeny(sh(fx, fx.main, MERGE, env))
+      assertPlainOpening(reason)
+      assert.match(reason, /src\/route\.js:\d+/)
+      assert.ok(reason.includes(slug), reason)
+    }
+  })
+
+  test('FAIL CLOSED: có thẻ chỉ-học mà chưa có bản sao ⇒ deny kèm lệnh khôi phục kho.mjs lay', () => {
+    const { fx, slug, env } = hocFx({ 'src/ok.js': UNRELATED }, { lay: false })
+    for (const sh of [claudeSh, codexSh]) {
+      const reason = assertDeny(sh(fx, fx.main, MERGE, env))
+      assertPlainOpening(reason)
+      assert.match(reason, /kho\.mjs lay /)
+      assert.ok(reason.includes(slug), reason)
+      assert.match(reason, /chưa có bản sao/)
+    }
+  })
+
+  test('có bản sao nhưng nhánh chỉ thêm code khác hẳn ⇒ qua; thẻ lay-dung (MIT) hoặc không có thẻ ⇒ bỏ qua như cũ', () => {
+    const ok = hocFx({ 'src/ok.js': UNRELATED })
+    assertPass(claudeSh(ok.fx, ok.fx.main, MERGE, ok.env))
+    const mit = hocFx({ 'src/route.js': DISGUISED }, { licence: 'MIT', lay: false })
+    assertPass(claudeSh(mit.fx, mit.fx.main, MERGE, mit.env))
+    const none = ruleFx({ feat: { 'src/route.js': DISGUISED } })
+    assertPass(claudeSh(none, none.main, MERGE))
+  })
+
+  test('chép chỉ-học (deny) thắng việc nới luật (ask): cùng lúc có cả hai ⇒ deny', () => {
+    const { fx, env } = hocFx({ 'src/route.js': DISGUISED, 'eslint.config.js': 'export default []\n' })
+    const reason = assertDeny(claudeSh(fx, fx.main, MERGE, env))
+    assert.match(reason, /src\/route\.js:\d+/)
+  })
 })

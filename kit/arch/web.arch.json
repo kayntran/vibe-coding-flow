@@ -1,0 +1,41 @@
+{
+  "$comment": "Mẫu kiến trúc cho dự án web (modular monolith, hexagonal nhẹ). Mỗi tính năng là một module riêng: thêm vào modules một dòng { name: \"features/<tên>\", path: \"src/features/<tên>\", mayDependOn: [\"shared\"] } rồi thêm một dòng vào Codemap của docs/ARCHITECTURE.md. Tính năng KHÔNG import tính năng khác. Mỗi forbidden bắt buộc có reason + fix. Sửa xong chạy: node ~/.claude/hooks/arch.mjs gen",
+  "version": 1,
+  "parts": [
+    {
+      "name": "web",
+      "stack": "web",
+      "root": "src",
+      "modules": [
+        {
+          "name": "shared",
+          "path": "src/shared",
+          "desc": "Code dùng chung (kiểu dữ liệu, tiện ích, thành phần giao diện chung). KHÔNG biết tính năng nào.",
+          "mayDependOn": []
+        }
+      ],
+      "shared": ["src/shared"],
+      "limits": { "fileLines": 400, "fnLines": 60, "complexity": 15 },
+      "forbidden": [
+        {
+          "from": "src/features/*/{model,api}/**",
+          "to": "src/features/*/ui/**",
+          "reason": "Phần dữ liệu và gọi máy chủ không được biết giao diện.",
+          "fix": "Chuyển phần dùng chung sang model hoặc shared; ui mới là bên gọi model/api, không ngược lại."
+        },
+        {
+          "from": "src/features/*/{ui,model}/**",
+          "to": "node_modules/{@supabase,@stripe,stripe}/**",
+          "reason": "Gọi dịch vụ ngoài (Supabase, Stripe…) chỉ được làm trong api của tính năng hoặc shared/lib.",
+          "fix": "Thêm một hàm trong features/<tên>/api (hoặc shared/lib) bọc lời gọi, rồi gọi hàm đó."
+        },
+        {
+          "from": "src/shared/**",
+          "to": "src/features/**",
+          "reason": "shared không được biết tính năng nào, nếu không các tính năng sẽ dính nhau qua shared.",
+          "fix": "Chuyển đoạn code đó vào đúng tính năng, hoặc để tính năng truyền dữ liệu vào shared qua tham số."
+        }
+      ]
+    }
+  ]
+}

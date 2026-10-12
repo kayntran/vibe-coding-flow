@@ -57,9 +57,11 @@ Sửa xong ⇒ test lại (dấu test; QA lại nếu đụng UI) ⇒ diff đổ
   chỗ đã sửa: <danh sách>". Vẫn còn lỗi nặng thật sau lượt này ⇒ dừng, báo user.
 - Chỉ sửa MINOR ⇒ không gọi lại model: captain đọc diff sửa (`git diff <commit đã review>..HEAD`), thêm vào JSON cũ
   trường `"delta_reviewed_by": "captain", "delta": "<commit đã review>..HEAD"` rồi đóng dấu.
-Gộp các file JSON thành một (`findings` = tất cả, kèm trạng thái sửa/bác) rồi:
-`node ~/.claude/hooks/flow-gate.mjs stamp review <S>/review-final.json`
+Gộp các file JSON thành một (`findings` = tất cả, kèm trạng thái sửa/bác, mã AC liên quan, `commit` đã review) rồi:
+`node ~/.claude/hooks/flow-gate.mjs stamp review <S>/review-final.json` + chép bản cuối vào
+`docs/specs/<tính năng>/notes/review-final.json` (lưu cùng tính năng, ghi commit đã kiểm).
 
 ## 4. Báo user
 Tóm tắt: đã đổi gì · test (số thật) · QA (criteria pass/fail) · review (model + tầng đã chạy + lý do; finding đã sửa / đã bác)
-· hỏi gộp ⇒ skill `flow-merge`.
+· hỏi gộp ⇒ skill `flow-merge`. Không tự nâng nhãn: tách rõ **đã biết** (đã chạy/đo) · **quan sát được** · **suy luận** ·
+**cần bạn quyết** · **chưa biết**.

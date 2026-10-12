@@ -15,6 +15,8 @@ integration, build) theo CLAUDE.md dự án. Đỏ ⇒ pha 7. Xanh ⇒ pha 6.
 2. Agent `qa-tester` — brief: charter, lệnh chạy app, **port riêng** từ `node ~/.claude/hooks/wt-env.mjs alloc <đường worktree>` (`PORT_BASE`),
    dữ liệu/tài khoản test (từ seed của dự án), đường ghi `<scratchpad>/qa/qa-report.md`.
    Nhiều luồng độc lập ⇒ 2–3 `qa-tester` song song, mỗi con một nhóm criteria + port riêng.
+   Mỗi qa-tester/làn dùng dữ liệu riêng: `FLOW_DB_NAME`, `FLOW_TEST_DATA` từ `wt-env.mjs alloc` (DB thử riêng: nhánh DB
+   không dữ liệu thật / `supabase start` / container), khoá test; không bao giờ trỏ vào database thật hay `.env` của thư mục chính.
 3. Đọc báo cáo, mở 1–2 ảnh của bug nặng nhất để kiểm claim.
 4. Có bug ⇒ pha 7, rồi chạy lại qa-tester cho đúng criteria hỏng + một vòng hồi quy luồng chính.
 5. Diff đụng giao diện ⇒ DỪNG: chạy app, mở cho user xem (hoặc 2–3 ảnh chụp màn chính), hỏi "giao diện đã ổn chưa?"
@@ -24,6 +26,7 @@ integration, build) theo CLAUDE.md dự án. Đỏ ⇒ pha 7. Xanh ⇒ pha 6.
 6. Hết bug ⇒ đóng dấu trong worktree:
    `node ~/.claude/hooks/flow-gate.mjs stamp qa <scratchpad>/qa/qa-report.md`
    Diff không đụng UI/app ⇒ được ghi file chỉ một dòng `N/A: <lý do>` rồi stamp (hook từ chối N/A khi diff có file UI).
+   Báo cáo ghi commit đã kiểm + mã AC từng mục; bản cuối chép vào `docs/specs/<tính năng>/notes/qa-report.md`.
 
 ## Pha 7 — Debug & sửa
 1. Agent `debugger` — brief: triệu chứng, nguồn (lệnh test đỏ / `gh run` id / đường log / bug trong qa-report),

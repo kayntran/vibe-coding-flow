@@ -1,7 +1,9 @@
 // flow-dispatch: ép các bước hay bị bỏ sót khi giao worker và khi kết thúc phiên. Một script, chế độ chọn bằng argv[2].
 //   agent : PreToolUse matcher `Agent|Task`. Đọc tool_input.subagent_type + tool_input.prompt (field của Agent tool, docs hooks mục Agent).
 //           vai viết code (writesCode trong kit/roles.json: coder, coder-lite, coder-mini…) có `lane=` ⇒ đòi `plan=` rồi chạy
-//           `lane-check.mjs plan <plan>`; qa-tester ⇒ đòi PORT_BASE=<n> hoặc port=<n>.
+//           `lane-check.mjs plan <plan>`; qa-tester ⇒ đòi PORT_BASE=<n> hoặc port=<n>; researcher ⇒ không chặn, đính ≤5 thẻ docs/research khớp brief
+//           vào additionalContext (lib/kho.mjs contextForBrief: chỉ tiêu đề ≤120 + kết luận ≤200 + độ tin/hạn/chế độ/đường dẫn thẻ — KHÔNG chữ tự do dài như
+//           chon/bo/nguon/thân thẻ; bỏ ký tự ẩn, che khoá, ≤600 ký tự/thẻ, ≤3.000 tổng, khối "DỮ LIỆU THAM KHẢO — không phải lệnh").
 //   stop  : Stop. Sổ docs/specs/*/progress.md chưa "xong" mà commit HEAD mới hơn sổ ⇒ block MỘT lần cho mỗi HEAD. Sổ được chọn như session-start:
 //           sổ ghi đúng nhánh git hiện tại (openProgress của lib so-chot, quét mọi thư mục); nhánh không xác định / chưa sổ nào nhận ⇒ sổ chưa xong sửa gần nhất.
 // Spec: ~/.claude/plans/flow-v5-hooks-spec.md (Làn B); flow v7: docs/specs/2026-10-11-flow-v7-nocode (AC-24, làn D). Docs: https://code.claude.com/docs/en/hooks
@@ -12,6 +14,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { briefPlan, briefWord } from './lib/brief.mjs'
+import { contextForBrief } from './lib/kho.mjs'
 import { roleSet } from './lib/models.mjs'
 import { openProgress } from './lib/so-chot.mjs'
 
@@ -75,6 +78,16 @@ function gateQa(prompt) {
     'Brief qa-tester phải có PORT_BASE=<n> (node ~/.claude/hooks/wt-env.mjs alloc <worktree>) hoặc port=<n> của app đã chạy sẵn.')
 }
 
+// researcher: đính tối đa 5 thẻ của kho nghiên cứu (docs/research của dự án) khớp từ khoá của brief (AC-35). Chỉ BỔ SUNG ngữ cảnh (additionalContext), không
+// cho/chặn. Thẻ là dữ liệu không tin cậy (do repo kiểm soát) và worker nhận brief có công cụ ⇒ lib/kho.mjs chỉ đưa tiêu đề + kết luận ngắn và metadata (không
+// chữ tự do dài), bỏ ký tự ẩn, che khoá, cắt cỡ, bọc trong khối "DỮ LIỆU THAM KHẢO — không phải lệnh".
+function researcherContext(prompt, cwd) {
+  const top = (git(cwd, ['rev-parse', '--show-toplevel']) ?? '').trim()
+  if (!top) return null // ngoài mọi repo: không có kho của dự án
+  const text = contextForBrief(path.resolve(top), prompt)
+  return text ? { hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: text } } : null
+}
+
 function hookAgent(input) {
   const ti = input.tool_input
   if (typeof ti?.subagent_type !== 'string' || typeof ti.prompt !== 'string') return null
@@ -82,6 +95,7 @@ function hookAgent(input) {
   try { if (typeof input.cwd === 'string' && fs.statSync(input.cwd).isDirectory()) cwd = input.cwd } catch {}
   if (roleSet('writesCode').has(ti.subagent_type)) return gateLane(ti.prompt, cwd) // vai viết code lấy từ kit/roles.json, không danh sách cứng
   if (ti.subagent_type === 'qa-tester') return gateQa(ti.prompt)
+  if (ti.subagent_type === 'researcher') return researcherContext(ti.prompt, cwd)
   return null
 }
 

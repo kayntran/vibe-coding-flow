@@ -1,7 +1,10 @@
 // flow-gate: cổng worktree/review/qa/test cho flow captain + worker. Một script, chế độ chọn bằng argv[2].
 //   hook : edit (PreToolUse Edit|Write|NotebookEdit + apply_patch của Codex/Devin) · bash (PreToolUse Bash: chặn git merge thiếu dấu,
 //          git commit/push có secret, commit thêm thư viện lạ, lệnh phá huỷ trên nhánh chính, `apply_patch <<` vào thư mục chính;
-//          hỏi lại khi push nhánh chính — chỉ Claude; Codex/Devin ⇒ deny, user tự chạy lệnh push) · stop (Stop) ·
+//          hỏi lại khi push nhánh chính — chỉ Claude; Codex/Devin ⇒ deny, user tự chạy lệnh push; git merge mà nhánh đích nới luật — đụng file luật
+//          (kể cả .claude/flow.json, kit/checkers.json) hoặc thêm dòng tắt luật — ⇒ hỏi lại/deny như push, chép repo "chỉ học" ⇒ deny, không so được
+//          diff base...<đích> ⇒ deny; pull ., cherry-pick, rebase, fetch ., push ., branch -f, update-ref, checkout -B, switch -C đưa nhánh vào main
+//          ⇒ qua đúng cổng như git merge) · stop (Stop) ·
 //          subagent-stop (SubagentStop: receipt + audit phạm vi làn)
 //   CLI  : stamp review <file.json> · stamp qa <file.md> · stamp test -- <lệnh…> · status      (chạy trong worktree)
 // Spec: ~/.claude/plans/flow-v2-hooks-spec.md, flow-v3-hooks-spec.md (Làn A: quét secret), flow-v5-hooks-spec.md (Làn A: dấu test, lệnh phá huỷ, ask, audit);
@@ -269,7 +272,7 @@ function tokenize(cmd) {
   return segs
 }
 
-const MERGE_VALUE_FLAGS = new Set(['-m', '-F', '-s', '-X', '--message', '--file', '--strategy', '--strategy-option', '--into-name'])
+const MERGE_VALUE_FLAGS = new Set(['-m', '-F', '-s', '-X', '--message', '--file', '--strategy', '--strategy-option', '--into-name', '--cleanup'])
 
 // tokens = một đoạn lệnh. Trả { dir, sub, rest } nếu là `[VAR=giá-trị…] git [-C p] <sub> ...`, ngược lại null.
 function parseGitSub(tokens, cwd) {
@@ -662,15 +665,200 @@ function gateDestructive(g) {
   }
 }
 
-function gateMerge(m) {
-  const info = repoInfo(m.dir)
-  if (!info) return null
-  const base = mainBranch(info)
-  if (info.branch !== base) return null
-  const lacking = m.targets
+// ---------- chống lách ở cổng gộp: file luật, dòng tắt luật, chép repo "chỉ học" ([j21n], AC-45, AC-37) ----------
+
+// File luật = isRuleFile của lib/arch.mjs (một nguồn) + kit/rules/** + kit/checkers.json (bảng checker của kit) + .claude/flow.json
+// (miễn test, uiPattern, trustedDepSources, prodRefs: sửa nó là đổi cổng gộp/thư viện/khoá thật). Nhãn đời thường cho từng loại.
+const KIT_RULES = /^kit\/rules\//
+const GATE_CONFIG = /^(kit\/checkers\.json|\.claude\/flow\.json)$/
+const RULE_LABELS = [
+  [/^\.claude\/flow\.json$/, 'cấu hình cổng của dự án'], [/^kit\/checkers\.json$/, 'danh sách checker của kit'],
+  [/^docs\/arch\.json$/, 'luật kiến trúc'], [/^docs\/arch-baseline\.json$/, 'danh sách vi phạm cũ được bỏ qua'],
+  [/(^|\/)\.dependency-cruiser/, 'luật import giữa các module'], [/(^|\/)\.go-arch-lint/, 'luật kiến trúc của Go'],
+  [/(^|\/)\.golangci\./, 'luật kiểm code Go'], [/(^|\/)(eslint\.config\.|\.eslintrc|eslint-suppressions)/, 'luật ESLint'],
+  [/(^|\/)biome\.jsonc?$/, 'luật Biome'], [/(^|\/)sgconfig\.ya?ml$/, 'luật ast-grep'], [KIT_RULES, 'luật của kit'],
+]
+const CHANGE_VERBS = { A: 'thêm', M: 'sửa', D: 'xoá', T: 'đổi kiểu' }
+const LIMIT_WORDS = { fileLines: 'cỡ file', fnLines: 'cỡ hàm', complexity: 'độ phức tạp' }
+// Dòng tắt luật. Tài liệu (.md/.mdx/.txt) chỉ nhắc tới chúng, không tắt được gì nên không tính.
+const SUPPRESS = [
+  [/\beslint-disable/, 'eslint-disable'], [/@ts-ignore\b/, '@ts-ignore'], [/\/\/\s*nolint\b/, '//nolint'],
+  [/\bbiome-ignore\b/, 'biome-ignore'], [/#\s*noqa\b/i, '# noqa'], [/\bast-grep-ignore\b/, 'ast-grep-ignore'],
+  [/@ts-nocheck\b/, '@ts-nocheck'], [/\bsquawk-ignore\b/, 'squawk-ignore'], [/#\s*type:\s*ignore\b/, '# type: ignore'],
+]
+
+// Dòng (đã bỏ dấu +) có tắt luật không? Trả tên loại hoặc null. @ts-expect-error phải kèm lý do (≥ 3 chữ/số sau nó, bỏ `*/`).
+function suppressionOf(text) {
+  const hit = SUPPRESS.find(([re]) => re.test(text))
+  if (hit) return hit[1]
+  const m = /@ts-expect-error\b/.exec(text)
+  if (!m) return null
+  const reason = text.slice(m.index + m[0].length).replace(/\*\/.*$/, '')
+  return (reason.match(/[\p{L}\p{N}]/gu) ?? []).length >= 3 ? null : '@ts-expect-error không kèm lý do'
+}
+
+// Các dòng THÊM tắt luật trong patch `-U0`: [{ file, line, what }]. Đếm dòng theo số dòng ghi ở đầu mỗi hunk nên dòng thêm bắt đầu
+// bằng "++ " (thành "+++ …" trong patch) không bị đọc nhầm là tên file mới.
+function addedSuppressions(patch) {
+  const out = []
+  let file = null
+  let oldLeft = 0
+  let newLeft = 0
+  let line = 0
+  for (const l of patch.split('\n')) {
+    if (oldLeft > 0 || newLeft > 0) {
+      if (l[0] === '+') {
+        newLeft--
+        const what = file && !DOC_FILE.test(file) ? suppressionOf(l.slice(1)) : null
+        if (what) out.push({ file, line, what })
+        line++
+        continue
+      }
+      if (l[0] === '-') { oldLeft--; continue }
+      if (l[0] === '\\') continue
+      oldLeft = newLeft = 0 // hunk cụt: dòng này là đầu mục mới
+    }
+    if (l.startsWith('diff --git ')) file = null
+    else if (l.startsWith('+++ ')) {
+      const f = l.slice(4).replace(/\t$/, '').replace(/^"|"$/g, '')
+      file = f === '/dev/null' ? null : f.replace(/^b\//, '')
+    } else {
+      const h = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(l)
+      if (h) { oldLeft = h[1] === undefined ? 1 : Number(h[1]); line = Number(h[2]); newLeft = h[3] === undefined ? 1 : Number(h[3]) }
+    }
+  }
+  return out
+}
+
+// Diff base...sha của MỘT merge target (HEAD đang là nhánh chính nên không dùng base...HEAD): { changes: [{ st, file }], patch } hoặc null khi git lỗi
+// (không chung lịch sử, quá lớn, quá giờ…). --no-renames: đổi tên lộ cả đường dẫn cũ lẫn mới; --text: .gitattributes `-diff` không giấu được dòng thêm.
+function mergeDiff(info, base, sha) {
+  const range = `${base}...${sha}`
+  const common = ['-c', 'core.quotepath=off', 'diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--text']
+  const names = git(info.dir, [...common, '--name-status', '-z', range, '--'])
+  const patch = names === null ? null : git(info.dir, [...common, '-U0', '--src-prefix=a/', '--dst-prefix=b/', range, '--'])
+  if (names === null || patch === null) return null
+  const t = names.split('\0')
+  const changes = []
+  for (let i = 0; i + 1 < t.length; i += 2) changes.push({ st: t[i].charAt(0), file: t[i + 1] })
+  return { changes, patch }
+}
+
+// Trần (limits.*) từng phần của docs/arch.json ở hai bản (before/after = commit): câu "nới/siết trần …" cho mỗi trần đổi giá trị. Lỗi đọc ⇒ rỗng.
+function limitChanges(dir, before, after) {
+  const pick = (rev) => {
+    const out = new Map()
+    try {
+      const parts = JSON.parse(git(dir, ['show', `${rev}:docs/arch.json`]) ?? '').parts
+      for (const [i, p] of (Array.isArray(parts) ? parts : []).entries()) for (const [k, v] of Object.entries(p?.limits ?? {})) out.set(`${p?.name ?? i}\0${k}`, v)
+    } catch {}
+    return out
+  }
+  const was = pick(before)
+  const changes = []
+  for (const [key, now] of pick(after)) {
+    if (!was.has(key) || was.get(key) === now) continue
+    const [part, k] = key.split('\0')
+    changes.push(`${now > was.get(key) ? 'nới' : 'siết'} trần ${LIMIT_WORDS[k] ?? k} (${k} của phần ${part}: từ ${was.get(key)} thành ${now})`)
+  }
+  return changes
+}
+
+const showName = (s) => String(s).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, 80)
+
+// Có thể có thẻ chi-hoc không (docs/research ở thư mục làm việc hoặc trong cây của sha)? git lỗi ⇒ coi như có.
+function hasResearchDir(info, sha) {
+  return fs.existsSync(path.join(info.toplevel, 'docs', 'research')) || (git(info.dir, ['ls-tree', '-d', '--name-only', sha, 'docs/research']) ?? 'lỗi').trim() !== ''
+}
+
+const GUARD_OPENINGS = {
+  unknown: 'Chưa kiểm được nhánh sắp gộp có nới luật của dự án hay chép code từ repo chỉ-được-học hay không nên AI dừng lại, chưa gộp; AI sẽ kiểm lại rồi gộp sau.',
+  copy: 'Phần mới của nhánh này có đoạn giống code của repo mà dự án chỉ được đọc để học, không được chép, nên AI dừng lại; AI sẽ viết lại đoạn đó bằng cách của mình rồi gộp lại.',
+  missing: 'Chưa kiểm được nhánh này có chép code từ repo chỉ-được-học hay không nên AI dừng lại; AI sẽ khôi phục bản sao repo đó (hoặc báo bạn nếu không tự làm được) rồi gộp lại.',
+}
+
+// Mọi merge target: so base...<target> (không phải base...HEAD). Trả deny khi không kiểm được (fail closed) hoặc chép repo chỉ-học;
+// trả ask (Claude) / deny + lệnh để user tự chạy (Codex/Devin) khi nhánh nới luật hoặc thêm dòng tắt luật; null khi sạch. Deny thắng ask.
+// userCmd = dòng lệnh để user tự chạy (Codex/Devin) khi lệnh gốc không phải `git merge`: chuỗi = in ra, null = không in được (có ký tự lạ), thiếu = `git merge <đích>`.
+async function mergeGuards(info, base, targets, host, userCmd) {
+  const stops = [] // { kind: 'unknown'|'copy'|'missing', msg }
+  const loosen = [] // việc nới luật, mỗi mục một câu đời thường
+  const multi = targets.length > 1
+  const safeName = (t) => (SAFE_REF.test(t) ? t : '(tên có ký tự lạ)')
+  const { isRuleFile } = await import('./lib/arch.mjs')
+  for (const target of targets) {
+    const at = multi ? ` (nhánh ${safeName(target)})` : ''
+    const sha = revOf(info, target)
+    if (!sha) { stops.push({ kind: 'unknown', msg: `không tìm thấy "${showName(target)}" trong repo (nhánh/commit không tồn tại hoặc tên chưa được viết rõ trong lệnh)` }); continue }
+    const diff = mergeDiff(info, base, sha)
+    if (!diff) { stops.push({ kind: 'unknown', msg: `không tính được thay đổi ${base}...${showName(target)} (git diff lỗi, quá lớn, hoặc nhánh không chung lịch sử với ${base})` }); continue }
+    const mergeBase = (git(info.dir, ['merge-base', base, sha]) ?? '').trim()
+    for (const { st, file } of diff.changes) {
+      if (!isRuleFile(file) && !KIT_RULES.test(file) && !GATE_CONFIG.test(file)) continue
+      const label = RULE_LABELS.find(([re]) => re.test(file))?.[1] ?? 'luật'
+      const limits = st === 'M' && file === 'docs/arch.json' && mergeBase ? limitChanges(info.dir, mergeBase, sha) : []
+      loosen.push(`${CHANGE_VERBS[st] ?? 'đổi'} file ${label} (${file})${limits.length ? `: ${limits.join('; ')}` : ''}${at}`)
+    }
+    for (const s of addedSuppressions(diff.patch)) loosen.push(`thêm dòng tắt luật ở ${s.file}:${s.line} (${s.what})${at}`)
+    // chép repo chỉ-học: chỉ khi dự án có thẻ chi-hoc (chiHocMatches trả ngay khi không có thẻ); lỗi bất ngờ ⇒ chặn nếu dự án có docs/research
+    let hoc
+    try {
+      hoc = (await import('./lib/kho.mjs')).chiHocMatches(info, base, sha)
+    } catch (e) {
+      log(`chiHocMatches ${target}: ${e?.stack ?? e}`)
+      if (hasResearchDir(info, sha)) stops.push({ kind: 'missing', msg: `phần kiểm chép code từ repo chỉ-học bị lỗi (${showName(e?.message ?? e)}) nên chưa biết nhánh ${showName(target)} có chép hay không` })
+      continue
+    }
+    if (hoc.matches.length > 0) {
+      const shown = hoc.matches.slice(0, 8).map((x) => `${x.file}:${x.line}-${x.end_line} (${x.so_dong} dòng, giống ${Math.round(x.ty_le * 100)}% repo chỉ-học "${x.the}")`).join('; ')
+      stops.push({ kind: 'copy', msg: `nhánh ${showName(target)} có ${hoc.matches.length} đoạn giống repo chỉ-học: ${shown}${hoc.matches.length > 8 ? `; …và ${hoc.matches.length - 8} đoạn nữa` : ''} ` +
+        '— tự viết lại theo cách của dự án (đổi tên biến hay khoảng trắng thì vẫn bị bắt)' })
+    }
+    for (const x of hoc.missing) {
+      stops.push({ kind: 'missing', msg: `repo chỉ-học "${x.the}": ${x.ly_do}${x.lenh ? ` — khôi phục bằng: ${x.lenh}` : ''}` })
+    }
+    if (hoc.loi) stops.push({ kind: 'missing', msg: `không so được với repo chỉ-học: ${hoc.loi}` })
+  }
+  if (stops.length > 0) {
+    const kind = ['unknown', 'copy', 'missing'].find((k) => stops.some((s) => s.kind === k))
+    return permission('deny', `${GUARD_OPENINGS[kind]}\n${stops.map((s) => `- ${s.msg}`).join('\n')}`)
+  }
+  if (loosen.length === 0) return null
+  const list = loosen.slice(0, 10).map((s) => `- ${s}`).join('\n') + (loosen.length > 10 ? `\n- …và ${loosen.length - 10} mục nữa` : '')
+  const names = targets.map(safeName).join(' ')
+  if (host === 'claude') {
+    return permission('ask',
+      'Nhánh này sửa luật kiểm tra của dự án hoặc tắt kiểm tra ở vài chỗ, cần bạn đồng ý trước khi AI gộp vào nhánh chính. ' +
+      `Gộp ${names} vào ${base} sẽ kèm:\n${list}\nĐồng ý nếu đúng ý bạn; từ chối thì AI sẽ gỡ phần nới luật rồi gộp lại.`)
+  }
+  // Codex/Devin không có ask ở PreToolUse ⇒ deny, user tự chạy lệnh gộp. Tên nhánh in vào dòng lệnh chỉ khi toàn ký tự an toàn (như gateAskMainPush).
+  const printable = userCmd === undefined ? targets.every((t) => SAFE_REF.test(t)) : userCmd !== null
+  const head = 'Nhánh này sửa luật kiểm tra của dự án hoặc tắt kiểm tra ở vài chỗ nên cần chính bạn chạy lệnh gộp; AI dừng lại và ' +
+    `${printable ? 'đưa bạn lệnh để chép' : 'không đưa lệnh vì tên nhánh có ký tự lạ'}. Gộp ${names} vào ${base} sẽ kèm:\n${list}\n`
+  const where = info.toplevel.replace(/[\x00-\x1f\x7f]/g, ' ')
+  if (!printable) {
+    return permission('deny', `${head}AI không tự chạy lệnh này: bạn mở terminal trong thư mục ${where}, tự kiểm tên nhánh (git branch -a) rồi tự gõ lệnh gộp đúng nhánh muốn gộp; xong thì báo AI làm tiếp.`)
+  }
+  return permission('deny', `${head}AI không tự chạy lệnh này: user chạy trong thư mục ${where}, xong thì báo AI làm tiếp:\n${userCmd ?? `git merge ${targets.join(' ')}`}`)
+}
+
+// Cổng gộp cho một danh sách đích (nhánh/commit) sắp vào nhánh chính `base`: đủ dấu review/qa/test, rồi chống lách (mergeGuards).
+// Dùng chung cho `git merge` và mọi đường khác đưa commit vào nhánh chính (entrants).
+async function gateTargets(info, base, targets, host, userCmd) {
+  const lacking = targets
     .map((target) => ({ target, st: tryGateState(info, base, target) }))
     .filter(({ st }) => st && st.missing.length > 0)
-  if (lacking.length === 0) return null
+  if (lacking.length === 0) {
+    // Mọi dấu đủ: xét tiếp chống lách. Lỗi bất ngờ ⇒ chặn (cổng này là chỗ AI có thể lách luật, không cho qua âm thầm).
+    try {
+      return await mergeGuards(info, base, targets, host, userCmd)
+    } catch (e) {
+      log(`mergeGuards: ${e?.stack ?? e}`)
+      return permission('deny',
+        'Chưa kiểm được nhánh sắp gộp có nới luật của dự án hay không nên AI dừng lại, chưa gộp; AI sẽ báo bạn lỗi này thay vì tự gộp. ' +
+        `Bước kiểm luật bị lỗi: ${showName(e?.message ?? e)}. Xem flow-gate.log; user tự chạy lệnh gộp nếu đã tự kiểm.`)
+    }
+  }
   const detail = lacking
     .map(({ target, st }) => `${target}: thiếu ${st.missing.join(', ')}` + (st.naOnUi ? ' (diff có file UI nhưng qa ghi N/A)' : '') + ` (patch-id=${st.pid})`)
     .join('; ')
@@ -685,6 +873,185 @@ function gateMerge(m) {
     (kinds.has('review') || kinds.has('qa') ? ' (skill flow-review / flow-qa tạo file review.json / qa.md)' : '') +
     (kinds.has('test') ? '. Repo không có test: ghi .claude/flow.json {"tests":"none"}' : '') + '.')
 }
+
+async function gateMerge(m, host) {
+  const info = repoInfo(m.dir)
+  if (!info) return null
+  const base = mainBranch(info)
+  if (info.branch !== base) return null
+  return gateTargets(info, base, m.targets, host)
+}
+
+// ---------- mọi đường khác đưa commit của nhánh khác vào nhánh chính (QA B3) ----------
+// `git merge` không phải cách duy nhất: pull ., cherry-pick, rebase, fetch ., push ., branch -f, update-ref, checkout -B, switch -C cũng làm nhánh chính
+// nhận commit chưa qua review. Mỗi lệnh ⇒ quy ra danh sách đích rồi qua đúng gateTargets như `git merge`. Không quy ra được đích ⇒ deny (fail closed).
+
+const PULL_VALUE_FLAGS = new Set(['-s', '-X', '-F', '-j', '-o', '--strategy', '--strategy-option', '--file', '--cleanup', '--into-name', '--depth', '--deepen', '--shallow-since',
+  '--shallow-exclude', '--jobs', '--upload-pack', '--server-option', '--negotiation-tip', '--refmap', '--filter'])
+const FETCH_VALUE_FLAGS = new Set(['-j', '-o', '--depth', '--deepen', '--shallow-since', '--shallow-exclude', '--jobs', '--upload-pack', '--server-option', '--negotiation-tip', '--refmap', '--filter'])
+const CHERRY_VALUE_FLAGS = new Set(['-m', '-X', '--mainline', '--strategy-option', '--strategy', '--cleanup', '--empty'])
+const REBASE_VALUE_FLAGS = new Set(['-s', '-X', '-x', '-C', '--strategy', '--strategy-option', '--exec', '--onto', '--empty'])
+const SWITCH_VALUE_FLAGS = new Set(['-b', '-B', '-c', '-C', '--create', '--force-create', '--orphan', '--conflict'])
+const ENTRY_SUBS = new Set(['pull', 'cherry-pick', 'rebase', 'fetch', 'branch', 'checkout', 'switch', 'update-ref'])
+const SAFE_TOKEN = /^[A-Za-z0-9._/:+@^~=,-]+$/ // token an toàn để in vào dòng lệnh user chép (không dấu cách, nháy, ; | & $ ` ( ) < >)
+
+// rest → { pos: đối số không phải cờ (gồm cả sau `--`), vals: Map cờ → giá trị }. Cờ dài trong valueFlags lấy token kế hoặc dạng --cờ=giá-trị;
+// cụm cờ ngắn (-fB, -fBmain, -qC main) duyệt từng ký tự như git: gặp cờ nhận giá trị thì phần dính liền sau nó (hoặc token kế nếu hết cụm) là giá trị.
+function splitArgs(rest, valueFlags) {
+  const pos = []
+  const vals = new Map()
+  let only = false
+  for (let j = 0; j < rest.length; j++) {
+    const t = rest[j]
+    if (!only && t === '--') only = true
+    else if (only || !t.startsWith('-') || t === '-') pos.push(t)
+    else if (t.startsWith('--')) {
+      const eq = t.indexOf('=')
+      if (eq >= 0) vals.set(t.slice(0, eq), t.slice(eq + 1))
+      else if (valueFlags.has(t)) vals.set(t, rest[++j] ?? '')
+    } else {
+      for (let k = 1; k < t.length; k++) {
+        if (!valueFlags.has(`-${t[k]}`)) continue
+        vals.set(`-${t[k]}`, t.slice(k + 1) || (rest[++j] ?? ''))
+        break
+      }
+    }
+  }
+  return { pos, vals }
+}
+
+const headName = (r) => r.replace(/^\+/, '').replace(/^refs\/heads\//, '')
+const refSrc = (spec) => { const s = spec.replace(/^\+/, ''); const c = s.indexOf(':'); return c < 0 ? s : s.slice(0, c) }
+const refDst = (spec) => { const s = spec.replace(/^\+/, ''); const c = s.indexOf(':'); return c < 0 ? '' : s.slice(c + 1) }
+const rangeTip = (t) => { const m = /^(.*?)\.\.\.?(.*)$/.exec(t); return m ? (m[2] || 'HEAD') : t } // `a..b`, `a...b` ⇒ b
+
+// `repo` của push/pull/fetch có phải CHÍNH repo này không: `.`, `./`, `.\`; đường dẫn hay file:// tới thư mục chính, thư mục .git hoặc bất kỳ worktree nào
+// của repo (cùng git-common-dir, so realpath); hoặc tên remote có url/pushurl như vậy. Remote mạng (https, ssh, user@host:…) thì không.
+function isThisRepo(info, repo, viaName = true) {
+  if (typeof repo !== 'string' || !repo) return false
+  if (/^\.[\\/]*$/.test(repo)) return true
+  if (viaName && SAFE_REF.test(repo)) {
+    const url = (git(info.dir, ['config', '--get', `remote.${repo}.pushurl`]) || git(info.dir, ['config', '--get', `remote.${repo}.url`]) || '').trim()
+    if (url) return isThisRepo(info, url, false)
+  }
+  let p = repo
+  if (/^file:\/\//i.test(p)) {
+    try { p = fileURLToPath(p) } catch { return false }
+  } else if (/^[a-z][a-z0-9+.-]*:\/\//i.test(p) || /^[^/\\]+@[^/\\:]+:/.test(p)) return false
+  const dir = path.resolve(info.dir, toNative(p))
+  try { if (!fs.statSync(dir).isDirectory()) return false } catch { return false }
+  const out = git(dir, ['rev-parse', '--git-common-dir'])
+  if (!out) return false
+  const real = (x) => { try { return fs.realpathSync.native(x) } catch { return path.resolve(x) } }
+  return norm(real(path.resolve(dir, out.trim()))) === norm(real(info.commonDir))
+}
+
+// g = parseGitSub. Trả null (lệnh này không đưa commit nhánh khác vào nhánh chính), { unknown: lý do } (không quy ra được đích) hoặc
+// { targets, cmd } (cmd = dòng lệnh gốc để user chép khi host không có ask; null nếu có ký tự lạ).
+function entrants(g, info, base) {
+  const onMain = info.branch === base
+  const rest = g.rest
+  const cmdParts = [g.sub, ...rest]
+  const cmd = cmdParts.every((t) => SAFE_TOKEN.test(t)) ? `git ${cmdParts.join(' ')}` : null
+  const into = (targets) => (targets.length ? { targets, cmd } : null)
+  const cfg = (k) => (info.branch ? (git(info.dir, ['config', '--get', `branch.${info.branch}.${k}`]) ?? '').trim() : '')
+  // Lấy srcs từ repo: repo `.` ⇒ ref cục bộ, kiểm được ngay. Remote khác ⇒ chỉ nhánh chính của remote là bình thường (đồng bộ); nhánh khác chưa tải về nên chưa biết nội dung.
+  const fromRepo = (repo, srcs, verb) => {
+    const list = srcs.filter(Boolean)
+    if (list.length === 0) return null
+    if (isThisRepo(info, repo)) return into(list)
+    const odd = list.filter((s) => !isMainName(headName(s)))
+    if (odd.length === 0) return null
+    const safe = (s) => (SAFE_REF.test(s) ? s : '<tên>')
+    return { unknown: `${verb} sẽ lấy ${odd.map((s) => `"${showName(s)}"`).join(', ')} từ "${showName(repo)}" vào nhánh chính ${base} nhưng nội dung chỉ biết sau khi tải về; ` +
+      `chạy git fetch ${safe(repo)} trước, rồi git merge ${safe(repo)}/${safe(headName(odd[0]))} để đi qua cổng kiểm` }
+  }
+  // pull/fetch với refspec `nguồn:đích`: fetch cập nhật THẲNG refs/heads/<đích> từ bất kỳ worktree nào (pull luôn fetch kiểu cho phép đổi nhánh đang checkout),
+  // nên đích là nhánh chính ⇒ nguồn phải qua cổng dù đang đứng ở nhánh khác; nguồn bỏ trống mà đích là nhánh chính ⇒ deny. mergesHere = pull đang đứng ở main:
+  // mọi nguồn còn được merge vào main.
+  const viaRefspecs = (repo, specs, verb, mergesHere) => {
+    const toMain = specs.filter((s) => headName(refDst(s)) === base)
+    if (toMain.some((s) => !refSrc(s))) {
+      return { deny: `Không xoá hay đặt lại nhánh chính bằng lệnh có nguồn bỏ trống được; AI sẽ bỏ lệnh này và để bạn tự chạy nếu thật sự cần. ` +
+        `${verb} với đích ${base} mà nguồn để trống (:${base}) xoá hoặc đặt lại nhánh chính theo HEAD. User tự chạy lệnh này nếu thật sự cần.` }
+    }
+    return fromRepo(repo, (mergesHere ? specs : toMain).map(refSrc), verb)
+  }
+  switch (g.sub) {
+    case 'pull': {
+      const { pos } = splitArgs(rest, PULL_VALUE_FLAGS)
+      let specs = pos.slice(1).filter((s) => s !== 'tag')
+      if (specs.length === 0 && cfg('merge')) specs = [cfg('merge')]
+      return viaRefspecs(pos[0] ?? (cfg('remote') || 'origin'), specs, 'git pull', onMain)
+    }
+    case 'cherry-pick': {
+      if (!onMain || rest.some((t) => /^--(continue|abort|quit|skip)$/.test(t))) return null
+      return into(splitArgs(rest, CHERRY_VALUE_FLAGS).pos.filter((t) => !t.startsWith('^')).map(rangeTip))
+    }
+    case 'rebase': {
+      if (rest.some((t) => /^--(continue|abort|quit|skip|edit-todo|show-current-patch)$/.test(t))) return null
+      const { pos, vals } = splitArgs(rest, REBASE_VALUE_FLAGS)
+      // `rebase <upstream> <nhánh>`: nhánh bị dời là <nhánh> (git tự chuyển sang nó, chạy ở đâu cũng được); không nêu nhánh thì là nhánh đang đứng
+      if (!(pos[1] !== undefined ? headName(pos[1]) === base : onMain)) return null
+      const t = vals.get('--onto') || pos[0]
+      return t ? into([t]) : null
+    }
+    case 'fetch': {
+      const { pos } = splitArgs(rest, FETCH_VALUE_FLAGS)
+      return pos[0] === undefined ? null : viaRefspecs(pos[0], pos.slice(1), 'git fetch', false)
+    }
+    case 'push': {
+      const p = parsePushArgs(rest)
+      if (p.skip || !isThisRepo(info, p.repo ?? p.positional[0])) return null
+      const specs = p.repo !== null ? p.positional : p.positional.slice(1)
+      return into(specs.filter((s) => headName(refDst(s)) === base).map(refSrc).filter(Boolean)) // `:main` (xoá) đã bị gateDeleteMainPush chặn trước
+    }
+    case 'branch': {
+      const f = simpleFlags(rest)
+      const force = f.short.has('f') || f.long.has('force')
+      const copy = f.short.has('C') || (force && (f.short.has('c') || f.long.has('copy')))
+      if (copy) { // branch -C [<nguồn>] <đích>: đè nhánh đích bằng bản sao của nguồn
+        const dst = f.pos.length >= 2 ? f.pos[1] : f.pos[0]
+        return dst !== undefined && headName(dst) === base ? into([f.pos.length >= 2 ? f.pos[0] : (info.branch ?? 'HEAD')]) : null
+      }
+      const other = ['d', 'D', 'm', 'M', 'c', 'l', 'u'].some((c) => f.short.has(c)) ||
+        ['delete', 'move', 'copy', 'list', 'set-upstream-to', 'unset-upstream', 'edit-description', 'contains', 'merged', 'no-merged', 'points-at', 'show-current'].some((l) => f.long.has(l))
+      return force && !other && f.pos[0] !== undefined && headName(f.pos[0]) === base ? into([f.pos[1] ?? 'HEAD']) : null
+    }
+    case 'update-ref': {
+      if (rest.includes('--stdin')) return { unknown: 'git update-ref --stdin đổi ref theo danh sách đọc từ đầu vào nên không biết ref nào (có thể là nhánh chính) bị đổi sang đâu' }
+      if (rest.some((t) => t === '-d' || t === '--delete')) return null
+      const { pos } = splitArgs(rest, new Set(['-m']))
+      const dst = pos[0] === 'HEAD' ? (onMain ? base : null) : pos[0] !== undefined ? headName(pos[0]) : null
+      return dst === base && pos[1] !== undefined ? into([pos[1]]) : null
+    }
+    case 'checkout':
+    case 'switch': {
+      // checkout -B <tên> [<điểm đầu>] / switch -C <tên> [<điểm đầu>]: đặt lại nhánh <tên> về <điểm đầu> (mặc định HEAD)
+      const force = g.sub === 'checkout' ? '-B' : '-C'
+      const { pos, vals } = splitArgs(rest, SWITCH_VALUE_FLAGS) // splitArgs tách cả cụm cờ ngắn: -fB main, -fBmain, -qCmain
+      const name = vals.get(force) ?? vals.get('--force-create')
+      return name !== undefined && headName(name) === base ? into([pos[0] ?? 'HEAD']) : null
+    }
+    default:
+      return null
+  }
+}
+
+// Đích đưa vào nhánh chính qua pull/cherry-pick/rebase/fetch/push/branch/update-ref/checkout/switch ⇒ cùng cổng với `git merge` (dấu + nới luật + chép chỉ-học).
+async function gateEntry(g, host) {
+  const info = repoInfo(g.dir)
+  if (!info) return null
+  const base = mainBranch(info)
+  const e = entrants(g, info, base)
+  if (!e) return null
+  if (e.deny) return permission('deny', e.deny)
+  if (e.unknown) return permission('deny', `${GUARD_OPENINGS.unknown}\n- ${e.unknown}`)
+  return gateTargets(info, base, e.targets, host, e.cmd)
+}
+
+// Lỗi bất ngờ ở bước phân tích lệnh (không phải ở bước kiểm dấu, đã tự chặn trong gateTargets) ⇒ ghi log rồi cho qua như các cổng git khác.
+const gateEntrySafe = (g, host) => safelyAsync(`gateEntry ${g.sub}`, () => gateEntry(g, host))
 
 // ---------- thư viện mới khi commit (AC-38) ----------
 
@@ -847,7 +1214,7 @@ async function safelyAsync(name, fn) {
   }
 }
 
-const GIT_WORDS = /merge|commit|push|reset|branch|checkout|restore|clean/
+const GIT_WORDS = /merge|commit|push|pull|fetch|rebase|cherry-pick|update-ref|switch|reset|branch|checkout|restore|clean/
 const APPLY_PATCH_WORD = /\bapply_patch\b/ // Codex/Devin sửa file bằng `apply_patch <<'EOF' … EOF`, `cat <<EOF | apply_patch`, bash -c "…" … qua shell
 const APPLY_PATCH_TOKEN = /(^|[\\/])apply_patch(\.\w+)?$/
 const PATCH_WRAPPERS = new Set(['command', 'env', 'exec', 'sudo', 'doas', 'time', 'nice', 'nohup', 'builtin', 'xargs', 'stdbuf', 'timeout', 'setsid', 'ionice', 'then', 'do', 'else', 'elif'])
@@ -1031,17 +1398,21 @@ async function hookBash(input) {
       sawAdd = true
     } else if (g.sub === 'merge') {
       const m = parseGitMerge(g)
-      if (m) out = gateMerge(m)
+      if (m) out = await gateMerge(m, n.host)
     } else if (g.sub === 'commit') {
       out = safely(`gateSecrets ${g.sub}`, () => gateSecrets(g)) ?? await safelyAsync('gateDeps', () => gateDeps(g, sawAdd))
     } else if (g.sub === 'push') {
+      // `git push . x:main` là đưa nhánh x vào main ngay trong repo này (không có remote nào để hỏi): chỉ cổng gộp quyết định
+      const toHere = safely('isThisRepo', () => { const info = repoInfo(g.dir); const p = parsePushArgs(g.rest); return info !== null && isThisRepo(info, p.repo ?? p.positional[0]) })
       out = safely(`gateSecrets ${g.sub}`, () => gateSecrets(g)) ??
         safely('gateForcePush', () => gateForcePush(g)) ??
         safely('gateDeleteMainPush', () => gateDeleteMainPush(g)) ??
-        safely('gateAskMainPush', () => gateAskMainPush(g, n.host))
+        await gateEntrySafe(g, n.host) ??
+        (toHere ? null : safely('gateAskMainPush', () => gateAskMainPush(g, n.host)))
     } else if (DESTRUCTIVE_SUBS.has(g.sub)) {
       out = safely(`gateDestructive ${g.sub}`, () => gateDestructive(g))
     }
+    if (!out && ENTRY_SUBS.has(g.sub)) out = await gateEntrySafe(g, n.host)
     if (out?.hookSpecificOutput?.permissionDecision === 'ask') ask ??= out
     else if (out && !out.hookSpecificOutput?.permissionDecision) note ??= out // chỉ nhắc (additionalContext): không cắt ngang các cổng sau
     else if (out) return out

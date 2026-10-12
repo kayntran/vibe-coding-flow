@@ -71,6 +71,7 @@ AGENTS.md, `.claude/rules/`) thắng phần này.
 | X ở đâu, chỗ nào dùng Y | tự tìm bằng công cụ Grep có sẵn hoặc `rg` một lệnh nhiều `-e` (không `grep -r`/`find` quét thư mục); thư mục bị git bỏ qua (worktree, thư mục nội bộ) ⇒ thêm `-uu` kẻo tìm sót |
 | giao việc cho worker / chạy song song | skill `flow-team` |
 | sắp sửa file trong git repo | skill `flow-worktree` |
+| kiến trúc, cấu trúc thư mục, file/hàm quá dài, tách module; dự án chưa có `docs/arch.json` | skill `flow-architecture` |
 | "cho vai X dùng model Y", "trả model về mặc định" | `node ~/.claude/hooks/models.mjs set <vai> <app> <dòng>[:mức]` / `reset <vai>` — báo lại một dòng |
 
 **Luôn luôn:**

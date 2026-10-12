@@ -1,0 +1,46 @@
+{
+  "$comment": "Mẫu kiến trúc cho dự án Go / Wails (modular monolith, hexagonal nhẹ): mỗi miền nghiệp vụ là một module = một thư mục internal/<miền> (bên trong chia domain / service / store / transport). Thêm miền mới: thêm vào modules một dòng { name: \"<miền>\", path: \"internal/<miền>\", mayDependOn: [] } rồi thêm một dòng vào Codemap của docs/ARCHITECTURE.md; miền chỉ được gọi miền ghi trong mayDependOn. Mỗi forbidden bắt buộc có reason + fix. Sửa xong chạy: node ~/.claude/hooks/arch.mjs gen",
+  "version": 1,
+  "parts": [
+    {
+      "name": "go",
+      "stack": "go",
+      "root": "internal",
+      "modules": [],
+      "shared": [],
+      "limits": { "fileLines": 400, "fnLines": 60, "complexity": 15 },
+      "forbidden": [
+        {
+          "from": "internal/*/domain/**",
+          "to": "internal/*/{service,store,transport}",
+          "reason": "domain là lõi nghiệp vụ, không được import lớp nào khác của miền.",
+          "fix": "Khai báo interface ngay trong domain; service/store/transport cài đặt interface đó."
+        },
+        {
+          "from": "internal/*/{domain,service,transport}/**",
+          "to": "database/sql",
+          "reason": "Chỉ lớp store được chạm database.",
+          "fix": "Thêm hàm vào store của miền và gọi qua interface."
+        },
+        {
+          "from": "internal/*/{domain,service,store}/**",
+          "to": "net/http",
+          "reason": "Chỉ lớp transport được biết HTTP.",
+          "fix": "Nhận/trả dữ liệu thường (struct, error) và để transport dựng request/response."
+        },
+        {
+          "from": "internal/*/{domain,service,store}/**",
+          "to": "github.com/wailsapp/wails",
+          "reason": "Chỉ lớp transport được biết Wails.",
+          "fix": "Để transport gọi service, service không import Wails."
+        },
+        {
+          "from": "internal/*/{service,store}/**",
+          "to": "internal/*/transport",
+          "reason": "Lớp trong không được biết lớp ngoài (transport).",
+          "fix": "Đảo chiều: transport gọi service, không để service gọi transport."
+        }
+      ]
+    }
+  ]
+}

@@ -20,8 +20,14 @@ Mọi tài liệu của một tính năng nằm trong `docs/specs/<YYYY-MM-DD>-<
 1. Gửi trong MỘT message:
    - AskUserQuestion: ≤5 câu/vòng, mỗi câu có đáp án khuyến nghị đứng đầu. Hỏi mục tiêu, người dùng, phạm vi,
      ràng buộc, thế nào là "xong".
-   - Cỡ M/L: Agent `researcher` chạy nền — brief: ý tưởng, stack, ràng buộc licence, đường ghi
-     `docs/specs/<YYYY-MM-DD>-<slug>/research.md`.
+   - Cỡ M/L: tra kho trước `node ~/.claude/hooks/kho.mjs tim <repo> "<từ khoá>"` — thẻ còn hạn ⇒ dùng lại ("dùng kết
+     quả ngày …"), hết hạn ⇒ chỉ tra phần cũ. Chỉ gọi Agent `researcher` KHI CẦN [w99v]: bí ý tưởng/cách làm · không chắc
+     đã có ai làm · user đưa repo/link · sắp tự viết khả năng chung lớn. Brief: ý tưởng, stack, ràng buộc licence, đường
+     ghi `docs/specs/<YYYY-MM-DD>-<slug>/research.md`; researcher ghi thẻ vào `docs/research/` (hook tự đính thẻ khớp).
+   - User đưa repo/link ⇒ đọc kỹ MỘT lần, ghi thẻ repo (`kho.mjs moi repo …`: làm gì, cấu trúc, lấy được phần nào,
+     licence, commit đã đọc, chế độ `lay-dung` hoặc `chi-hoc` cho GPL/AGPL/cấm thương mại — chỉ lưu logic bằng lời).
+     Lần sau đọc thẻ, chỉ đọc lại repo khi thẻ thiếu hoặc repo đổi nhiều.
+   - Không viết lại bánh xe: có sẵn trong dự án → thư viện chuẩn → thư viện/repo licence thoáng → tự viết (ghi lý do).
 2. Nhận research ⇒ kể user những gì đáng giá (repo dùng lại được, ý tưởng hay hơn) trước khi chốt spec.
 3. Viết `docs/specs/<YYYY-MM-DD>-<slug>/SPEC.md`:
    - Mục tiêu (1–3 câu), người dùng, user story.
@@ -58,8 +64,16 @@ ngay sau khi chọn stack): `node ~/.claude/hooks/skills-check.mjs --host claude
 `needs-login` ⇒ đưa đúng lệnh đăng nhập · `misconfigured` ⇒ báo một dòng · `unknown` ⇒ thử một lệnh đọc rẻ trước khi
 dựa vào. Cài xong cần mở lại phiên ⇒ ghi sổ tiến độ trước. Thư viện thật của dự án (vd `shadcn init`) là task đầu của PLAN.
 
+**Kiến trúc dự án** chưa có `docs/arch.json` (dự án mới hoặc có sẵn) hoặc tính năng thêm module ⇒ skill `flow-architecture`
+trước; plan theo đúng `docs/ARCHITECTURE.md`.
+
 Viết `PLAN.md` cạnh SPEC.md, mọi path phải kiểm có thật trong code:
-- **Kiến trúc**: module nào, trách nhiệm, contract (type/interface/API) giữa chúng; data model/migration.
+- **Kiến trúc — BẮT BUỘC 9 dòng**, mỗi dòng một câu trả lời (thiếu dòng nào = plan chưa đạt): (1) ranh giới module, ai
+  được gọi ai · (2) hợp đồng giữa module (kiểu/schema, ai sở hữu) · (3) dữ liệu: bảng thuộc module nào, ai được ghi,
+  xoá/đổi có sao lưu không · (4) lỗi và biên: parse tại biên, lỗi nào người dùng thấy · (5) tăng trưởng: thứ gì vỡ đầu
+  tiên ở 10x người dùng + đường nâng cấp · (6) quan sát: độ trễ, lưu lượng, lỗi, bão hoà + ai được báo khi hỏng ·
+  (7) quyền/riêng tư · (8) chi phí trần · (9) đường quay lại (rollback). Không "MVP tạm" cho dữ liệu, hợp đồng, ranh giới.
+- **Mã nối**: mỗi task ghi AC nó phủ (`AC-xx → task → kết quả`); báo cáo QA/review đánh dấu theo mã đó.
 - **Chọn thư viện** dựa research.md, ghi lý do.
 - **ADR** cho quyết định khó đảo ngược (DB, giao thức, cấu trúc module, phụ thuộc lớn):
   `docs/adr/NNNN-<tên>.md` = Bối cảnh · Quyết định · Hệ quả · Trạng thái. ADR Accepted không sửa; đổi ý = ADR mới.
@@ -87,6 +101,13 @@ Viết `PLAN.md` cạnh SPEC.md, mọi path phải kiểm có thật trong code:
   - Chạy song song có đáng không ⇒ theo mục "Khi nào KHÔNG song song" trong skill `flow-team`.
 - **Kế hoạch test**: unit/integration/e2e cần thêm + **QA charter** (từ acceptance criteria: vai, trạng thái đầu,
   dữ liệu, bằng chứng cần có) cho pha 6.
+- **Plan sống** — cuối PLAN.md luôn có 4 mục, cập nhật trong lúc làm: `## Phát hiện bất ngờ` (kèm bằng chứng: lệnh +
+  kết quả) · `## Nhật ký quyết định` · `## Thay đổi plan` (mỗi dòng: ngày giờ | task | đổi gì | vì sao | người dùng thấy
+  khác không | ai quyết) · `## Kết quả` (khi xong). Tự sửa plan + ghi nhật ký, KHÔNG hỏi: đổi thứ tự/chia nhỏ task, tên
+  file/hàm, chọn thư viện trong danh sách cho phép, thêm bước kiểm, chỉnh tiêu chí kỹ thuật mà điều người dùng thấy
+  không đổi. Dừng hỏi user (câu đời thường): đổi điều người dùng thấy, thêm/bỏ tính năng, xoá/đổi dữ liệu, thêm thứ
+  tốn tiền, quyền/bảo mật, đổi kiến trúc lớn hoặc mục tiêu đã chốt, hai lần sửa liền một task không qua kiểm.
+  Làm ra sai ý ⇒ quay về plan, sửa cụ thể hơn rồi làm lại phần đó, KHÔNG vá chồng.
 
 ## Pha 3 — Soát plan bằng model khác (user KHÔNG duyệt plan kỹ thuật)
 

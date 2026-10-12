@@ -1,0 +1,47 @@
+{
+  "$comment": "Mẫu kiến trúc cho tiện ích trình duyệt (Chrome/Firefox extension). Khác web: background, content script và giao diện (popup/options) là ba môi trường chạy riêng, chỉ nói chuyện với nhau bằng message. Thêm module: thêm vào modules một dòng { name, path, mayDependOn } và một dòng vào Codemap của docs/ARCHITECTURE.md. Mỗi forbidden bắt buộc có reason + fix. Sửa xong chạy: node ~/.claude/hooks/arch.mjs gen",
+  "version": 1,
+  "parts": [
+    {
+      "name": "extension",
+      "stack": "extension",
+      "root": "src",
+      "modules": [
+        {
+          "name": "shared",
+          "path": "src/shared",
+          "desc": "Kiểu dữ liệu, tiện ích và định nghĩa message dùng chung giữa background / content / popup. KHÔNG biết môi trường nào.",
+          "mayDependOn": []
+        }
+      ],
+      "shared": ["src/shared"],
+      "limits": { "fileLines": 400, "fnLines": 60, "complexity": 15 },
+      "forbidden": [
+        {
+          "from": "src/content/**",
+          "to": "src/background/**",
+          "reason": "Content script chạy trong trang web, background chạy riêng; import nhau sẽ nhúng nhầm code sang môi trường kia.",
+          "fix": "Gửi message qua chrome.runtime.sendMessage; kiểu message khai báo trong src/shared."
+        },
+        {
+          "from": "src/background/**",
+          "to": "src/{content,popup,options}/**",
+          "reason": "Background không được biết giao diện hay content script.",
+          "fix": "Background trả kết quả bằng message; giao diện tự lắng nghe và vẽ."
+        },
+        {
+          "from": "src/{popup,options}/**",
+          "to": "src/{background,content}/**",
+          "reason": "Giao diện không import trực tiếp background/content, hai bên chạy ở môi trường khác nhau.",
+          "fix": "Hỏi background bằng message (chrome.runtime.sendMessage), dùng kiểu message từ src/shared."
+        },
+        {
+          "from": "src/features/*/{ui,model}/**",
+          "to": "node_modules/{@supabase,@stripe,stripe}/**",
+          "reason": "Gọi dịch vụ ngoài chỉ được làm trong api của tính năng hoặc shared/lib.",
+          "fix": "Thêm một hàm trong features/<tên>/api (hoặc shared/lib) bọc lời gọi, rồi gọi hàm đó."
+        }
+      ]
+    }
+  ]
+}

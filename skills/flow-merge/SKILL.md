@@ -22,6 +22,12 @@ Chỉ chạy khi user đã gật trong chat. Nhánh chính tên `master`/khác �
    vào progress.md (hook thôi nạp sổ này), cất kho các quyết định ✅ phạm vi tính năng (điều `chung` và điều ⚠️ chờ xem lại giữ nguyên) và sinh
    lại INDEX/ROADMAP. Dùng lệnh này, KHÔNG sửa progress.md bằng Edit: thư mục chính bị hook chặn sửa thẳng. Việc có chạy `flow-impact` ⇒ cập nhật mục tương ứng trong
    `docs/feature-map.md` (registry · tính năng tiêu thụ · file test đối chiếu). Rồi commit phần đóng sổ.
+4b. **Rút kinh nghiệm (sau gộp, cùng commit đóng sổ):** nhìn lại việc vừa xong — lỗi QA/review, vòng sửa, phát hiện bất
+   ngờ trong PLAN. Mỗi điều QUA "durable bar" (đọc code/test/tài liệu hiện có KHÔNG suy ra được, và quên nó sẽ tái phạm)
+   ⇒ `node ~/.claude/hooks/solutions.mjs ghi <projectRoot> -` (JSON qua stdin); điều tầm thường ⇒ không ghi. Lỗi khớp
+   bài học cũ ⇒ `solutions.mjs gap <projectRoot> <dang_loi>`; lặp lần 2 mà chưa có máy kiểm ⇒ đề xuất theo thang nó in
+   (luật có sẵn → luật cấm tuỳ biến → ast-grep → test → hook → lời dặn) và hỏi user một câu. Báo user MỘT dòng ("ghi
+   1 bài học: …"). Hằng tháng `solutions.mjs ra-soat` — bài học không còn đúng với code thì sửa hoặc bỏ.
 5. **Trước khi push:** `git log --oneline origin/main..main`. Ngoài commit của mình còn commit khác chưa push (của phiên
    khác/việc cũ) ⇒ liệt kê cho user, hỏi có push kèm không — push là đẩy tất cả. Rồi `git push origin main` (nếu có
    remote) → `git worktree remove <path> && git branch -d <branch>` → `node ~/.claude/hooks/wt-env.mjs release <path>`.

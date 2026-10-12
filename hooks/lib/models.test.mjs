@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import {
   loadRoles, roleSet, parseCodexCatalog, parseAgyCatalog, pickModel, resolve, setOverride, resetOverride, runCli, findExe,
@@ -334,6 +334,19 @@ test('resolve/codex đọc ~/.codex/models_cache.json (mới ⇒ không exec); c
   const stale = resolve('codex', 'coder', { ...base, home: homeWith(NOW - 3 * DAY), exec: failExec })
   assert.equal(stale.model, 'gpt-5.6-sol')
   assert.equal(stale.source, 'fallback')
+})
+
+test('resolve/codex: models_cache.json đang bị Codex ghi dở (JSON hỏng) ⇒ đợi rồi đọc lại, không trả model null (CLI sẽ dùng mặc định có thể đã bị gỡ)', () => {
+  const home = tmp()
+  const file = path.join(home, '.codex', 'models_cache.json')
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, '{"fetched_at":"' + new Date(NOW).toISOString() + '","models":[{"slug":"gpt-5.6-s') // ghi dở
+  const good = JSON.stringify({ ...MAC, fetched_at: new Date(NOW).toISOString() })
+  const child = spawn(process.execPath, ['-e', `setTimeout(() => require('fs').writeFileSync(${JSON.stringify(file)}, ${JSON.stringify(good)}), 150)`], { stdio: 'ignore' })
+  try {
+    const r = resolve('codex', 'coder', { home, now: NOW, env: {}, exec: () => ({ ok: false, error: 'bận' }), catalog: {} })
+    assert.equal(r.model, 'gpt-5.6-sol', JSON.stringify(r))
+  } finally { child.kill() }
 })
 
 test('resolve/codex: CODEX_HOME trong env được tôn trọng', () => {

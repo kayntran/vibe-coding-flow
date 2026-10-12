@@ -860,13 +860,13 @@ test('install.mjs chạy trực tiếp ở ~/.claude giả (kit thật): cài đ
   assert.equal(fs.existsSync(path.join(home, '.codex')), false)
 })
 
-test('cài trên kit THẬT với Codex: 7 skill flow-*, đủ vai trong agents/, AGENTS.md ≤ 24 KB, hooks.json = hostgen', { timeout: 120000 }, async () => {
+test('cài trên kit THẬT với Codex: đủ skill flow-* (có flow-architecture), đủ vai trong agents/, AGENTS.md ≤ 24 KB, hooks.json = hostgen', { timeout: 120000 }, async () => {
   const home = tmp(); withCodex(home)
   const r = await run(home, HERE)
   assert.equal(r.code, 0, r.out)
   const skills = ls(path.join(home, '.agents', 'skills')).filter((s) => s.startsWith('flow-'))
   assert.deepEqual(skills, ls(path.join(HERE, 'skills')).filter((s) => s.startsWith('flow-')))
-  assert.equal(skills.length, 7)
+  assert.ok(skills.length >= 8 && skills.includes('flow-architecture'), skills.join(', '))
   const tomls = ls(path.join(home, '.codex', 'agents')).map((f) => f.replace(/\.toml$/, ''))
   assert.deepEqual(tomls, ls(path.join(HERE, 'agents')).filter((f) => f.endsWith('.md')).map((f) => f.replace(/\.md$/, '')))
   assert.ok(Buffer.byteLength(rd(home, '.codex', 'AGENTS.md'), 'utf8') <= 24 * 1024 + 64)

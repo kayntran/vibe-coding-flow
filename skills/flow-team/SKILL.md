@@ -50,6 +50,10 @@ tích hợp.
   `return=needs_context` kèm tên file (luật nằm sẵn trong body `coder`/`coder-lite`).
 - Làn cần chạy app/dev server/`qa-tester` ⇒ cấp port: `node ~/.claude/hooks/wt-env.mjs alloc <đường worktree>` ⇒ in
   `PORT_BASE=<n>`; app dùng các port `n..n+19`, ghi `PORT_BASE` vào brief. Không bao giờ dùng port mặc định của dự án.
+- Cô lập dữ liệu mỗi làn: `alloc` in thêm `FLOW_DB_NAME`, `FLOW_TEST_DATA`; `wt-env.mjs env <worktree>` in khối biến cho
+  `.env.local` của worktree. Mỗi làn một database thử riêng (nhánh Supabase/Neon KHÔNG mang dữ liệu thật, `supabase
+  start`, hoặc container), dữ liệu thử riêng, khoá test riêng. Brief ghi rõ; cấm chép `.env` của thư mục chính, cấm nối
+  database thật.
   Worktree chỉ cô lập file: không chạy migration đồng thời lên cùng DB local.
 - Việc đánh giá độc lập (research, review plan, nhiều debugger cho nhiều lỗi, 2 lượt Codex) gửi trong MỘT message.
 - Giao xong không ngó chừng (không sleep/poll/đọc log) — hệ thống tự báo khi xong.

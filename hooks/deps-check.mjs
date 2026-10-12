@@ -10,6 +10,7 @@
 // Exit: 0 ổn / không có gì mới (kể cả khi có gói "chưa kiểm được" vì mạng — dòng đó vẫn in rõ, không im lặng) ·
 //       1 có thư viện có vấn đề · 2 không chạy được (sai cách dùng, mốc git/repo không đọc được; không coi là sạch).
 import fs from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { DEFAULT_MIN_AGE_DAYS, newPackages, vetAll } from './lib/deps.mjs'
 
@@ -55,6 +56,19 @@ function describe(r) {
   return `CHƯA   ${label(r)} — chưa kiểm được: ${r.unknown.join('; ')}`
 }
 
+// Package nguồn git/URL user đã duyệt: .claude/flow.json {"trustedDepSources": ["tên@nguồn", …]} của HEAD (cùng cách đọc với cổng flow-gate).
+// Chỉ đọc bản đã commit, không đọc đĩa/index. Không có repo, HEAD hoặc flow.json, hoặc file hỏng/sai kiểu ⇒ [] (không tin ai, như cũ).
+function trustedDepSources(repo) {
+  const r = spawnSync('git', ['cat-file', 'blob', 'HEAD:.claude/flow.json'], { cwd: repo, encoding: 'utf8' })
+  if (r.error || r.status !== 0) return []
+  try {
+    const list = JSON.parse(r.stdout.replace(/^﻿/, ''))?.trustedDepSources
+    return Array.isArray(list) ? list.filter((n) => typeof n === 'string') : []
+  } catch {
+    return []
+  }
+}
+
 export async function run(argv, io = {}) {
   try {
     const a = parseArgs(argv)
@@ -64,7 +78,7 @@ export async function run(argv, io = {}) {
       minAgeDays = Number(a['min-age'])
       if (!Number.isFinite(minAgeDays) || minAgeDays < 0) fail(`--min-age cần một số ngày, nhận "${a['min-age']}"`)
     }
-    const vetOpts = { fetch: io.fetch, now: io.now, minAgeDays }
+    const vetOpts = { fetch: io.fetch, now: io.now, minAgeDays, trustedSources: trustedDepSources(a.repo ?? '.') }
 
     const pkgs = a.vet !== undefined
       ? [parseVetTarget(a.vet)]
