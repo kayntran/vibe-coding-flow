@@ -37,11 +37,14 @@ export function patchFiles(patchText) {
 
 // Dấu hiệu theo thứ tự mạnh → yếu; không có dấu nào ⇒ claude.
 //   codex : `turn_id`, `model` gpt-*  (research.md §1.4, đã kiểm bằng codex exec thật)
-//   devin : tên tool Devin viết thường, `prompt_id`/`tool_provenance` (tài liệu hooks Devin), env DEVIN_PROJECT_DIR (Claude không đặt)
+//   devin : tên tool Devin viết thường; `prompt_id`/`tool_provenance` (tài liệu hooks Devin), env DEVIN_PROJECT_DIR — ba dấu này chỉ tính khi KHÔNG có
+//           `transcript_path`: Claude Code cũng gửi `prompt_id` (từ 2026-10) và luôn có transcript_path; Devin không gửi trường này; Devin Desktop
+//           làm vỏ chạy Claude thì env DEVIN_* có thể lọt vào hook của Claude
 //   codex : tên tool chỉ Codex có (apply_patch/spawn_agent) khi chưa có dấu Devin
 function detectHost(input, toolName, env) {
   if (nonEmpty(input.turn_id) || (typeof input.model === 'string' && /^gpt-/i.test(input.model))) return 'codex'
-  if (DEVIN_TOOLS.has(toolName) || nonEmpty(input.prompt_id) || input.tool_provenance != null || nonEmpty(env?.DEVIN_PROJECT_DIR)) return 'devin'
+  if (DEVIN_TOOLS.has(toolName)) return 'devin'
+  if (!nonEmpty(input.transcript_path) && (nonEmpty(input.prompt_id) || input.tool_provenance != null || nonEmpty(env?.DEVIN_PROJECT_DIR))) return 'devin'
   if (CODEX_TOOLS.has(toolName)) return 'codex'
   return 'claude'
 }

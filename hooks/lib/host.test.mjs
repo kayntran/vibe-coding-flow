@@ -84,6 +84,19 @@ test('normalize Claude: Bash → bash + command', () => {
   assert.deepEqual(r, { host: 'claude', event: 'PreToolUse', tool: 'bash', command: 'git status', files: [], cwd: '/proj' })
 })
 
+// Claude Code (2026-10) gửi kèm prompt_id ở mọi hook — trùng tên trường của Devin; transcript_path (Devin không gửi) là dấu Claude.
+test('normalize Claude: payload thật có prompt_id + transcript_path + scratchpad_dir → vẫn là claude (kể cả env DEVIN_PROJECT_DIR khi Devin làm vỏ)', () => {
+  const claude = {
+    session_id: 's1', prompt_id: '550e8400-e29b-41d4-a716-446655440000', transcript_path: 'C:/u/.claude/projects/p/s1.jsonl', cwd: '/proj',
+    scratchpad_dir: '/tmp/s', permission_mode: 'default', effort: 'high', hook_event_name: 'PreToolUse', tool_name: 'Bash',
+    tool_input: { command: 'git push origin main' }, tool_use_id: 'toolu_1',
+  }
+  assert.equal(normalize(claude).host, 'claude')
+  assert.equal(normalize(claude, { DEVIN_PROJECT_DIR: '/proj' }).host, 'claude')
+  assert.equal(normalize({ ...claude, hook_event_name: 'SessionStart', tool_name: undefined, tool_input: undefined }).host, 'claude')
+  assert.equal(normalize({ ...claude, hook_event_name: 'Stop', tool_name: undefined, tool_input: undefined, stop_hook_active: false }).host, 'claude')
+})
+
 test('normalize Claude: Edit/Write → edit + file_path; NotebookEdit → notebook_path; MultiEdit → edit', () => {
   const base = { hook_event_name: 'PreToolUse', cwd: '/proj' }
   assert.deepEqual(
