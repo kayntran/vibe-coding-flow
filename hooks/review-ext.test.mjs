@@ -696,6 +696,87 @@ describe('run: reviewer hỏng', () => {
   })
 })
 
+describe('run: CLI ngoài báo lỗi kiểu bản cũ ⇒ thêm một dòng gợi ý cập nhật (zzma CN-05)', () => {
+  const REQ = "The 'gpt-6.1-sol' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again."
+  const HINT = 'Codex đang ở bản 0.153.0, bản mới nhất là 0.162.1: lỗi này là do bản cũ. Nói "cập nhật Codex" để AI cập nhật.'
+  // Gắn staleHint giả vào deps; trả về danh sách lần gọi.
+  const stub = (h, impl) => {
+    const calls = []
+    h.deps.staleHint = async (tool, text) => { calls.push({ tool, text }); return impl ? impl(tool, text) : HINT }
+    return calls
+  }
+
+  test('codex "requires a newer version" ⇒ exit 1, giữ lời báo lỗi cũ, thêm đúng dòng gợi ý; staleHint nhận tên CLI + chữ lỗi', async () => {
+    const h = harness({ reply: { status: 1, stdout: '', stderr: REQ } })
+    const calls = stub(h)
+    assert.equal(await run(h.args(makeRepo(), 'codex'), h.deps), 1)
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].tool, 'codex')
+    assert.ok(calls[0].text.includes('requires a newer version of Codex'))
+    assert.match(errText(h), /không ra JSON review/)
+    assert.ok(h.logs.err.includes(HINT), errText(h))
+    assert.equal(h.logs.err.filter((l) => l === HINT).length, 1)
+    assert.equal(fs.existsSync(h.out), false)
+    assert.deepEqual(fs.readdirSync(h.tmpRoot), [])
+  })
+
+  test('mỗi model gọi staleHint với đúng tên CLI: grok → cursor-agent, flash/opus → agy, codex → codex', async () => {
+    for (const [model, cli] of [['grok', 'cursor-agent'], ['flash', 'agy'], ['opus', 'agy'], ['codex', 'codex']]) {
+      const h = harness({ reply: { status: 1, stdout: '', stderr: REQ } })
+      const calls = stub(h)
+      assert.equal(await run(h.args(makeRepo(), model), h.deps), 1, model)
+      assert.deepEqual(calls.map((c) => c.tool), [cli], model)
+    }
+  })
+
+  test('cũng hỏi khi lỗi là hết lượt / chưa đăng nhập (staleHint tự quyết có phải bản cũ không); lời cũ giữ nguyên', async () => {
+    const h = harness({ reply: { status: 1, stdout: '', stderr: 'Error: usage limit reached' } })
+    const calls = stub(h, () => null)
+    assert.equal(await run(h.args(makeRepo(), 'codex'), h.deps), 1)
+    assert.equal(calls.length, 1)
+    assert.match(errText(h), /HẾT LƯỢT/)
+    assert.ok(!errText(h).includes('cập nhật Codex'))
+  })
+
+  test('staleHint trả null ⇒ không thêm dòng nào', async () => {
+    const h = harness({ reply: { status: 1, stdout: '', stderr: REQ } })
+    stub(h, () => null)
+    assert.equal(await run(h.args(makeRepo(), 'codex'), h.deps), 1)
+    assert.match(errText(h), /không ra JSON review/)
+    assert.ok(!errText(h).includes('cập nhật'), errText(h))
+  })
+
+  test('staleHint ném lỗi ⇒ vẫn exit 1 với lời báo lỗi cũ, workspace vẫn xoá', async () => {
+    const h = harness({ reply: { status: 1, stdout: '', stderr: REQ } })
+    stub(h, () => { throw new Error('mạng sập') })
+    assert.equal(await run(h.args(makeRepo(), 'codex'), h.deps), 1)
+    assert.match(errText(h), /không ra JSON review/)
+    assert.ok(!errText(h).includes('mạng sập'))
+    assert.deepEqual(fs.readdirSync(h.tmpRoot), [])
+  })
+
+  test('review thành công ⇒ không gọi staleHint', async () => {
+    const h = harness()
+    const calls = stub(h)
+    assert.equal(await run(h.args(makeRepo(), 'codex'), h.deps), 0)
+    assert.equal(calls.length, 0)
+  })
+
+  test('không tiêm staleHint, lỗi KHÔNG phải bản cũ ⇒ dùng staleHint thật: không chạm mạng, không dòng gợi ý', async () => {
+    const h = harness({ reply: { status: 1, stdout: '', stderr: 'Error: usage limit reached' } })
+    const fetched = []
+    const realFetch = globalThis.fetch
+    globalThis.fetch = async (url) => { fetched.push(String(url)); throw new Error('không được chạm mạng') }
+    try {
+      assert.equal(await run(h.args(makeRepo(), 'codex'), h.deps), 1)
+    } finally {
+      globalThis.fetch = realFetch
+    }
+    assert.deepEqual(fetched, [])
+    assert.ok(!errText(h).includes('cập nhật'))
+  })
+})
+
 // ---------- runReviewer: tiến trình thật ----------
 
 describe('run: kết quả của reviewer chứa khoá (prompt injection) ⇒ exit 3, không ghi nội dung', () => {

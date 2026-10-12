@@ -72,6 +72,7 @@ AGENTS.md, `.claude/rules/`) thắng phần này.
 | giao việc cho worker / chạy song song | skill `flow-team` |
 | sắp sửa file trong git repo | skill `flow-worktree` |
 | kiến trúc, cấu trúc thư mục, file/hàm quá dài, tách module; dự án chưa có `docs/arch.json` | skill `flow-architecture` |
+| "cập nhật <công cụ>" / "cập nhật hết"; gọi CLI ngoài bị lỗi kiểu bản cũ | `node ~/.claude/hooks/updates.mjs cmd <công cụ>` (lỗi: `check <công cụ> --fresh`) → hỏi user một câu → chạy; node/git ⇒ đưa lệnh để user tự chạy |
 | "cho vai X dùng model Y", "trả model về mặc định" | `node ~/.claude/hooks/models.mjs set <vai> <app> <dòng>[:mức]` / `reset <vai>` — báo lại một dòng |
 
 **Luôn luôn:**

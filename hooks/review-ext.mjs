@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { GROK_ENV } from "./grok.mjs";
 import { check as checkCli, classifyFailure, resolveBin } from "./lib/clis.mjs";
 import { resolve as resolveModel } from "./lib/models.mjs";
+import { staleHint } from "./lib/updates.mjs";
 import { scanDiff, scanText, scanDir, isSensitiveFile, isPrivateData, unquoteGitPath, diffSectionPaths } from "./lib/secrets.mjs";
 
 export { GROK_ENV };
@@ -299,6 +300,12 @@ function buildCall(model, { ws, prompt, resolved, timeout }) {
 
 // ---------- chạy ----------
 
+// CLI ngoài lỗi kiểu "bản cũ" (model không hỗ trợ, cần bản mới hơn, please upgrade…) ⇒ kiểm phiên bản TƯƠI của CLI đó và nói nguyên nhân + đề nghị cập nhật
+// bằng một dòng (zzma CN-05). Lỗi khác ⇒ null ngay, không chạm mạng. Không bao giờ ném.
+async function staleHintOf(deps, cli, text) {
+  try { return await (deps.staleHint ?? staleHint)(cli, text); } catch { return null; }
+}
+
 // Biến môi trường truyền cho reviewer (AC-28 tầng 4): bỏ mọi biến tên dạng khoá/mật khẩu của máy (vd khoá Supabase user để ở
 // biến môi trường) — reviewer đọc code từ ngoài, bị prompt injection vẫn không in được chúng. Chỉ giữ biến đăng nhập của
 // đúng CLI đang gọi (CLI nào đăng nhập bằng tài khoản thì lưu ở cấu hình riêng, không cần env).
@@ -433,6 +440,8 @@ async function review(o, io, deps) {
       if (v.reason === "quota") io.err(`${o.model}: HẾT LƯỢT dùng (gói miễn phí/quota) ⇒ dùng model dự phòng.`);
       else if (v.reason === "not-logged-in") io.err(`${o.model}: ${v.message}. Đăng nhập: ${v.loginCmd} ⇒ dùng model dự phòng.`);
       else io.err(`${o.model}: không ra JSON review (exit=${r.status}, ${r.timedOut ? "ETIMEDOUT" : (r.error?.code ?? "")} ${secs}s). Xem ${stem}.raw.txt`);
+      const hint = await staleHintOf(deps, cli, rawText);
+      if (hint) io.err(hint);
       return 1;
     }
     result.reviewer = call.label;

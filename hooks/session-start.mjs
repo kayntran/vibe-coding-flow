@@ -1,4 +1,4 @@
-// SessionStart (startup|resume|clear|compact): ghép additionalContext từ bốn phần, rỗng thì không in gì. Tổng ≤ 8.500 ký tự (SPEC AC10).
+// SessionStart (startup|resume|clear|compact): ghép additionalContext từ năm phần, rỗng thì không in gì. Tổng ≤ 8.500 ký tự (SPEC AC10).
 //   0. Lời nhắc an toàn (v7, mỗi cái một dòng, đứng đầu): đang ở Devin Local (AC-41) · MCP có khoá gõ thẳng, CHỈ nêu tên server (AC-28) ·
 //      file luật của dự án có ký tự ẩn, nêu file:dòng (AC-28). Hook chỉ đọc; không bao giờ in giá trị khoá hay nội dung dòng có ký tự ẩn.
 //   1. Sổ tiến độ: sổ docs/specs/*/progress.md chưa `Trạng thái: xong` ghi đúng nhánh git hiện tại (openProgress của lib so-chot, quét mọi thư mục);
@@ -6,16 +6,24 @@
 //   2. Sổ chốt: excerpt() của lib so-chot (luật chung, quyết định của tính năng đang làm, ⚠️, roadmap 1 dòng) trong phần trần còn lại
 //      = 8.500 − lời nhắc an toàn − tiến độ − nhắc MCP. Hook CHỈ ĐỌC repo (cache của excerpt nằm ngoài repo, ~/.claude/cache/so-chot).
 //   3. Nhắc báo cáo MCP: đủ 30 ngày kể từ mốc = max(dòng đầu mcp-usage.jsonl, lastReport trong mcp-usage.state.json).
+//   4. Nhắc bản mới của công cụ (zzma CN-01/02): MỘT dòng từ cache ~/.claude/cache/updates.json (lib/updates.mjs), mỗi ngày tối đa một lần; KHÔNG chờ mạng.
+//      Cache cũ hơn 24 giờ ⇒ kích `node hooks/updates.mjs check --fresh` chạy nền tách rời (windowsHide, không giữ phiên), CHỈ phiên giành được khoá
+//      updates.spawn.lock mới spawn (hai phiên cùng lúc chỉ một). FLOW_UPDATES=off tắt cả hai việc.
 // Spec: plans/flow-v6-so-chot/SPEC.md (AC10–14, 21, 22b, 23); trước đó ~/.claude/plans/flow-v3-hooks-spec.md (Làn B). Docs: https://code.claude.com/docs/en/hooks
 // Lỗi nội bộ luôn CHO QUA (exit 0, không in gì) và ghi một dòng vào ~/.claude/logs/session-start.log.
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { normalize } from './lib/host.mjs'
 import { scanHiddenPaths, scanText } from './lib/secrets.mjs'
 import { excerpt, openProgress } from './lib/so-chot.mjs'
+import { claimRefresh, isStale, noteLine, readCache as readUpdatesCache, todayOf, updateCache as patchUpdatesCache } from './lib/updates.mjs'
 
+const HOOK_DIR = path.dirname(fileURLToPath(import.meta.url))
+const UPDATES_SCRIPT = process.env.FLOW_UPDATES_SCRIPT || path.join(HOOK_DIR, 'updates.mjs') // FLOW_UPDATES_SCRIPT: để test thay bằng script giả
+const UPDATES_PREFIX = 'Báo user một lần, nguyên văn: '
 const LOGS_DIR = path.join(os.homedir(), '.claude', 'logs')
 const USAGE_LOG = process.env.MCP_USAGE_LOG || path.join(LOGS_DIR, 'mcp-usage.jsonl')
 const STATE_FILE = path.join(LOGS_DIR, 'mcp-usage.state.json')
@@ -215,6 +223,32 @@ function mcpSection() {
   return Date.now() - anchor >= 30 * DAY ? MCP_REMINDER : ''
 }
 
+// ---------- bản mới của công cụ (zzma) ----------
+
+// Kích kiểm nền: tiến trình riêng, tách khỏi phiên (detached + bỏ stdio + unref), không hiện cửa sổ trên Windows ⇒ phiên không chờ, không giữ nó.
+// cwd = thư mục hook (không phải thư mục dự án): tiến trình nền đang chạy không khoá thư mục dự án/worktree trên Windows.
+function launchRefresh() {
+  try {
+    const child = spawn(process.execPath, [UPDATES_SCRIPT, 'check', '--fresh'], { cwd: HOOK_DIR, detached: true, stdio: 'ignore', windowsHide: true })
+    child.on('error', (e) => logErr(`kích kiểm cập nhật lỗi (${errTag(e)})`))
+    child.unref()
+  } catch (e) {
+    logErr(`kích kiểm cập nhật lỗi (${errTag(e)})`)
+  }
+}
+
+// Dòng nhắc từ cache (không bao giờ hỏi mạng). Dấu "đã nhắc hôm nay" ghi vào cache (nằm ngoài repo). Kích kiểm nền CHỈ khi chính phiên này giành được quyền
+// (claimRefresh: file khoá updates.spawn.lock tạo bằng 'wx' = nguyên tử, hết hạn 10 phút) — hai phiên mở cùng lúc chỉ một bên spawn, không quyết định từ bản cache đọc trước đó.
+function updatesSection() {
+  if (process.env.FLOW_UPDATES === 'off') return ''
+  const now = Date.now()
+  const cache = readUpdatesCache()
+  const line = noteLine(cache, todayOf(now), { now })
+  if (line) patchUpdatesCache({}, (c) => ({ ...c, notified: todayOf(now) }))
+  if (isStale(cache, now) && claimRefresh({}, now)) launchRefresh()
+  return line ? `${UPDATES_PREFIX}${line}` : ''
+}
+
 // ---------- lời nhắc an toàn (v7) ----------
 
 // Tên server / đường dẫn lấy từ file trong repo (không đáng tin): chỉ giữ chữ an toàn, một dòng, có độ dài trần ⇒ không dùng để cài lời lẽ vào context.
@@ -341,10 +375,11 @@ try {
   ].filter(Boolean).join('\n')
   const progress = repo ? safe('progress', () => progressSection(repo.top, repo.branch)) : ''
   const mcp = safe('mcp', mcpSection)
-  // Sổ chốt lấy phần trần còn lại sau lời nhắc an toàn + tiến độ + nhắc MCP (và các dòng trống ngăn cách giữa các phần) ⇒ tổng luôn ≤ TOTAL_CAP.
-  const room = TOTAL_CAP - notices.length - progress.length - mcp.length - (notices ? 2 : 0) - (progress ? 2 : 0) - (mcp ? 2 : 0)
+  const upd = safe('cập nhật công cụ', updatesSection)
+  // Sổ chốt lấy phần trần còn lại sau lời nhắc an toàn + tiến độ + nhắc MCP + nhắc cập nhật (và các dòng trống ngăn cách giữa các phần) ⇒ tổng luôn ≤ TOTAL_CAP.
+  const room = TOTAL_CAP - notices.length - progress.length - mcp.length - upd.length - (notices ? 2 : 0) - (progress ? 2 : 0) - (mcp ? 2 : 0) - (upd ? 2 : 0)
   const chot = repo ? safe('so-chot', () => excerpt(repo.top, { branch: repo.branch, budget: room })) : ''
-  const parts = [notices, progress, chot, mcp].filter(Boolean)
+  const parts = [notices, progress, chot, mcp, upd].filter(Boolean)
   if (parts.length) {
     process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: parts.join('\n\n') } }))
   }
