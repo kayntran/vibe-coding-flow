@@ -101,7 +101,7 @@ function addBranch(fx, name) {
 const pidOf = (fx, cwd = fx.wt) => /^pid: ([0-9a-f]{40,})$/m.exec(cli(fx, cwd, 'status').stdout)?.[1]
 
 // Đóng đủ dấu review + qa + test (flow-v5: cổng gộp đòi thêm dấu test; test:false = chỉ review + qa).
-function stampBoth(fx, { qa = 'QA ok\n', cwd = fx.wt, test = true } = {}) {
+function stampBoth(fx, { qa = 'QA ok\nUser duyệt giao diện: có\n', cwd = fx.wt, test = true } = {}) {
   const review = write(fx.root, 'review.json', JSON.stringify({ findings: [] }))
   const qaFile = write(fx.root, 'qa.md', qa)
   const r1 = cli(fx, cwd, 'stamp', 'review', review)
@@ -488,6 +488,36 @@ describe('stamp & status', () => {
     assert.match(na.stderr, /UI/)
     assert.match(cli(fx, fx.wt, 'status').stdout, /uiTouched: true/)
     assert.ok(!fs.existsSync(fx.gates) || fs.readdirSync(fx.gates).length === 0)
+  })
+
+  test('diff có file UI: báo cáo QA phải có dòng "User duyệt giao diện: có" (AI đã dừng cho user xem và user gật); diff không UI thì không đòi', () => {
+    const fx = fixture()
+    commit(fx.wt, 'Page.vue', '<template/>\n', 'ui')
+    const thieu = cli(fx, fx.wt, 'stamp', 'qa', write(fx.root, 'q1.md', 'QA đạt hết\n'))
+    assert.equal(thieu.status, 1)
+    assert.match(thieu.stderr, /duyệt giao diện/)
+    assert.equal(cli(fx, fx.wt, 'stamp', 'qa', write(fx.root, 'q2.md', 'QA đạt\nUser duyệt giao diện: chưa\n')).status, 1)
+    // câu chưa phải lời gật ⇒ không tính (review Grok)
+    for (const [i, line] of ['có thể xem lại sau khi sửa nút', 'ok không', 'rồi nhưng chưa'].entries()) {
+      assert.equal(cli(fx, fx.wt, 'stamp', 'qa', write(fx.root, `qn${i}.md`, `QA đạt\nUser duyệt giao diện: ${line}\n`)).status, 1, line)
+    }
+    // chữ tiếng Việt dạng NFD (macOS) vẫn nhận
+    assert.equal(cli(fx, fx.wt, 'stamp', 'qa', write(fx.root, 'qd.md', 'QA đạt\nUser duyệt giao diện: có\n'.normalize('NFD'))).status, 0)
+    assert.equal(cli(fx, fx.wt, 'stamp', 'qa', write(fx.root, 'q3.md', 'QA đạt\n- **User duyệt giao diện:** có (2026-10-12, ảnh màn chính)\n')).status, 0)
+    const fx2 = fixture()
+    commit(fx2.wt, 'feat.go', 'package x\n', 'feat')
+    assert.equal(cli(fx2, fx2.wt, 'stamp', 'qa', write(fx2.root, 'q.md', 'ok\n')).status, 0)
+  })
+
+  test('cổng gộp kiểm lại dấu QA đã lưu: diff có UI mà file dấu thiếu dòng duyệt (vd đóng dấu lúc uiPattern tạm loại UI) ⇒ coi như thiếu qa', () => {
+    const fx = fixture()
+    commit(fx.wt, 'Page.vue', '<template/>\n', 'ui')
+    const pid = pidOf(fx)
+    fs.mkdirSync(fx.gates, { recursive: true })
+    fs.writeFileSync(path.join(fx.gates, `qa-${pid}.md`), 'QA xong\n') // dấu lưu sẵn, không có dòng duyệt
+    assert.match(cli(fx, fx.wt, 'status').stdout, /qa: không/)
+    fs.writeFileSync(path.join(fx.gates, `qa-${pid}.md`), 'QA xong\nUser duyệt giao diện: có\n')
+    assert.match(cli(fx, fx.wt, 'status').stdout, /qa: có/)
   })
 
   test('diff chỉ có file nhị phân vẫn có pid', () => {
@@ -1424,6 +1454,61 @@ describe('subagent-stop: audit phạm vi làn', () => {
     }
   })
 
+  // Tài liệu (docs/specs/…/PLAN.md) nằm ngoài git [o3e4]: worktree mới tạo không có bản này, bản thật ở thư mục chính.
+  describe('PLAN.md không có trong worktree ⇒ tìm cùng đường dẫn tương đối ở thư mục chính', () => {
+    const REL = 'docs/specs/x/PLAN.md'
+    const TABLE = (files) => `| lane | files | depends_on |\n|---|---|---|\n| A | ${files} | - |\n`
+
+    test('đường dẫn tuyệt đối trong worktree / tương đối theo cwd ⇒ dùng bản ở thư mục chính: trong scope qua, ngoài scope bị bắt', () => {
+      const { fx } = auditFx()
+      write(fx.main, REL, TABLE('feat.go'))
+      assert.equal(fs.existsSync(path.join(fx.wt, REL)), false, 'điều kiện: worktree không có PLAN')
+      for (const planRef of [path.join(fx.wt, REL), REL, path.join(fx.wt, REL).replace(/\\/g, '/')]) {
+        assertPass(go(fx, tx(fx, briefOf(planRef)), 'coder'))
+      }
+      commit(fx.wt, 'extra.js', 'x\n', 'ngoài scope')
+      for (const planRef of [path.join(fx.wt, REL), REL]) {
+        assert.match(assertBlock(go(fx, tx(fx, briefOf(planRef)))), /OUTSIDE extra\.js/, planRef)
+      }
+    })
+
+    test('đường dẫn có dấu cách và tiếng Việt vẫn tìm được ở thư mục chính', () => {
+      const { fx } = auditFx()
+      const rel = 'docs/specs/2026-10-12 trang dự án/PLAN.md'
+      write(fx.main, rel, TABLE('feat.go'))
+      commit(fx.wt, 'extra.js', 'x\n', 'ngoài scope')
+      assert.match(assertBlock(go(fx, tx(fx, `outcome=x\nplan="${path.join(fx.wt, rel)}"\nlane=A\n`))), /OUTSIDE extra\.js/)
+    })
+
+    test('worktree CÓ bản riêng ⇒ dùng bản trong worktree, không nhìn sang thư mục chính', () => {
+      const { fx } = auditFx()
+      write(fx.main, REL, TABLE('khong-co-gi.go')) // bản chính: feat.go ngoài scope
+      write(fx.wt, REL, TABLE('feat.go'))
+      assertPass(go(fx, tx(fx, briefOf(path.join(fx.wt, REL)))))
+    })
+
+    test('không có ở cả worktree lẫn thư mục chính ⇒ vẫn block như AC-09 (không kiểm được phạm vi), có log', () => {
+      const { fx } = auditFx()
+      commit(fx.wt, 'extra.js', 'x\n', 'ngoài scope')
+      const reason = assertBlock(go(fx, tx(fx, briefOf(path.join(fx.wt, REL)))))
+      assert.match(reason, /không kiểm được phạm vi làn A vì/)
+      assert.match(fs.readFileSync(fx.log, 'utf8'), /lane-check audit lane A/)
+    })
+
+    test('đường dẫn nằm ngoài worktree (không có đường dẫn tương đối) và không tồn tại ⇒ không đoán, vẫn block', () => {
+      const { fx } = auditFx()
+      write(fx.main, 'PLAN-ngoai.md', TABLE('feat.go'))
+      const reason = assertBlock(go(fx, tx(fx, briefOf(path.join(fx.root, 'khong-co', 'PLAN.md')))))
+      assert.match(reason, /không kiểm được phạm vi làn A vì/)
+    })
+
+    test('chạy ngay ở thư mục chính (không phải worktree) mà PLAN không có ⇒ không tìm đâu khác, block như cũ', () => {
+      const { fx } = auditFx()
+      const reason = assertBlock(go(fx, tx(fx, briefOf(path.join(fx.main, REL))), 'coder', { cwd: fx.main }))
+      assert.match(reason, /không kiểm được phạm vi làn A vì/)
+    })
+  })
+
   test('làn khác trong cùng plan: file của làn A là ngoài scope của làn B', () => {
     const { fx, plan } = auditFx()
     const reason = assertBlock(go(fx, tx(fx, briefOf(plan, 'lane=B'))))
@@ -2259,6 +2344,16 @@ describe('v7 Stop: nhánh có sổ tiến độ chưa xong mà mục Làn: còn 
   test('mục Làn: có dòng phụ thụt lề / dòng trống giữa các làn vẫn được đọc; "* [ ]" cũng tính', () => {
     const fx = sheetFx({ body: 'Làn:\n- [x] A đã gộp\n\n  ghi chú thụt lề\n* [ ] B đang làm\n' })
     assertPass(hook(fx, 'stop', stopIn(fx.wt)))
+  })
+
+  test('sổ nằm ngoài git ở THƯ MỤC CHÍNH (kit để docs ngoài git), worktree không có ⇒ vẫn đọc được: còn "- [ ]" thì không nhắc', () => {
+    const fx = fixture()
+    commit(fx.wt, 'feat.go', 'package x\n', 'feat')
+    fs.mkdirSync(path.join(fx.main, 'docs', 'specs', 'x'), { recursive: true })
+    fs.writeFileSync(path.join(fx.main, SHEET), sheet()) // không commit: chỉ nằm trên đĩa ở thư mục chính
+    assertPass(hook(fx, 'stop', stopIn(fx.wt)))
+    fs.writeFileSync(path.join(fx.main, SHEET), sheet({ body: 'Làn:\n- [x] A đã gộp\n' }))
+    assert.match(assertBlock(hook(fx, 'stop', stopIn(fx.wt))), /thiếu: review, qa/)
   })
 
   test('không có sổ nào ⇒ nhắc như cũ (không ảnh hưởng nhánh bình thường)', () => {

@@ -28,6 +28,10 @@ const DOC_FILE = /\.(md|mdx|txt)$/i // diff chỉ có file này (hoặc dưới 
 const DEPS_BUDGET_MS = 8000 // tổng thời gian kiểm thư viện mới (hook bash có 15 s); quá hạn ⇒ unknown, không chặn
 const RECEIPT_RE = /return=(done_with_concerns|done|needs_context|blocked|green|red)\b/ // green|red là của test-runner
 const NA_RE = /^\uFEFF?\s*N\/A/i
+// B\u00E1o c\u00E1o QA c\u1EE7a diff c\u00F3 UI ph\u1EA3i ghi user \u0111\u00E3 xem v\u00E0 g\u1EADt giao di\u1EC7n (AI d\u1EEBng h\u1ECFi "\u0111\u00E3 \u1ED5n ch\u01B0a?" tr\u01B0\u1EDBc khi review/g\u1ED9p).
+// Sau l\u1EDDi g\u1EADt ch\u1EC9 \u0111\u01B0\u1EE3c h\u1EBFt d\u00F2ng ho\u1EB7c k\u00FD t\u1EF1 kh\u00F4ng ph\u1EA3i ch\u1EEF (vd "c\u00F3 (ng\u00E0y, xem g\u00EC)"); "c\u00F3 th\u1EC3\u2026", "ok kh\u00F4ng" kh\u00F4ng t\u00EDnh. So tr\u00EAn b\u1EA3n NFC.
+const UI_OK_RE = /^[ \t>*_-]*User duy\u1EC7t giao di\u1EC7n[ \t*_]*[:\uFF1A][ \t*_]*(c\u00F3|r\u1ED3i|ok|\u0111\u1ED3ng \u00FD)(?![ \t]*[\p{L}\p{N}])/imu
+const uiApproved = (text) => UI_OK_RE.test(String(text).normalize('NFC'))
 
 function log(msg) {
   try {
@@ -149,7 +153,7 @@ function gateState(info, base, head) {
   const hasReview = readMark(path.join(info.gatesDir, `review-${pid}.json`)) !== null
   const qa = readMark(path.join(info.gatesDir, `qa-${pid}.md`))
   const naOnUi = qa !== null && ui && NA_RE.test(qa)
-  const hasQa = qa !== null && !naOnUi
+  const hasQa = qa !== null && !naOnUi && (!ui || uiApproved(qa)) // diff có UI ⇒ dấu QA phải ghi user đã duyệt giao diện
   const testExempt = testExemption(info, base, head)
   const hasTest = readMark(path.join(info.gatesDir, `test-${pid}.json`)) !== null
   const missing = []
@@ -1086,7 +1090,9 @@ async function lanesStillOpen(info) {
   if (!info.branch || info.branch === 'HEAD') return false
   try {
     const { openProgress } = await import('./lib/so-chot.mjs')
-    const hit = openProgress(info.toplevel, info.branch)
+    // worktree không có sổ (docs ngoài git [o3e4]) ⇒ tìm ở thư mục chính, như planFromMain
+    const hit = openProgress(info.toplevel, info.branch) ??
+      (info.linked && path.basename(info.commonDir) === '.git' ? openProgress(path.dirname(info.commonDir), info.branch) : null)
     if (!hit || fs.statSync(hit.file).size > 1024 * 1024) return false
     return hasOpenLane(fs.readFileSync(hit.file, 'utf8'))
   } catch (e) {
@@ -1163,6 +1169,25 @@ function firstUserMessage(file) {
   return null
 }
 
+// Đường dẫn thật, kể cả khi chính nó chưa tồn tại: realpath của thư mục tồn tại gần nhất + phần còn lại (so sánh với toplevel của git, vốn là realpath).
+function realish(p) {
+  const abs = path.resolve(p)
+  const d = existingDir(abs)
+  if (!d) return abs
+  try { return path.join(fs.realpathSync.native(d), path.relative(d, abs)) } catch { return abs }
+}
+
+// Tài liệu (docs/specs/…/PLAN.md) nằm ngoài git [o3e4] nên worktree mới tạo không có bản này: plan= trỏ vào worktree mà file không có ở đó
+// ⇒ tìm cùng đường dẫn tương đối ở thư mục chính của repo. Có bản trong worktree, plan ngoài worktree, đang ở thư mục chính, hay vẫn không
+// thấy ⇒ giữ nguyên plan (lane-check báo lỗi ⇒ block như AC-09).
+function planFromMain(plan, info) {
+  if (!info?.linked || fs.existsSync(plan) || path.basename(info.commonDir) !== '.git') return plan
+  const rel = path.relative(realish(info.toplevel), realish(plan))
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return plan
+  const alt = path.join(path.dirname(info.commonDir), rel)
+  return fs.existsSync(alt) ? alt : plan
+}
+
 // Worker coder nộp bài: brief (tin nhắn user đầu trong transcript) có plan= và lane= ⇒ chạy lane-check audit trong cwd của worker.
 // Phát hiện file ngoài scope (exit 1) ⇒ block. AC-09: lane-check không chạy được (exit 2/lỗi) ⇒ cũng block (không cho qua âm thầm); lặp vô hạn
 // không xảy ra vì lượt sau stop_hook_active=true ⇒ cho qua. Brief không có plan=/lane= ⇒ không có gì để audit ⇒ cho qua.
@@ -1172,10 +1197,11 @@ function auditScope(input) {
   if (!brief) return null
   const cwd = path.resolve(toNative(input.cwd || process.cwd()))
   // Bộ đọc brief dùng chung với flow-dispatch (lib/brief.mjs): nháy, đường dẫn có dấu cách, ~/, /c/…, tiền tố ngắn dần.
-  const plan = briefPlan(brief, cwd)
+  const briefed = briefPlan(brief, cwd)
   const lane = briefWord(brief, 'lane')
-  if (!plan || !lane) return null
+  if (!briefed || !lane) return null
   const info = repoInfo(cwd)
+  const plan = planFromMain(briefed, info)
   const base = briefWord(brief, 'base') ?? (info ? mainBranch(info) : 'main')
   // --repo = cwd của worker: plan thường nằm ngoài repo của worker (vd ~/.claude/plans), nên không suy repo từ đường dẫn plan.
   const args = [path.join(HOOK_DIR, 'lane-check.mjs'), 'audit', plan, lane, '--repo', cwd, '--worktree', cwd, '--branch', 'HEAD', '--base', base]
@@ -1300,7 +1326,12 @@ function cliStamp(kind, file) {
     if (!json || !Array.isArray(json.findings)) return fail(`${file} thiếu mảng "findings".`)
   } else {
     if (!text.trim()) return fail(`${file} rỗng.`)
-    if (NA_RE.test(text) && uiTouched(info, base, 'HEAD')) return fail(`${file} ghi N/A nhưng diff có file UI; cần QA thật.`)
+    const ui = uiTouched(info, base, 'HEAD')
+    if (NA_RE.test(text) && ui) return fail(`${file} ghi N/A nhưng diff có file UI; cần QA thật.`)
+    if (ui && !uiApproved(text)) {
+      return fail(`${file} thiếu dòng "User duyệt giao diện: có". Diff có file UI ⇒ trước khi đóng dấu QA, mở app/ảnh chụp cho user xem và hỏi ` +
+        '"giao diện đã ổn chưa?" (AskUserQuestion); user gật thì ghi dòng đó vào báo cáo, chưa ưng thì sửa rồi hỏi lại.')
+    }
   }
   fs.mkdirSync(info.gatesDir, { recursive: true })
   fs.copyFileSync(path.resolve(file), path.join(info.gatesDir, kind === 'review' ? `review-${pid}.json` : `qa-${pid}.md`))

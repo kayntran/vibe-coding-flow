@@ -35,8 +35,19 @@ Mọi tài liệu của một tính năng nằm trong `docs/specs/<YYYY-MM-DD>-<
    bảo mật/input độc, khôi phục sau lỗi, tương thích bản cũ/dữ liệu cũ, truy cập bằng bàn phím/màn hẹp. Lặp tới khi hai
    vòng liên tiếp không thêm gì. Mỗi edge case giữ lại ⇒ một acceptance criteria hoặc một dòng "ngoài phạm vi".
    Có thể giao `researcher` gom thêm edge case người khác từng gặp với bài tương tự.
-6. **Cổng 1:** user duyệt SPEC — cổng DUY NHẤT user phải duyệt trước khi thi công. Viết/sửa SPEC xong ⇒ tóm tắt ngắn
+6. **Cổng 1:** user duyệt SPEC — cổng duy nhất về PHẠM VI (plan kỹ thuật không đưa user duyệt); màn mới / làm lại giao
+   diện còn cổng giao diện ở bước 7 trước pha 2. Viết/sửa SPEC xong ⇒ tóm tắt ngắn
    trong chat + chép bản xem vào thư mục mở phiên và mở sẵn (khung xem file không mở được file trong worktree).
+7. **Cổng giao diện** (tính năng có màn mới / làm lại giao diện), sau khi SPEC được duyệt, trước pha 2:
+   - Trong worktree, dựng ~5 bản demo theo các hướng bố cục/phong cách KHÁC NHAU, ngay trong app của dự án (webapp hoặc
+     desktop app chạy local, dùng chính stack + thành phần của dự án, dữ liệu mẫu tiếng Việt). Không dùng widget/artifact
+     hay file HTML rời. Dự án chưa có app ⇒ dựng khung app trước (task đầu của plan) rồi mới demo.
+   - Thêm thanh chuyển nhỏ nổi trên màn (Bản 1…5, phím ←/→) để bấm qua lại; chỉ bật khi chạy dev (vd `import.meta.env.DEV`,
+     cờ build dev) — không bao giờ có trong bản phát hành.
+   - Chạy app (`node ~/.claude/hooks/wt-env.mjs alloc <worktree>` lấy port), mở cho user xem, hỏi bằng AskUserQuestion:
+     chọn bản nào, cần sửa gì. Sửa theo lời tới khi gật; ghi bản đã chọn vào sổ chốt.
+   - Chọn xong ⇒ gỡ các bản còn lại + thanh chuyển; plan làm thật theo bản đã chọn. Sửa giao diện nhỏ (đổi chữ, màu, một
+     nút) ⇒ một bản, vẫn mở cho user xem và hỏi.
 
 ## Pha 2 — Plan kỹ thuật
 

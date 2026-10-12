@@ -17,7 +17,11 @@ integration, build) theo CLAUDE.md dự án. Đỏ ⇒ pha 7. Xanh ⇒ pha 6.
    Nhiều luồng độc lập ⇒ 2–3 `qa-tester` song song, mỗi con một nhóm criteria + port riêng.
 3. Đọc báo cáo, mở 1–2 ảnh của bug nặng nhất để kiểm claim.
 4. Có bug ⇒ pha 7, rồi chạy lại qa-tester cho đúng criteria hỏng + một vòng hồi quy luồng chính.
-5. Hết bug ⇒ đóng dấu trong worktree:
+5. Diff đụng giao diện ⇒ DỪNG: chạy app, mở cho user xem (hoặc 2–3 ảnh chụp màn chính), hỏi "giao diện đã ổn chưa?"
+   bằng AskUserQuestion. Chưa ưng ⇒ sửa, QA lại phần đổi, hỏi lại. Gật ⇒ ghi vào báo cáo dòng
+   `User duyệt giao diện: có (<ngày>, <xem gì>)` — thiếu dòng này hook không đóng dấu QA cho diff có UI. Kiểm luôn: bản
+   demo thừa và thanh chuyển demo đã gỡ hết.
+6. Hết bug ⇒ đóng dấu trong worktree:
    `node ~/.claude/hooks/flow-gate.mjs stamp qa <scratchpad>/qa/qa-report.md`
    Diff không đụng UI/app ⇒ được ghi file chỉ một dòng `N/A: <lý do>` rồi stamp (hook từ chối N/A khi diff có file UI).
 

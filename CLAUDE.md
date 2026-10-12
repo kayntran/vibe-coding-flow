@@ -50,6 +50,11 @@ AGENTS.md, `.claude/rules/`) thắng phần này.
 
 **Phân cỡ** — nói một dòng trước khi làm:
 - **S** (tả diff bằng một câu, 1–2 file, không đổi schema/API): worktree → làm → kiểm → QA nếu đụng UI → review → hỏi gộp.
+- **Đụng giao diện (mọi cỡ) ⇒ DỪNG cho user xem trước khi đi tiếp.** Màn mới / làm lại giao diện ⇒ trước khi code thật,
+  dựng ~5 bản demo khác hướng NGAY TRONG app của dự án chạy local (dữ liệu mẫu; không widget/artifact) + thanh chuyển qua
+  lại giữa các bản (chỉ bật khi chạy dev), mở app cho user chọn; sửa nhỏ ⇒ một bản. Chọn xong ⇒ làm thật, gỡ bản thừa.
+  Làm xong ⇒ mở app/ảnh chụp, hỏi "giao diện đã ổn chưa?" (AskUserQuestion); gật rồi mới review/gộp (báo cáo QA ghi
+  `User duyệt giao diện: có` — thiếu thì hook không đóng dấu QA).
 - **M** (nhiều file một module) / **L** (tính năng mới, schema, nhiều module, bảo mật): đủ pha, bắt đầu bằng `flow-spec`.
 
 **Định tuyến** — user nói gì thì làm gì:
