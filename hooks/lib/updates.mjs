@@ -89,6 +89,15 @@ const OWN = { // thư mục riêng của bộ cài từng hãng
   devin: ['self', /\/devin\/cli\/|\/\.local\/bin\/devin/],
 }
 const defaultRealpath = (p) => fs.realpathSync.native(p)
+// Nội dung (≤ 4 KB) của file chạy và bản .cmd cạnh nó — chỉ để nhận shim; không đọc được ⇒ [].
+function shimText(binPath, o) {
+  const read = o.readFile ?? ((p) => { const b = Buffer.alloc(4096); const fd = fs.openSync(p, 'r'); try { return b.toString('utf8', 0, fs.readSync(fd, b, 0, 4096, 0)) } finally { fs.closeSync(fd) } })
+  const out = []
+  for (const p of new Set([String(binPath ?? ''), `${String(binPath ?? '').replace(/\.(cmd|ps1|exe)$/i, '')}.cmd`])) {
+    try { out.push(String(read(p))) } catch { /* không có file này */ }
+  }
+  return out
+}
 
 // Cách cài theo đường dẫn file chạy (và đường dẫn thật sau liên kết tượng trưng: Mac /opt/homebrew/bin/codex → …/lib/node_modules/…).
 // Thứ tự quan trọng: Devin Desktop → corepack → pnpm → npm (kể cả npm dưới node của brew) → bộ cài riêng → brew → fnm/nvm/volta → winget → Apple Git.
@@ -102,6 +111,8 @@ export function detectMethod(tool, binPath, o = {}) {
   const has = (re) => paths.some((p) => re.test(p))
   if (has(/\/resources\/app\/extensions\//)) return 'desktop'
   if (has(/\/corepack\//)) return 'corepack'
+  // Windows: shim .cmd trong thư mục npm của corepack (pnpm.cmd gọi node_modules\corepack\dist\pnpm.js) — đường dẫn giống npm nhưng npm sẽ từ chối EEXIST.
+  if (platform === 'win32' && shimText(binPath, o).some((t) => /corepack[\\/]dist[\\/]/i.test(t))) return 'corepack'
   if (has(/\/pnpm\/|\/\.pnpm\//)) return 'pnpm'
   if (has(/\/node_modules\/|\/appdata\/roaming\/npm\/|\/\.npm-global\/|\/npm\/[^/]+$/)) return 'npm'
   const own = OWN[tool]
@@ -191,7 +202,14 @@ export function updateCommand(tool, o = {}) {
   const r = CMD[tool]({ method, platform, latest: verOrNull(o.latest), onLts: Boolean(o.onLts), wingetHas: o.wingetHas ?? null, wingetFallback: verOrNull(o.wingetFallback), paths })
   const cmd = isSafeCmd(r.cmd) ? r.cmd : null
   const userRuns = Boolean(CATALOG[tool].affectsAll) || method === 'desktop'
-  return { cmd, userRuns, ...(r.note ? { note: r.note } : {}) }
+  // Có công cụ tự đổi `npm` ⇒ `pnpm` trong lệnh (gặp thật 2026-10-12): cài thành bản thứ hai qua pnpm (thường hỏng) thay vì nâng bản npm đang dùng.
+  // Đường npm-cli.js dựng từ Node đang chạy (đúng cả khi Node cài qua fnm/nvm), viết sẵn dạng chạy được trong PowerShell lẫn bash.
+  const npmCli = path.join(path.dirname(o.nodePath ?? process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')
+  const npmNote = cmd && method === 'npm' && platform === 'win32' && /^npm /.test(cmd)
+    ? `Có công cụ đổi npm→pnpm thì chạy npm gốc: node "${npmCli}" ${cmd.slice(4)}`
+    : null
+  const note = [r.note, npmNote].filter(Boolean).join('. ')
+  return { cmd, userRuns, ...(note ? { note } : {}) }
 }
 
 // ---------- tìm file chạy ----------
@@ -482,7 +500,7 @@ function cleanEntry(tool, e) {
     method: typeof e.method === 'string' && METHODS.has(e.method) ? e.method : 'unknown',
     cmd: isSafeCmd(e.cmd) ? e.cmd : null,
     userRuns: Boolean(e.userRuns), affectsAll: Boolean(def.affectsAll),
-    note: typeof e.note === 'string' && e.note ? e.note.replace(/[\u0000-\u001f\u007f]+/g, ' ').slice(0, 300) : null,
+    note: typeof e.note === 'string' && e.note ? e.note.replace(/[\u0000-\u001f\u007f]+/g, ' ').slice(0, 500) : null,
     eol: Boolean(e.eol),
   }
 }
@@ -557,7 +575,8 @@ async function probeTool(tool, o) {
     const notes = [d.note, cmd.note]
     if (def.dup) {
       const methods = [...new Set(findAll(tool, o).map((p) => detectMethod(tool, p, o)))]
-      if (methods.length > 1) notes.push(`Máy có hai bản ${def.label} (${methods.join(' và ')}). Lệnh cập nhật chỉ sửa bản đang dùng (${method}); bản còn lại nên gỡ.`)
+      // cảnh báo hai bản đứng ĐẦU: ghi chú bị cắt ở trần độ dài thì vẫn còn lời khuyên gỡ bản thừa
+      if (methods.length > 1) notes.unshift(`Máy có hai bản ${def.label} (${methods.join(' và ')}). Lệnh cập nhật chỉ sửa bản đang dùng (${method}); bản còn lại nên gỡ.`)
     }
     const entry = cleanEntry(tool, {
       installed, latest: d.latest ?? null, method, cmd: cmd.cmd, userRuns: cmd.userRuns, eol: d.eol,

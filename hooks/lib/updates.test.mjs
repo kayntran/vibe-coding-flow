@@ -206,6 +206,23 @@ describe('detectMethod', () => {
   for (const [tool, p, o, want] of table) {
     test(`${tool} ở ${p} ⇒ ${want}`, () => assert.equal(U.detectMethod(tool, p, o), want))
   }
+  test('Windows: pnpm.cmd trong thư mục npm mà nội dung gọi corepack ⇒ corepack (không phải npm — npm sẽ từ chối EEXIST); shim npm thường ⇒ npm', () => {
+    const shim = (text) => ({ platform: 'win32', realpath: () => { throw new Error('x') }, readFile: (p) => { if (/pnpm(\.cmd)?$/i.test(p)) return text; throw new Error('ENOENT') } })
+    const corepack = '@IF EXIST "%~dp0\\node.exe" (\r\n  "%~dp0\\node.exe"  "%~dp0\\node_modules\\corepack\\dist\\pnpm.js" %*\r\n)'
+    assert.equal(U.detectMethod('pnpm', `${APD}\\npm\\pnpm.cmd`, shim(corepack)), 'corepack')
+    assert.equal(U.detectMethod('pnpm', `${APD}\\npm\\pnpm`, shim(corepack)), 'corepack')
+    assert.equal(U.detectMethod('pnpm', `${APD}\\npm\\pnpm.cmd`, shim('"%~dp0\\node_modules\\pnpm\\bin\\pnpm.cjs" %*')), 'npm')
+    assert.equal(U.updateCommand('pnpm', { path: `${APD}\\npm\\pnpm.cmd`, latest: '12.9.1', ...shim(corepack) }).cmd, 'corepack install -g pnpm@12.9.1')
+  })
+  test('Windows, cài bằng npm ⇒ lệnh giữ nguyên + ghi chú chạy npm gốc (công cụ đổi npm→pnpm sẽ cài thành bản thứ hai)', () => {
+    const r = U.updateCommand('claude', { method: 'npm', platform: 'win32', latest: '2.1.296' })
+    assert.equal(r.cmd, 'npm install -g @anthropic-ai/claude-code@latest')
+    assert.match(r.note ?? '', /npm-cli\.js/)
+    assert.doesNotMatch(r.note, /%ProgramFiles%/) // PowerShell không nới biến kiểu cmd
+    const custom = U.updateCommand('claude', { method: 'npm', platform: 'win32', latest: '2.1.296', nodePath: 'C:\\Users\\t\\fnm\\node.exe' })
+    assert.match(custom.note, /C:\\Users\\t\\fnm\\node_modules\\npm\\bin\\npm-cli\.js" install -g @anthropic-ai\/claude-code@latest/) // dựng từ Node đang chạy (fnm/nvm)
+    assert.equal(U.updateCommand('claude', { method: 'npm', platform: 'darwin', latest: '2.1.296' }).note, undefined)
+  })
   test('realpath ném lỗi ⇒ vẫn dùng đường dẫn gốc, không ném', () => {
     assert.equal(U.detectMethod('codex', `${LAD}\\pnpm\\bin\\codex.cmd`, { platform: 'win32', realpath: () => { throw new Error('x') } }), 'pnpm')
   })
