@@ -6,8 +6,9 @@ description: Kiểm và sửa — chạy lint/typecheck/test, tự mở app dùn
 # Flow — kiểm, test thực tế, debug
 
 ## Pha 5 — Kiểm cơ học
-Agent `test-runner` chạy đủ bộ (lint, typecheck, unit, integration, build) theo CLAUDE.md dự án.
-Đỏ ⇒ pha 7. Xanh ⇒ pha 6.
+`node ~/.claude/hooks/flow-check.mjs --dir <worktree>` (máy kiểm theo stack: lint, typecheck, SAST, lỗ hổng thư viện,
+khoá trong bản build — công cụ thiếu ⇒ hỏi user cài, không cài ngầm) + Agent `test-runner` chạy đủ bộ test (unit,
+integration, build) theo CLAUDE.md dự án. Đỏ ⇒ pha 7. Xanh ⇒ pha 6.
 
 ## Pha 6 — Test thực tế
 1. Lấy QA charter trong PLAN.md (cỡ S: captain tự viết 3–5 dòng từ yêu cầu).

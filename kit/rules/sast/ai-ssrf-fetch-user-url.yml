@@ -1,0 +1,33 @@
+id: ai-ssrf-fetch-user-url
+language: Tsx
+severity: error
+message: "fetch / axios.get gọi địa chỉ lấy thẳng từ request mà chưa kiểm (SSRF)"
+note: |
+  Người dùng có thể bắt máy chủ của bạn gọi vào mạng nội bộ, metadata đám mây hoặc dịch vụ khác.
+  Sửa: chỉ cho gọi tên miền trong danh sách cho phép (kiểm bằng hàm validate trước khi fetch), hoặc dựng URL từ phần cố định.
+rule:
+  any:
+    - pattern: fetch($U)
+    - pattern: fetch($U, $OPTS)
+    - pattern: axios.get($U)
+    - pattern: axios.get($U, $OPTS)
+constraints:
+  U:
+    all:
+      - not:
+          kind: string
+      - not:
+          kind: call_expression
+          has:
+            field: function
+            regex: '(?i)(valid|safe|allow|sanitize|assert|check|verify)'
+      - regex: '(?i)\b(req|request|searchParams|query|params|body|formData|userUrl|user_url)\b'
+ignores:
+  - '**/node_modules/**'
+  - '**/dist/**'
+  - '**/build/**'
+  - '**/.next/**'
+  - '**/out/**'
+  - '**/kit/rules/fixtures/**'
+  - '**/*.test.*'
+  - '**/*.spec.*'

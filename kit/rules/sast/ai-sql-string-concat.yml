@@ -1,0 +1,39 @@
+id: ai-sql-string-concat
+language: Tsx
+severity: error
+message: "Câu SQL ghép chuỗi từ biến (nguy cơ SQL injection)"
+note: |
+  Giá trị người dùng nằm thẳng trong câu SQL nên kẻ xấu đọc, sửa hoặc xoá được cả bảng.
+  Sửa: dùng tham số hoá (db.query với dấu $1 và mảng giá trị, hoặc query builder / ORM), không ghép chuỗi hay template.
+rule:
+  kind: call_expression
+  all:
+    - has:
+        field: function
+        kind: member_expression
+        has:
+          field: property
+          regex: '^\$?(query|execute|raw|exec|queryRawUnsafe|executeRawUnsafe|unsafe)$'
+    - has:
+        field: arguments
+        kind: arguments
+        has:
+          any:
+            - kind: template_string
+              regex: '(?i)\b(select|insert|update|delete)\b'
+              has:
+                kind: template_substitution
+            - kind: binary_expression
+              has:
+                stopBy: end
+                kind: string
+                regex: '(?i)\b(select|insert|update|delete)\b'
+ignores:
+  - '**/node_modules/**'
+  - '**/dist/**'
+  - '**/build/**'
+  - '**/.next/**'
+  - '**/out/**'
+  - '**/kit/rules/fixtures/**'
+  - '**/*.test.*'
+  - '**/*.spec.*'

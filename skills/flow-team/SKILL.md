@@ -1,6 +1,6 @@
 ---
 name: flow-team
-description: Đội hình worker và cách giao việc — chọn worker nào (researcher, recon, coder, coder-lite, test-runner, qa-tester, debugger, Codex, Grok, agy), viết brief, đọc receipt, chạy song song nhiều worker, thang leo khi worker hỏng, ghi nhật ký. Dùng khi sắp gọi Agent tool hoặc CLI model ngoài, khi chia làn thi công song song, khi worker trả blocked/sai. KHÔNG cần cho việc captain tự làm (tìm kiếm rg, phỏng vấn, viết plan, UI, việc dưới ~5 phút).
+description: Đội hình worker và cách giao việc — chọn worker nào (researcher, recon, coder, coder-lite, coder-mini, test-runner, qa-tester, debugger, Codex, Grok, agy), viết brief, đọc receipt, chạy song song nhiều worker, thang leo khi worker hỏng, ghi nhật ký. Dùng khi sắp gọi Agent tool hoặc CLI model ngoài, khi chia làn thi công song song, khi worker trả blocked/sai. KHÔNG cần cho việc captain tự làm (tìm kiếm rg, phỏng vấn, viết plan, UI, việc dưới ~5 phút).
 ---
 
 # Đội hình & giao việc
@@ -9,24 +9,30 @@ description: Đội hình worker và cách giao việc — chọn worker nào (r
 
 | Vai | Ai | Giao khi | Không giao |
 |---|---|---|---|
-| Research prior art | `researcher` (Sonnet high) — tự tìm GitHub + gọi thêm **Grok 4.7** + **agy** để có thêm góc nhìn | ý tưởng cỡ M/L, dò edge case cỡ L | quyết định |
+| Research prior art | `researcher` (Sonnet high) — tự tìm GitHub + gọi thêm **Grok** + **agy** để có thêm góc nhìn | ý tưởng cỡ M/L, dò edge case cỡ L | quyết định |
 | Đọc thô / tra docs | `recon` (Sonnet high) | đọc >30KB trong repo, tra API/CVE, trả kết luận `path:line` | quyết định |
 | Code có mẫu | `coder-lite` (Sonnet high) | i18n, docs, sửa lặp, test theo spec rõ, lint/type, bug hẹp có test tái hiện | logic mới, schema, đồng thời, bảo mật |
 | Code khó | `coder` (Sonnet xhigh) | service, SQL/transaction/schema, khoá đồng thời, bảo mật, logic mới | việc chép lặp |
-| Kiểm cơ học | `test-runner` (Haiku 4.5) | lint/typecheck/test/build, trả CHỈ phần đỏ | đoán nguyên nhân, sửa code |
+| Việc nhỏ | `coder-mini` (Haiku medium) | mini project độc lập, tính năng cỡ S 1–2 file có mẫu, sửa nhanh có test tái hiện | logic mới phức tạp, schema, bảo mật, UI |
+| Kiểm cơ học | `test-runner` (Haiku medium) | lint/typecheck/test/build, trả CHỈ phần đỏ | đoán nguyên nhân, sửa code |
 | Test thực tế | `qa-tester` (Sonnet high) | chạy app, lái Playwright như người dùng theo QA charter | sửa code |
 | Debug | `debugger` (Sonnet xhigh, hỏi thêm **Codex**) | test đỏ, CI đỏ, log server, stack trace ⇒ nguyên nhân gốc | sửa code |
-| Review plan | **Codex gpt-6.1-sol medium**, 1 lượt — CHỈ việc cỡ L | sau khi viết PLAN.md | cỡ S/M (captain tự soát) |
-| Review code + bảo mật + hiệu năng | theo rủi ro (thường: **Grok 4.7** · nhạy cảm: **Codex high** + Grok · tiền/dữ liệu: + **Gemini 3.8 Flash**), qua `review-ext.mjs` / `codex exec` | MỘT lần cho cả tính năng, trước khi gộp (skill `flow-review`) | sau từng giai đoạn/làn |
-| Review dự phòng | Codex → Grok → Gemini Flash → `code-reviewer` (Opus 5.5 medium) | lượt nào lỗi thì sang model kế chưa dùng | — |
+| Soát plan | chuỗi Codex Sol high → Opus high qua agy → `code-reviewer` opus (đang ở Codex: Sol high), 1 lượt — CHỈ cỡ L (skill `flow-spec` pha 3) | sau khi viết PLAN.md, thay cho việc user duyệt plan | cỡ S/M (captain tự soát) |
+| Review code + bảo mật + hiệu năng | theo rủi ro (thường: **Grok** · nhạy cảm: **Codex Sol high** + Grok · tiền/dữ liệu: + **Gemini Flash**), tất cả qua `review-ext.mjs --model …` | MỘT lần cho cả tính năng, trước khi gộp (skill `flow-review`) | sau từng giai đoạn/làn |
+| Review dự phòng | Codex → Grok → Gemini Flash → `code-reviewer` (Opus medium) | lượt nào lỗi thì sang model kế chưa dùng | — |
 
-- **agy** (Antigravity CLI) CHỈ dùng cho research, KHÔNG dùng review. Model: `claude-opus-4-6-thinking`; hết lượt dùng ⇒
-  `gemini-3.1-pro-high`.
+- **Model luôn là bản mới nhất của dòng** (`kit/roles.json`): Claude ghi tên dòng (`sonnet|opus|haiku`) trong
+  frontmatter agent; CLI ngoài lấy id bằng `node ~/.claude/hooks/models.mjs pick <app> <vai>` — KHÔNG ghi cứng id.
+  User đổi model cho vai bằng lời ⇒ `models.mjs set <vai> <app> <dòng>[:mức]` (ghi `~/.claude/flow.local.json`, giữ khi
+  cập nhật kit), `reset <vai>` để trả mặc định.
+- **Trước mọi lần gọi CLI ngoài** (codex, agy, cursor-agent, grok, devin): `node ~/.claude/hooks/cli-check.mjs <tên>`.
+  Chưa sẵn sàng ⇒ dùng worker native; chỉ đưa user lệnh đăng nhập khi lý do là `not-logged-in` (hết lượt/mất mạng thì không).
+- **agy** dùng cho research và soát plan (Opus mới nhất), không dùng review code.
 - Ưu tiên provider khác cho vai **đánh giá** (review, research, ý kiến debug thứ hai): người viết ≠ người chấm.
 - Viết code giữ Sonnet — A/B 2026-09-29, 39 lượt việc thật, 2 giám khảo chấm mù: Sonnet xhigh 46,0/50 cao nhất ở
   DB+khoá và bảo mật (~$0,8/việc); Sonnet high 45,1 rẻ nhất ($0,39). Sonnet low/medium tụt mạnh ở việc khó. Codex
   viết code chưa đo — muốn dùng thì A/B trước; khi Codex viết thì Claude review.
-- Model ghim id đầy đủ trong frontmatter agent, không alias. Không truyền `model` khi gọi Agent, trừ bậc leo Opus.
+- Không truyền `model` khi gọi Agent, trừ bậc leo Opus.
 
 Captain tự làm: tìm kiếm "X ở đâu" bằng MỘT lệnh `rg` nhiều path + nhiều `-e` (worker tìm kiếm tốn 30–45K token và
 sót dòng — đo 2026-09-28) · phỏng vấn · viết plan · UI · việc dưới ~5 phút hoặc 1–2 file · việc dự án khai captain-only.
@@ -83,7 +89,7 @@ worker cũ (giữ ngữ cảnh, rẻ hơn spawn mới).
 
 ## Thang leo
 
-`coder-lite` → `coder` → `coder` + `model: "opus"` → captain. Leo khi `blocked` hoặc sai hai lần. Cùng model không thử
+`coder-mini` → `coder-lite` → `coder` → `coder` + `model: "opus"` → captain. Leo khi `blocked` hoặc sai hai lần. Cùng model không thử
 lại quá một lần; brief mơ hồ thì sửa brief.
 
 ## Nhật ký

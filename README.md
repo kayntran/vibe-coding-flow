@@ -26,24 +26,27 @@ Model ngoài Claude: Codex `gpt-6.1-sol` (review nhạy cảm, ý kiến debug) 
 thứ hai; gọi qua `hooks/review-ext.mjs`) · agy: `gemini-3.8-flash-high` (lượt review dự phòng/thứ ba),
 `claude-opus-4-6-thinking` → `gemini-3.1-pro-high` cho research. Bài thử chọn model: `skills/flow-review/SKILL.md` §1.
 
-## Cài trên máy mới
+## Cài / cập nhật — một lệnh
 
-Cần: Claude Code, Node, git, `gh`; Codex CLI ≥ 0.159 (`npm i -g @openai/codex@latest`); Grok CLI mới
-(`grok update`, `grok login`); agy (Antigravity CLI). Thiếu Grok/agy thì researcher vẫn tự tìm bằng GitHub/web.
+Cần: Git + Node ≥ 18 (thiếu thì lệnh cài báo đúng lệnh cài bổ sung). Có Claude Code và/hoặc Codex trên máy thì cài cho
+app nào có mặt. Chạy lại bao nhiêu lần cũng được: lần đầu thì cài, lần sau thì cập nhật.
 
+Windows (PowerShell, kể cả Windows PowerShell 5.1):
+```powershell
+irm https://raw.githubusercontent.com/kayntran/vibe-coding-flow/main/install.ps1 | iex
+```
+macOS / Linux / Git Bash:
 ```bash
-cd ~/.claude
-git init -b main
-git remote add origin https://github.com/kayntran/vibe-coding-flow.git
-git fetch origin
-git show origin/main:install.mjs > /tmp/kit-install.mjs && node /tmp/kit-install.mjs backup   # sao lưu file trùng tên
-git checkout -f -t origin/main                       # ghi đè các file cùng tên (đã sao lưu), không đụng file khác
-node ~/.claude/install.mjs                           # ghép 9 hook vào settings.json của máy này
-node --test ~/.claude/hooks/*.test.mjs ~/.claude/hooks/lib/*.test.mjs
+curl -fsSL https://raw.githubusercontent.com/kayntran/vibe-coding-flow/main/install.sh | sh
 ```
 
-Sau khi cài: so các file `*.before-kit-*` với bản kit, chép phần riêng của máy (nếu có) trở lại, rồi xoá bản sao lưu.
-Cập nhật kit về sau: `git -C ~/.claude pull` — git gộp thay đổi, trùng dòng thì báo conflict chứ không ghi đè im lặng.
+Bộ cài: kéo kit về `~/.claude` (cập nhật bằng `git pull --ff-only`, không ép) → quét ký tự ẩn trong luật/skill/agent →
+ghép hook vào `~/.claude/settings.json` + chặn đọc file bí mật (`.env*`, `*.pem`, `*.key`) → có Codex thì ghi khối
+`VIBE-FLOW` vào `~/.codex/AGENTS.md`, skill sang `~/.agents/skills`, agent `~/.codex/agents/*.toml` (model mới nhất của
+dòng trên máy), `~/.codex/hooks.json` → in việc còn lại (bấm tin hook trong Codex bằng `/hooks`, đăng nhập CLI nào chưa
+sẵn sàng). File trùng tên không phải của kit được sao lưu (`*.before-kit-*`, `~/.codex/backup-vibe-flow-*`), không xoá.
+Devin Desktop: chọn agent Claude/Codex bên trong (ACP) là dùng được flow; agent riêng của Devin không chạy cổng của kit.
+
 Luật riêng từng dự án nằm trong repo dự án (`CLAUDE.md`, `AGENTS.md`, `.claude/rules/`), kit không bao giờ đụng tới.
 
 Báo cáo MCP bất cứ lúc nào: `node ~/.claude/hooks/mcp-usage.mjs report` (mặc định 30 ngày gần nhất).

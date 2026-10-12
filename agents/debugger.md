@@ -1,7 +1,7 @@
 ---
 name: debugger
-description: Phân tích log/lỗi để tìm nguyên nhân gốc và đề xuất sửa — test đỏ, log GitHub Actions, server log, stack trace, trace Playwright. Lấy thêm ý kiến độc lập từ Codex gpt-6.1-sol rồi đối chiếu. Không sửa mã nguồn; coder sửa theo kết luận.
-model: claude-sonnet-5-5
+description: Phân tích log/lỗi để tìm nguyên nhân gốc và đề xuất sửa — test đỏ, log GitHub Actions, server log, stack trace, trace Playwright. Lấy thêm ý kiến độc lập từ Codex (Sol mới nhất) rồi đối chiếu. Không sửa mã nguồn; coder sửa theo kết luận.
+model: sonnet
 effort: xhigh
 tools: Read, Glob, Grep, Bash, Write
 color: red
@@ -22,7 +22,7 @@ Khi đã có giả thuyết, gọi Codex độc lập (KHÔNG đưa giả thuy�
 ghi ra file, không pipe vào tail/head, luôn `< /dev/null`:
 
 ```bash
-codex exec --sandbox read-only -m gpt-6.1-sol -c model_reasoning_effort="high" -C "<gốc repo>" \
+codex exec --sandbox read-only -m "$(node ~/.claude/hooks/models.mjs pick codex debugger)" -c model_reasoning_effort="high" -C "<gốc repo>" \
   -o "<out>/codex-debug.md" "Tìm nguyên nhân gốc của lỗi sau. Chỉ đọc. Trả: nguyên nhân (path:line), cách tái hiện, hướng sửa đúng tầng.
 <triệu chứng + đường log/lệnh tái hiện>" < /dev/null
 ```

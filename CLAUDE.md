@@ -63,9 +63,10 @@ AGENTS.md, `.claude/rules/`) thắng phần này.
 | chạy thử, test thử, kiểm tra như người dùng | skill `flow-qa` |
 | review, soát code, bảo mật | skill `flow-review` (cũng tự chạy trước mỗi lần gộp) |
 | gộp, merge, push, "xong rồi đẩy lên" | skill `flow-merge` — chỉ khi user đã gật |
-| X ở đâu, chỗ nào dùng Y | tự `rg` một lệnh nhiều `-e` |
+| X ở đâu, chỗ nào dùng Y | tự tìm bằng công cụ Grep có sẵn hoặc `rg` một lệnh nhiều `-e` (không `grep -r`/`find` quét thư mục); thư mục bị git bỏ qua (worktree, thư mục nội bộ) ⇒ thêm `-uu` kẻo tìm sót |
 | giao việc cho worker / chạy song song | skill `flow-team` |
 | sắp sửa file trong git repo | skill `flow-worktree` |
+| "cho vai X dùng model Y", "trả model về mặc định" | `node ~/.claude/hooks/models.mjs set <vai> <app> <dòng>[:mức]` / `reset <vai>` — báo lại một dòng |
 
 **Luôn luôn:**
 - Việc cỡ M/L có sổ `docs/specs/<ngày>-<chủ-đề>/progress.md`; đổi pha là cập nhật. Hook SessionStart tự nạp lại
@@ -75,6 +76,12 @@ AGENTS.md, `.claude/rules/`) thắng phần này.
   <projectRoot> <json>`) — không ghi vào progress.md, plan hay memory. Memory chỉ giữ sở thích cá nhân xuyên dự án.
 - User nói ra ý tưởng (tính năng, cải tiến) giữa việc ⇒ ghi thêm một dòng vào `docs/IDEAS.md` (`mcp__so-chot__ghi_y_tuong`
   hoặc CLI `y-tuong`) rồi làm tiếp, không ngắt việc đang làm, không tra trùng lúc đó.
-- Hook chặn: sửa thẳng thư mục chính, gộp thiếu dấu review/QA, commit/push có secret. Bị chặn ⇒ làm đúng bước còn
-  thiếu, không lách.
+- Hook chặn: sửa thẳng thư mục chính, gộp thiếu dấu review/QA, commit/push có secret, thêm thư viện đáng ngờ. Bị chặn
+  ⇒ làm đúng bước còn thiếu, không lách.
+- Ghi/sửa NỘI DUNG file (code, test, tài liệu, ghi chú) chỉ bằng công cụ sửa file (Write/Edit; Codex: apply_patch) — không
+  heredoc/echo/sed/`node -e` ghi file, không xoá thư mục để dọn chỗ test (bộ lọc an toàn bật hộp hỏi user; hook chặn).
+- Viết/sửa SPEC, plan, báo cáo xong ⇒ tóm tắt ngắn ngay trong chat + chép bản xem vào thư mục mở phiên và mở sẵn (khung
+  xem file không mở được file trong worktree); chỉ đưa link khi mở được thật.
+- Gọi CLI/model ngoài (codex, agy, cursor-agent, grok, devin) ⇒ `node ~/.claude/hooks/cli-check.mjs <tên>` trước; chưa
+  sẵn sàng ⇒ dùng worker native, chỉ đưa user đúng lệnh đăng nhập khi lý do là chưa đăng nhập (không khi hết lượt/mất mạng).
 - Không gộp, push, xoá, gửi gì ra ngoài khi user chưa gật.

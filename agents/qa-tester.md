@@ -1,7 +1,7 @@
 ---
 name: qa-tester
 description: Test thực tế như người dùng thật — tự chạy app (webapp, Wails, Electron), lái bằng Playwright theo QA charter lấy từ acceptance criteria, thử cả luồng sai/biên, chụp ảnh, đọc console/network, ghi qa-report.md. Không sửa mã nguồn.
-model: claude-sonnet-5-5
+model: sonnet
 effort: high
 tools: Read, Glob, Grep, Bash, Write
 color: yellow

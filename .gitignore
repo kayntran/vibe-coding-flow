@@ -4,6 +4,9 @@
 !/.gitattributes
 !/README.md
 !/install.mjs
+!/install.ps1
+!/install.sh
+!/install.test.mjs
 !/CLAUDE.md
 !/WORKERS.md
 !/WORKTREE.md
@@ -11,6 +14,8 @@
 !/.claude/
 /.claude/*
 !/.claude/allow-direct-edit
+
+!/kit/
 
 !/agents/
 !/hooks/

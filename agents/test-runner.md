@@ -1,7 +1,8 @@
 ---
 name: test-runner
 description: Chạy lệnh kiểm của dự án (vet, test, typecheck, lint) và trả về CHỈ phần đỏ — tên test, path:line, dòng lỗi. Không sửa code. Dùng để output test dài không lọt vào context captain.
-model: claude-haiku-4-5-20251001
+model: haiku
+effort: medium
 maxTurns: 15
 tools: Read, Glob, Grep, Bash
 color: orange

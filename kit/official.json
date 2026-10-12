@@ -1,0 +1,150 @@
+{
+  "_doc": "Danh sách skill/MCP CHÍNH HÃNG của kit (đã kiểm org/tên miền ở docs/specs/2026-10-11-flow-v7-nocode/notes/research-architecture.md mục 4). Quy tắc nhận chính hãng: tên miền MCP khớp domain hãng, hoặc repo thuộc org chính hãng và docs hãng trỏ tới repo đó. Bản cộng đồng KHÔNG cài (AC-32). hooks/lib/skills-check.mjs đọc file này; mọi khoá cấp trên (không bắt đầu bằng '_') là một thư viện. Trường: sourceOrg · note · skill {repo, names[] (tên thư mục skill dùng để nhận ra bản chính hãng), installCmd} · mcp {hosts[] (tên miền gốc, khớp cả tên miền con), packages[] (gói npm chính hãng), needArg (chỉ nhận gói khi có đối số này), guard ('supabase'|'stripe': kiểm thêm read_only/dev/khoá live), installCmd {claude, codex}}. Không có cả skill lẫn mcp (null) ⇒ status 'none' (hãng không có bản chính hãng). Chỉ TRẢ lệnh cài, không bao giờ chạy. Skill cài mức dự án vào .claude/skills hoặc .agents/skills (nơi skills-check tìm); skill đi kèm plugin (/plugin marketplace add) nằm chỗ khác nên chưa được nhận.",
+  "cloudflare": {
+    "sourceOrg": "cloudflare",
+    "skill": {
+      "repo": "cloudflare/skills",
+      "names": ["cloudflare", "wrangler", "workers-best-practices", "workers-profiling", "durable-objects"],
+      "installCmd": "npx skills add cloudflare/skills"
+    },
+    "mcp": {
+      "hosts": ["mcp.cloudflare.com"],
+      "installCmd": {
+        "claude": "claude mcp add --transport http --scope project cloudflare https://mcp.cloudflare.com/mcp",
+        "codex": "codex mcp add cloudflare --url https://mcp.cloudflare.com/mcp"
+      }
+    },
+    "note": "Apache-2.0. MCP API (mcp.cloudflare.com/mcp) là bản khuyến nghị; nhiều server cũ trong cloudflare/mcp-server-cloudflare đã bị đánh dấu deprecated."
+  },
+  "supabase": {
+    "sourceOrg": "supabase",
+    "skill": {
+      "repo": "supabase/agent-skills",
+      "names": ["supabase", "supabase-postgres-best-practices"],
+      "installCmd": "npx skills add supabase/agent-skills"
+    },
+    "mcp": {
+      "hosts": ["mcp.supabase.com"],
+      "packages": ["@supabase/mcp-server-supabase"],
+      "guard": "supabase",
+      "installCmd": {
+        "claude": "claude mcp add --transport http --scope project supabase \"https://mcp.supabase.com/mcp?read_only=true&project_ref=<project_ref>&features=database,docs\"",
+        "codex": "codex mcp add supabase --url \"https://mcp.supabase.com/mcp?read_only=true&project_ref=<project_ref>&features=database,docs\""
+      }
+    },
+    "note": "MIT/Apache-2.0. Repo MCP nằm org supabase-community nhưng docs supabase.com + registry DNS xác nhận chính hãng. CHỈ dùng read_only=true + project_ref của bản dev/nhánh, không production; thay <project_ref> trước khi chạy lệnh."
+  },
+  "shadcn": {
+    "sourceOrg": "shadcn-ui",
+    "skill": {
+      "repo": "shadcn-ui/ui",
+      "names": ["shadcn", "migrate-radix-to-base"],
+      "installCmd": "pnpm dlx skills add shadcn/ui"
+    },
+    "mcp": {
+      "packages": ["shadcn"],
+      "needArg": "mcp",
+      "installCmd": {
+        "claude": "pnpm dlx shadcn@latest mcp init --client claude",
+        "codex": "codex mcp add shadcn -- npx shadcn@latest mcp"
+      }
+    },
+    "note": "MIT. Ưu tiên skill hơn MCP (nhẹ hơn)."
+  },
+  "stripe": {
+    "sourceOrg": "stripe",
+    "skill": {
+      "repo": "stripe/ai",
+      "names": ["stripe-best-practices", "stripe-docs", "upgrade-stripe"],
+      "installCmd": "npx skills add https://docs.stripe.com"
+    },
+    "mcp": {
+      "hosts": ["mcp.stripe.com"],
+      "packages": ["@stripe/mcp"],
+      "guard": "stripe",
+      "installCmd": {
+        "claude": "claude mcp add --transport http --scope project stripe https://mcp.stripe.com",
+        "codex": "codex mcp add stripe --url https://mcp.stripe.com"
+      }
+    },
+    "note": "MIT. Chỉ dùng khoá test hoặc restricted key; không đưa khoá live cho agent và không gõ khoá thẳng vào cấu hình."
+  },
+  "playwright": {
+    "sourceOrg": "microsoft",
+    "skill": {
+      "repo": "microsoft/playwright-cli",
+      "names": ["playwright-cli"],
+      "installCmd": "npx skills add microsoft/playwright-cli"
+    },
+    "mcp": {
+      "packages": ["@playwright/mcp"],
+      "installCmd": {
+        "claude": "claude mcp add --scope project playwright -- npx @playwright/mcp@latest",
+        "codex": "codex mcp add playwright -- npx @playwright/mcp@latest"
+      }
+    },
+    "note": "Apache-2.0. Tên skill 'playwright-cli' suy từ tên repo, chưa kiểm từng thư mục skills/."
+  },
+  "vercel": {
+    "sourceOrg": "vercel",
+    "skill": {
+      "repo": "vercel-labs/agent-skills",
+      "names": ["deploy-to-vercel", "vercel-optimize", "react-best-practices", "web-design-guidelines", "composition-patterns"],
+      "installCmd": "npx skills add vercel-labs/agent-skills"
+    },
+    "mcp": {
+      "hosts": ["mcp.vercel.com"],
+      "installCmd": {
+        "claude": "claude mcp add --transport http --scope project vercel https://mcp.vercel.com",
+        "codex": "codex mcp add vercel --url https://mcp.vercel.com"
+      }
+    },
+    "note": "Phụ (kit dùng Cloudflare). vercel-labs/agent-skills không có LICENSE ở gốc: chỉ dùng như người dùng, không chép nội dung vào kit."
+  },
+  "neon": {
+    "sourceOrg": "neondatabase",
+    "skill": {
+      "repo": "neondatabase/agent-skills",
+      "names": ["neon-postgres", "neon-postgres-branches"],
+      "installCmd": "npx skills add neondatabase/agent-skills"
+    },
+    "mcp": {
+      "hosts": ["mcp.neon.tech"],
+      "packages": ["@neondatabase/mcp-server-neon"],
+      "installCmd": {
+        "claude": "claude mcp add --transport http --scope project neon https://mcp.neon.tech/mcp",
+        "codex": "codex mcp add neon --url https://mcp.neon.tech/mcp"
+      }
+    },
+    "note": "MIT/Apache-2.0. Chỉ khi dự án chọn Neon; dùng nhánh dev, không production."
+  },
+  "sentry": {
+    "sourceOrg": "getsentry",
+    "skill": {
+      "repo": "getsentry/sentry-for-ai",
+      "names": [],
+      "installCmd": "npx skills add getsentry/sentry-for-ai"
+    },
+    "mcp": {
+      "hosts": ["mcp.sentry.dev"],
+      "packages": ["@sentry/mcp-server"],
+      "installCmd": {
+        "claude": "claude mcp add --transport http --scope project sentry https://mcp.sentry.dev/mcp",
+        "codex": "codex mcp add sentry --url https://mcp.sentry.dev/mcp"
+      }
+    },
+    "note": "MCP theo giấy phép FSL-1.1-Apache-2.0 (nguồn mở trễ, dùng nội bộ được); skill MIT. Tên thư mục skill chưa kiểm nên chỉ nhận ra bản đã cài qua MCP."
+  },
+  "go": {
+    "sourceOrg": "golang",
+    "skill": null,
+    "mcp": null,
+    "note": "Không có skill/MCP chính hãng (chỉ gopls mcp, còn thử nghiệm). Dùng go vet, golangci-lint, govulncheck bằng lệnh và đọc docs go.dev."
+  },
+  "wails": {
+    "sourceOrg": "wailsapp",
+    "skill": null,
+    "mcp": null,
+    "note": "Không có skill/MCP chính hãng. Dùng docs web của Wails và 'wails doctor'."
+  }
+}

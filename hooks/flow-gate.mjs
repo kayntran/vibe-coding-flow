@@ -1,25 +1,33 @@
 // flow-gate: cổng worktree/review/qa/test cho flow captain + worker. Một script, chế độ chọn bằng argv[2].
-//   hook : edit (PreToolUse Edit|Write|NotebookEdit) · bash (PreToolUse Bash: chặn git merge thiếu dấu, git commit/push có secret,
-//          lệnh phá huỷ trên nhánh chính; hỏi lại khi push nhánh chính) · stop (Stop) · subagent-stop (SubagentStop: receipt + audit phạm vi làn)
+//   hook : edit (PreToolUse Edit|Write|NotebookEdit + apply_patch của Codex/Devin) · bash (PreToolUse Bash: chặn git merge thiếu dấu,
+//          git commit/push có secret, commit thêm thư viện lạ, lệnh phá huỷ trên nhánh chính, `apply_patch <<` vào thư mục chính;
+//          hỏi lại khi push nhánh chính — chỉ Claude; Codex/Devin ⇒ deny, user tự chạy lệnh push) · stop (Stop) ·
+//          subagent-stop (SubagentStop: receipt + audit phạm vi làn)
 //   CLI  : stamp review <file.json> · stamp qa <file.md> · stamp test -- <lệnh…> · status      (chạy trong worktree)
-// Spec: ~/.claude/plans/flow-v2-hooks-spec.md, flow-v3-hooks-spec.md (Làn A: quét secret), flow-v5-hooks-spec.md (Làn A: dấu test, lệnh phá huỷ, ask, audit).
+// Spec: ~/.claude/plans/flow-v2-hooks-spec.md, flow-v3-hooks-spec.md (Làn A: quét secret), flow-v5-hooks-spec.md (Làn A: dấu test, lệnh phá huỷ, ask, audit);
+//       flow v7: docs/specs/2026-10-11-flow-v7-nocode (làn D: AC-09 audit không im lặng, AC-24 lời chặn đời thường, AC-38 thư viện mới).
+// Nối các lib: lib/host.mjs (nhận diện app + chuẩn hoá payload) · lib/secrets.mjs (mẫu secret) · lib/models.mjs roleSet (vai từ kit/roles.json)
+//   · lib/deps.mjs (thư viện mới khi commit) · lib/so-chot.mjs openProgress (sổ tiến độ của nhánh).
 // Docs field input: https://code.claude.com/docs/en/hooks
-// Lỗi nội bộ ở chế độ hook luôn CHO QUA (exit 0, không in gì) và ghi một dòng vào flow-gate.log.
+// Lỗi nội bộ ở chế độ hook luôn CHO QUA (exit 0, không in gì) và ghi một dòng vào flow-gate.log — trừ các ca chủ ý chặn:
+//   không kiểm được phạm vi làn (AC-09) và không đọc được package.json/go.mod khi commit (AC-38).
+// Mọi lời chặn mở đầu bằng MỘT câu đời thường (bị chặn vì gì + AI sẽ tự làm gì) rồi mới tới chi tiết kỹ thuật (AC-24).
 import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { briefPlan, briefWord } from './lib/brief.mjs'
+import { normalize, patchFiles } from './lib/host.mjs'
+import { ALLOW_MARK, isSensitiveFile, scanPatch } from './lib/secrets.mjs'
 
 const HOOK_DIR = path.dirname(fileURLToPath(import.meta.url))
 const LOG_FILE = process.env.FLOW_GATE_LOG || path.join(HOOK_DIR, 'flow-gate.log')
 const DEFAULT_UI = /\.(tsx|jsx|vue|svelte|astro|html|css|scss|sass|less)$/i
 const DOC_FILE = /\.(md|mdx|txt)$/i // diff chỉ có file này (hoặc dưới docs/) ⇒ không đòi dấu test
-const RECEIPT_AGENTS = new Set(['coder', 'coder-lite', 'recon', 'researcher', 'test-runner', 'qa-tester', 'debugger', 'code-reviewer'])
+const DEPS_BUDGET_MS = 8000 // tổng thời gian kiểm thư viện mới (hook bash có 15 s); quá hạn ⇒ unknown, không chặn
 const RECEIPT_RE = /return=(done_with_concerns|done|needs_context|blocked|green|red)\b/ // green|red là của test-runner
 const NA_RE = /^\uFEFF?\s*N\/A/i
-const AUDIT_AGENTS = new Set(['coder', 'coder-lite']) // worker vi\u1EBFt code: n\u1ED9p b\u00E0i th\u00EC audit ph\u1EA1m vi l\u00E0n
 
 function log(msg) {
   try {
@@ -153,23 +161,35 @@ function gateState(info, base, head) {
 
 // ---------- hook handlers: trả object để in, hoặc null = cho qua ----------
 
-function hookEdit(input) {
-  const ti = input.tool_input
-  const p = ti?.file_path ?? ti?.notebook_path
-  if (typeof p !== 'string' || !p) return null
-  const info = repoInfo(path.resolve(input.cwd || process.cwd(), toNative(p)))
-  if (!info || info.linked) return null
-  if (fs.existsSync(path.join(info.toplevel, '.claude', 'allow-direct-edit'))) return null
-  return {
-    hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
-      permissionDecision: 'deny',
-      permissionDecisionReason:
-        `Đang sửa thẳng thư mục chính của ${info.toplevel} (nhánh ${info.branch ?? '?'}). ` +
-        'Gọi EnterWorktree để tạo worktree trước khi sửa file. ' +
-        'Muốn sửa thẳng thì user tạo file .claude/allow-direct-edit trong repo.',
-    },
+// files = các file mà tool sắp ghi (đã qua host.normalize / patchFiles; tương đối thì tính từ cwd). Deny nếu có file nằm trong thư mục chính
+// của một repo (không phải worktree) mà repo đó chưa bật .claude/allow-direct-edit. Codex/Devin không có EnterWorktree ⇒ chỉ cách dùng git.
+function denyDirectEdit(files, cwd, host) {
+  for (const p of files) {
+    const info = repoInfo(path.resolve(cwd, toNative(p)))
+    if (!info || info.linked) continue
+    if (fs.existsSync(path.join(info.toplevel, '.claude', 'allow-direct-edit'))) continue
+    const how = host === 'claude'
+      ? 'Gọi EnterWorktree để tạo worktree trước khi sửa file.'
+      : 'Tạo worktree bằng git worktree add ../<tên> -b <nhánh> rồi sửa file trong đó.'
+    return permission('deny',
+      'Chưa sửa thẳng vào bản chính của dự án được; AI sẽ tạo một bản sao riêng của dự án rồi sửa ở đó. ' +
+      `Đang sửa thẳng thư mục chính của ${info.toplevel} (nhánh ${info.branch ?? '?'}), file ${p}. ${how} ` +
+      'Muốn sửa thẳng thì user tạo file .claude/allow-direct-edit trong repo.')
   }
+  return null
+}
+
+function hookEdit(input) {
+  const n = normalize(input, process.env)
+  // tool ghi file đã biết (Edit/Write/NotebookEdit, Devin write/edit/notebook_edit, Codex apply_patch): host.mjs đã lấy sẵn danh sách file.
+  // Tên tool lạ/thiếu: giữ cách cũ (file_path hoặc notebook_path) — chế độ edit chỉ được gắn cho tool ghi file nên thà đọc dư còn hơn mù.
+  let files = n.files
+  if (n.tool === 'other') {
+    const ti = input.tool_input
+    const p = ti?.file_path ?? ti?.notebook_path
+    files = typeof p === 'string' && p ? [p] : []
+  }
+  return denyDirectEdit(files, n.cwd, n.host)
 }
 
 // Đọc dấu hiệu heredoc `<<[-] WORD` tại cmd[i] ('<' đầu tiên). Trả { word, dash, end } (end = chỉ số sau WORD) hoặc null.
@@ -247,7 +267,7 @@ function tokenize(cmd) {
 
 const MERGE_VALUE_FLAGS = new Set(['-m', '-F', '-s', '-X', '--message', '--file', '--strategy', '--strategy-option', '--into-name'])
 
-// tokens = một đoạn lệnh. Trả { dir, sub, rest } nếu là `git [-C p] <sub> ...`, ngược lại null.
+// tokens = một đoạn lệnh. Trả { dir, sub, rest } nếu là `[VAR=giá-trị…] git [-C p] <sub> ...`, ngược lại null.
 function parseGitSub(tokens, cwd) {
   let i = 0
   while (/^[A-Za-z_]\w*=/.test(tokens[i] ?? '')) i++
@@ -292,66 +312,7 @@ function tryGateState(info, base, head) {
 
 const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
 const SCAN_LIMIT = 20 * 1024 * 1024
-const ALLOW_MARK = 'flow-gate: allow-secret'
-// Tên mẫu ↔ regex (mỗi dòng chỉ lấy khớp đầu tiên của từng mẫu). url-credential: bỏ mật khẩu dạng placeholder ($VAR, {{x}}, <pw>);
-// lookbehind để chỉ thử từ đầu mỗi cụm scheme (tránh O(n^2) với dòng dài toàn [a-z0-9]).
-const SECRET_PATTERNS = [
-  ['private-key', /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
-  ['aws', /AKIA[0-9A-Z]{16}/],
-  ['github', /gh[pousr]_[A-Za-z0-9]{36,}/],
-  ['github', /github_pat_[A-Za-z0-9_]{60,}/],
-  ['anthropic', /sk-ant-[A-Za-z0-9_-]{20,}/],
-  ['openai', /sk-(?:proj-)?[A-Za-z0-9_-]{32,}/],
-  ['xai', /xai-[A-Za-z0-9]{40,}/],
-  ['google', /AIza[0-9A-Za-z_-]{35}/],
-  ['slack', /xox[baprs]-[A-Za-z0-9-]{10,}/],
-  ['jwt', /eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/],
-  ['url-credential', /(?<![a-z0-9+.-])[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^@\s/$<{][^@\s/]{7,}@/i],
-]
-
-function isSensitiveFile(file) {
-  const n = path.posix.basename(file).toLowerCase()
-  if (n === '.env') return true
-  if (n.startsWith('.env.')) return !/\.(example|sample|template)$/.test(n)
-  if (/^id_(rsa|ed25519)/.test(n)) return !n.endsWith('.pub') // khoá công khai không phải secret
-  return n.endsWith('.pem') || n === '.dev.vars' || n === 'credentials.json'
-}
-
-// Các khớp secret trong một dòng: [{ name, value }] với value đã che (4 ký tự đầu + …).
-function scanLine(text) {
-  const hits = []
-  for (const [name, re] of SECRET_PATTERNS) {
-    const m = re.exec(text)
-    if (!m) continue
-    const end = m.index + m[0].length
-    if (hits.some((h) => m.index < h.end && h.index < end)) continue // cùng một token đã được mẫu khác báo (sk-ant-… vs openai)
-    hits.push({ name, index: m.index, end, value: `${m[0].slice(0, 4)}…` })
-  }
-  return hits
-}
-
-// Duyệt `git diff -U0` (đã --no-prefix): trả { findings: [{file, line, name, value}], allowed: Set<file có dòng allow> }.
-function scanPatch(patch) {
-  const findings = []
-  const allowed = new Set()
-  let file = null
-  let line = 0
-  let inHunk = false
-  for (const l of patch.split('\n')) {
-    if (l.startsWith('diff --git ')) { inHunk = false; file = null; continue }
-    if (l.startsWith('@@ ')) { line = Number(/\+(\d+)/.exec(l)?.[1] ?? 0); inHunk = true; continue }
-    if (!inHunk) {
-      if (l.startsWith('+++ ')) { const f = l.slice(4).replace(/\t$/, ''); file = f === '/dev/null' ? null : f }
-      continue
-    }
-    if (l[0] !== '+' || file === null) continue
-    const text = l.slice(1)
-    const lineNo = line++
-    if (text.includes(ALLOW_MARK)) { allowed.add(file); continue }
-    for (const h of scanLine(text)) findings.push({ file, line: lineNo, name: h.name, value: h.value })
-  }
-  return { findings, allowed }
-}
+// Mẫu secret, file nhạy cảm và duyệt patch nằm ở lib/secrets.mjs (một nguồn cho cả kit): scanPatch, isSensitiveFile, ALLOW_MARK.
 
 // scan = { cmd: 'diff' | 'log', args, paths? }. diff: so sánh theo args (['--cached'], ['HEAD']…). log: từng commit không-merge
 // trong phạm vi args (['<base>..<sha>'] hoặc ['<sha>']), nên token thêm ở commit A rồi xoá ở commit B vẫn bị thấy.
@@ -532,27 +493,33 @@ function gateSecrets(g) {
     for (const f of r.findings) lines.add(f.line === null ? `${f.file} — ${f.name}` : `${f.file}:${f.line} — ${f.name} (${f.value})`)
   }
   if (lines.size === 0 && !truncated) return null
+  const where = verb === 'commit' ? 'sắp được lưu vào lịch sử dự án' : 'sắp được gửi lên máy chủ'
   const reason = []
   if (lines.size > 0) {
     const list = [...lines]
     const shown = list.slice(0, 10).join('; ') + (list.length > 10 ? `; …và ${list.length - 10} mục nữa` : '')
     reason.push(
+      `Phần ${where} có thứ giống mật khẩu hoặc khoá bí mật nên đã dừng lại; AI sẽ gỡ nó ra khỏi thay đổi rồi thử lại.`,
       `Phát hiện secret trong phần sắp ${verb}: ${shown}. Gỡ secret khỏi thay đổi và dùng biến môi trường. ` +
       `Nếu báo nhầm thì thêm comment "${ALLOW_MARK}" vào dòng đó (file nhạy cảm: vào một dòng của file).`,
     )
   }
   if (truncated) {
+    if (lines.size === 0) {
+      reason.push(`Phần ${where} quá lớn nên chưa kiểm hết được có lộ mật khẩu hay khoá bí mật không; AI sẽ dừng lại và nhờ bạn tự chạy lệnh.`)
+    }
     reason.push(
       `Diff quá lớn để quét hết (vượt ${SCAN_LIMIT / 1048576} MB, chỉ quét phần đầu) nên không coi là sạch. ` +
       `User tự chạy lệnh ${verb} nếu chắc không có secret.`,
     )
   }
-  return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason.join(' ') } }
+  return permission('deny', reason.join(' '))
 }
 
 // ---------- lệnh phá huỷ trên nhánh chính / hỏi lại khi push nhánh chính ----------
 
 const isMainName = (n) => n === 'main' || n === 'master'
+const SAFE_REF = /^(?!-)[A-Za-z0-9._/-]+$/ // tên remote/nhánh an toàn để in vào dòng lệnh user chép: không dấu cách, nháy, ; | & $ ` ( ) < >, xuống dòng; không bắt đầu bằng -
 const permission = (decision, reason) => ({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: decision, permissionDecisionReason: reason } })
 
 // Các ref gửi đi mà đích là nhánh chính: [{ src, name, plus }]. --mirror gửi mọi ref ⇒ coi như gửi nhánh chính.
@@ -573,6 +540,7 @@ function gateForcePush(g) {
   const hit = mainPushTargets(info, p).find((t) => p.force || t.plus)
   if (!hit) return null
   return permission('deny',
+    'Không ghi đè lịch sử của nhánh chính trên máy chủ được vì không hoàn tác được; AI sẽ đẩy lên một nhánh riêng rồi gộp sau. ' +
     `Không push ép (--force / --force-with-lease / refspec +) lên nhánh chính ${hit.name}: ghi đè lịch sử trên remote không hoàn tác được. ` +
     'Push nhánh riêng rồi gộp, hoặc để user tự chạy lệnh này.')
 }
@@ -589,11 +557,15 @@ function gateDeleteMainPush(g) {
     .map((n) => n?.replace(/^refs\/heads\//, ''))
     .find(isMainName)
   if (!hit) return null
-  return permission('deny', `Không xoá nhánh chính ${hit} trên remote (git push --delete / refspec :${hit}). User tự chạy lệnh này nếu thật sự cần.`)
+  return permission('deny',
+    'Không xoá nhánh chính trên máy chủ được; AI sẽ bỏ lệnh này và để bạn tự chạy nếu thật sự cần. ' +
+    `Không xoá nhánh chính ${hit} trên remote (git push --delete / refspec :${hit}). User tự chạy lệnh này nếu thật sự cần.`)
 }
 
-// g = parseGitSub của `git push` (đã qua quét secret). Ask khi sắp gửi commit lên nhánh chính: liệt kê tối đa 15 commit chưa có trên remote.
-function gateAskMainPush(g) {
+// g = parseGitSub của `git push` (đã qua quét secret). Sắp gửi commit lên nhánh chính: liệt kê tối đa 15 commit chưa có trên remote.
+// host claude ⇒ ask (user bấm duyệt). Codex/Devin không hỗ trợ ask ở PreToolUse (hook lỗi ⇒ tool vẫn chạy) ⇒ deny + in đúng lệnh push để
+// CHÍNH user chạy. Không có tiền tố/biến tự duyệt: thứ gì AI viết được trong lệnh thì AI cũng tự duyệt được.
+function gateAskMainPush(g, host) {
   const info = repoInfo(g.dir)
   if (!info) return null
   const p = parsePushArgs(g.rest)
@@ -608,7 +580,19 @@ function gateAskMainPush(g) {
   const n = Number((git(info.dir, ['rev-list', '--count', range]) ?? '').trim())
   if (!(n > 0)) return null // đã đồng bộ (hoặc git lỗi): không có gì để hỏi
   const list = (git(info.dir, ['log', '--oneline', '--no-decorate', '--no-color', '--no-show-signature', '-n', '15', range]) ?? '').trim()
-  return permission('ask', `Sắp push ${n} commit lên ${remote}/${t.name}:\n${list}`)
+  const body = `Sắp push ${n} commit lên ${remote}/${t.name}:\n${list}`
+  if (host === 'claude') return permission('ask', body)
+  // Tên remote/nhánh lấy nguyên văn từ lệnh hoặc cấu hình của AI: in vào dòng "chép rồi dán" thì `origin; calc` chạy thêm lệnh trong terminal của user.
+  // Chỉ in khi toàn ký tự an toàn; không thì không in lệnh, user tự kiểm tên remote rồi tự gõ.
+  if (!SAFE_REF.test(remote) || !SAFE_REF.test(t.name)) {
+    return permission('deny',
+      'Đẩy lên nhánh chính cần chính bạn chạy lệnh nên AI dừng lại; tên nơi nhận có ký tự lạ nên AI không đưa lệnh để chép. ' +
+      `Sắp push ${n} commit lên một remote có tên lạ (không in ra vì dán vào terminal có thể chạy thêm lệnh khác):\n${list}\n` +
+      'AI không tự chạy lệnh này: bạn mở terminal, tự kiểm tên remote (git remote -v) và cấu hình push của nhánh, rồi tự gõ lệnh push với đúng remote và nhánh muốn gửi; xong thì báo AI làm tiếp.')
+  }
+  return permission('deny',
+    'Đẩy lên nhánh chính cần chính bạn chạy lệnh nên AI dừng lại và đưa bạn lệnh để chép. ' +
+    `${body}\nAI không tự chạy lệnh này: user chạy trong thư mục ${info.toplevel.replace(/[\x00-\x1f\x7f]/g, ' ')}, xong thì báo AI làm tiếp:\ngit push ${remote} ${t.name}`)
 }
 
 // Duyệt cờ của lệnh git đơn giản: { short: Set<ký tự cờ ngắn>, long: Set<tên cờ dài không có =giá trị>, pos: [đối số không phải cờ, gồm cả sau `--`] }.
@@ -635,7 +619,9 @@ function gateDestructive(g) {
   const f = simpleFlags(g.rest)
   const flag = (shortCh, longName) => f.short.has(shortCh) || f.long.has(longName)
   const here = `thư mục chính của ${info.toplevel} (nhánh ${info.branch ?? '?'})`
-  const wipe = (what) => `${what} ở ${here} sẽ xoá thay đổi chưa commit. Làm trong worktree, hoặc để user tự chạy lệnh này.`
+  const wipe = (what) =>
+    'Lệnh này sẽ xoá các thay đổi chưa lưu ở bản chính của dự án nên đã dừng lại; AI sẽ làm việc trong một bản sao riêng thay vào đó. ' +
+    `${what} ở ${here} sẽ xoá thay đổi chưa commit. Làm trong worktree, hoặc để user tự chạy lệnh này.`
   switch (g.sub) {
     case 'reset':
       if (f.long.has('hard') && !info.linked && isMainName(info.branch)) return permission('deny', wipe('git reset --hard'))
@@ -643,11 +629,19 @@ function gateDestructive(g) {
     case 'branch': {
       const del = f.short.has('D') || (flag('d', 'delete') && flag('f', 'force'))
       const main = f.pos.map((n) => n.replace(/^refs\/heads\//, '')).find(isMainName)
-      if (del && main) return permission('deny', `Không xoá nhánh chính ${main} bằng git branch -D / -d -f. User tự chạy lệnh này nếu thật sự cần.`)
+      if (del && main) {
+        return permission('deny',
+          'Không xoá nhánh chính được; AI sẽ bỏ lệnh này và để bạn tự chạy nếu thật sự cần. ' +
+          `Không xoá nhánh chính ${main} bằng git branch -D / -d -f. User tự chạy lệnh này nếu thật sự cần.`)
+      }
       if (flag('m', 'move') || f.short.has('M')) {
         // `-m <x> <đích>` hoặc `-m <đích>` (đổi tên nhánh hiện tại); đích là nhánh chính khác nguồn ⇒ đè nhánh chính
         const [from, to] = f.pos.length >= 2 ? f.pos : [info.branch, f.pos[0]]
-        if (isMainName(to) && from !== to) return permission('deny', `Không đè nhánh chính ${to} bằng git branch -m / -M. User tự chạy lệnh này nếu thật sự cần.`)
+        if (isMainName(to) && from !== to) {
+          return permission('deny',
+            'Không đè lên nhánh chính được; AI sẽ đặt tên khác cho nhánh, hoặc để bạn tự chạy nếu thật sự cần. ' +
+            `Không đè nhánh chính ${to} bằng git branch -m / -M. User tự chạy lệnh này nếu thật sự cần.`)
+        }
       }
       return null
     }
@@ -682,9 +676,152 @@ function gateMerge(m) {
   if (kinds.has('qa')) how.push('node ~/.claude/hooks/flow-gate.mjs stamp qa <qa.md>')
   if (kinds.has('test')) how.push('node ~/.claude/hooks/flow-gate.mjs stamp test -- <lệnh test đủ bộ>')
   return permission('deny',
+    'Chưa gộp vào nhánh chính được vì bản này chưa qua đủ các bước kiểm tra; AI sẽ làm nốt các bước đó rồi gộp lại. ' +
     `Chưa đủ dấu để gộp vào ${base} — ${detail}. Chạy trong worktree của nhánh: ${how.join(' · ')}` +
     (kinds.has('review') || kinds.has('qa') ? ' (skill flow-review / flow-qa tạo file review.json / qa.md)' : '') +
     (kinds.has('test') ? '. Repo không có test: ghi .claude/flow.json {"tests":"none"}' : '') + '.')
+}
+
+// ---------- thư viện mới khi commit (AC-38) ----------
+
+const MANIFEST_NAMES = new Set(['package.json', 'go.mod'])
+
+// git với biến môi trường riêng (index tạm); ném lỗi khi git lỗi/quá giờ.
+function gitOrThrow(dir, args, env = process.env) {
+  const r = spawnSync('git', ['-C', dir, ...args], { encoding: 'utf8', env, maxBuffer: 1 << 26, timeout: 8000, windowsHide: true })
+  if (r.error) throw new Error(`git ${args.find((a) => !a.startsWith('-')) ?? args[0]}: ${r.error.message}`)
+  if (r.status !== 0) throw new Error(`git ${args.find((a) => !a.startsWith('-')) ?? args[0]}: ${(r.stderr || '').trim().split('\n')[0] || `exit ${r.status}`}`)
+  return r.stdout
+}
+
+// Cây (tree) mà commit sắp tạo, để newPackages so với HEAD. Commit thường ⇒ ':' (index thật là đủ). `commit -a`, `commit <path>`,
+// `--pathspec-from-file`, hoặc một `git add` đứng trước trong cùng lệnh (index lúc này chưa phản ánh commit) ⇒ dựng trên index TẠM:
+// chép index thật rồi thêm các package.json/go.mod đã sửa (-a: chỉ file đã theo dõi; add/path: cả file mới). Không bao giờ đụng index thật.
+// Chọn thừa còn hơn sót: commit <path> (--only) được tính như index + path.
+function commitTreeForDeps(info, c, sawAdd) {
+  const byPaths = !sawAdd && !c.all && !c.fromFile && c.paths.length > 0
+  if (!sawAdd && !c.all && !c.fromFile && !byPaths) return ':'
+  const cwd = byPaths ? info.dir : info.toplevel // pathspec của người dùng tính từ cwd; phần còn lại là cả repo
+  const specs = byPaths ? c.paths : [':(glob)**/package.json', ':(glob)**/go.mod']
+  const withNew = sawAdd || c.fromFile || byPaths
+  const listed = gitOrThrow(cwd, ['ls-files', '-z', '-m', ...(withNew ? ['-o', '--exclude-standard'] : []), '--', ...specs])
+  const files = [...new Set(listed.split('\0').filter((f) => f && MANIFEST_NAMES.has(path.posix.basename(f)) && !/(^|\/)(node_modules|vendor)\//.test(f)))]
+  // .claude/flow.json (allowlist thư viện nguồn ngoài) chỉ lấy bản trên đĩa khi CHÍNH commit này lấy bản đó: `-a`, hoặc liệt kê path/thư mục chứa nó
+  // (file phải đã theo dõi). `git add` đứng trước thì không đoán được nó add gì ⇒ bản chưa stage không được tin: phải `git add` flow.json từ lệnh trước.
+  if (c.all || byPaths) {
+    const flow = path.join(info.toplevel, '.claude', 'flow.json')
+    const l = gitOrThrow(cwd, ['ls-files', '-z', '-m', '--', ...(byPaths ? c.paths : ['.claude/flow.json'])])
+    files.push(...l.split('\0').filter((f) => f && norm(path.resolve(cwd, f)) === norm(flow)))
+  }
+  if (files.length === 0) return ':' // không manifest/flow.json nào đổi ngoài index ⇒ index thật đã đủ
+  const idx = path.resolve(info.dir, gitOrThrow(info.dir, ['rev-parse', '--git-path', 'index']).trim())
+  const tmp = path.join(os.tmpdir(), `flow-gate-index-${process.pid}-${Date.now().toString(36)}`)
+  try {
+    if (fs.existsSync(idx)) fs.copyFileSync(idx, tmp)
+    const env = { ...process.env, GIT_INDEX_FILE: tmp }
+    gitOrThrow(cwd, ['--literal-pathspecs', 'add', '--', ...files], env)
+    return gitOrThrow(cwd, ['write-tree'], env).trim()
+  } finally {
+    fs.rmSync(tmp, { force: true })
+  }
+}
+
+// Kiểm các package trong tổng thời gian ngân sách (vet song song, quá hạn ⇒ phần chưa xong là unknown). Ngân sách mặc định DEPS_BUDGET_MS;
+// FLOW_GATE_DEPS_MS (ms) đổi được, dùng cho test. vetAll không bao giờ ném.
+async function vetBudgeted(deps, pkgs, trustedSources = []) {
+  const budget = Number(process.env.FLOW_GATE_DEPS_MS) > 0 ? Number(process.env.FLOW_GATE_DEPS_MS) : DEPS_BUDGET_MS
+  const ctl = new AbortController()
+  const timers = []
+  const later = (ms, fn) => timers.push(setTimeout(fn, ms))
+  later(budget, () => ctl.abort())
+  const fetchFn = (url, init = {}) => fetch(url, {
+    ...init, signal: init.signal && typeof AbortSignal.any === 'function' ? AbortSignal.any([init.signal, ctl.signal]) : (init.signal ?? ctl.signal),
+  })
+  const hardStop = new Promise((resolve) => later(budget + 1500, () => resolve(null)))
+  try {
+    const res = await Promise.race([deps.vetAll(pkgs, { fetch: fetchFn, concurrency: 8, timeoutMs: 5000, trustedSources }), hardStop])
+    if (res) {
+      if (ctl.signal.aborted) log(`deps: hết giờ kiểm (${budget} ms), phần chưa xong tính là chưa kiểm được`)
+      return res
+    }
+    log(`deps: hết giờ kiểm (${budget} ms)`)
+    // gói nguồn git/URL không cần mạng để biết kết quả (bad, hoặc ok nếu đã duyệt) ⇒ không để một gói chậm làm chúng thành unknown
+    return Promise.all(pkgs.map((p) => p.source ? deps.vet(p, { trustedSources }) : { ...p, status: 'unknown', problems: [], unknown: [`hết giờ kiểm (${budget} ms)`] }))
+  } finally {
+    for (const t of timers) clearTimeout(t)
+  }
+}
+
+const pkgLabel = (p) => `${p.eco} ${p.name}${p.version && !p.source ? `@${p.version}` : ''}`
+
+// Package nguồn git/URL mà user đã duyệt: .claude/flow.json {"trustedDepSources": ["tên@nguồn", …]} (vd "pkg@git+https://host/pkg.git#<sha>"; diff hiện ra khi review).
+// Đọc từ bản SẮP COMMIT, không đọc đĩa (AI tự ghi file trên đĩa mà không git add thì không có hiệu lực): tree = ':' (index) hoặc cây của index tạm
+// (commitTreeForDeps, đã cộng flow.json khi `commit -a` / `commit <path>`). Thiếu/hỏng/sai kiểu ⇒ không tin ai.
+function trustedDepSources(info, tree) {
+  const text = git(info.toplevel, ['cat-file', 'blob', tree === ':' ? ':.claude/flow.json' : `${tree}:.claude/flow.json`])
+  if (text === null) return [] // commit này không có flow.json
+  try {
+    const list = JSON.parse(text.replace(/^﻿/, ''))?.trustedDepSources
+    return Array.isArray(list) ? list.filter((n) => typeof n === 'string') : []
+  } catch (e) {
+    log(`flow.json (bản sắp commit): ${e.message}`)
+    return []
+  }
+}
+
+// g = parseGitSub của `git commit`. Phần sắp commit có thư viện MỚI (package.json / go.mod) ⇒ kiểm có thật, đủ tuổi, không giả tên, không lỗ hổng.
+// bad (gồm nguồn git/URL chưa được duyệt) ⇒ deny. unknown (mạng lỗi/quá giờ) ⇒ KHÔNG chặn nhưng trả additionalContext liệt kê gói chưa kiểm được
+// để AI báo user (không im lặng) + log. newPackages ném (manifest hỏng, mốc git đọc không được) ⇒ deny kèm lý do.
+async function gateDeps(g, sawAdd) {
+  const info = repoInfo(g.dir)
+  if (!info) return null
+  const c = parseCommitFlags(g.rest)
+  if (c.dryRun) return null
+  const deps = await import('./lib/deps.mjs')
+  let tree = ':'
+  try {
+    tree = commitTreeForDeps(info, c, sawAdd)
+  } catch (e) {
+    log(`commitTreeForDeps: ${e?.message ?? e} (kiểm bản đã stage)`)
+  }
+  let pkgs
+  try {
+    pkgs = deps.newPackages(revOf(info, 'HEAD') ? 'HEAD' : null, tree, info.dir)
+  } catch (e) {
+    const why = String(e?.message ?? e).replace(/\s+/g, ' ').slice(0, 300)
+    log(`newPackages: ${why}`)
+    return permission('deny',
+      'Chưa kiểm tra được các thư viện mới trong phần sắp lưu nên dừng lại cho an toàn; AI sẽ sửa lỗi rồi thử lại, hoặc báo bạn nếu không tự sửa được. ' +
+      `Không đọc được package.json / go.mod để so với bản trước: ${why}. Kiểm bằng node ~/.claude/hooks/deps-check.mjs --list.`)
+  }
+  if (pkgs.length === 0) return null
+  const results = await vetBudgeted(deps, pkgs, trustedDepSources(info, tree))
+  for (const r of results) {
+    if (r.status === 'unknown') log(`deps unknown ${r.eco}:${r.name} — ${r.unknown.join('; ')}`)
+  }
+  const bad = results.filter((r) => r.status === 'bad')
+  if (bad.length > 0) {
+    const shown = bad.slice(0, 8).map((r) => `${pkgLabel(r)} — ${r.problems.join('; ')}`).join(' | ') + (bad.length > 8 ? ` | …và ${bad.length - 8} thư viện nữa` : '')
+    return permission('deny',
+      'Thư viện mới vừa thêm có dấu hiệu không an toàn nên chưa lưu; AI sẽ bỏ hoặc thay thư viện đó rồi lưu lại. ' +
+      `Thư viện mới trong phần sắp commit có vấn đề: ${shown}. Kiểm lại tên có đúng không (AI hay bịa hoặc gõ nhầm tên), chọn bản đủ tuổi và không có lỗ hổng ` +
+      '(kiểm lại bằng node ~/.claude/hooks/deps-check.mjs --vet npm:<tên>). Đã chắc chắn thì user tự chạy lệnh commit.' +
+      (bad.some((r) => r.source)
+        ? ' Thư viện nguồn git/URL mà user đã duyệt thì ghi từng mục "tên@nguồn" (nguồn y hệt trong package.json) vào "trustedDepSources" trong .claude/flow.json, ' +
+          `rồi git add .claude/flow.json bằng một lệnh riêng trước lệnh commit — chỉ bản sắp commit mới được tính (diff hiện ra khi review). Mục cần ghi: ${
+            bad.filter((r) => r.source).slice(0, 3).map((r) => JSON.stringify(`${r.name}@${r.version}`)).join(', ')}.`
+        : ''))
+  }
+  const unknown = results.filter((r) => r.status === 'unknown')
+  if (unknown.length === 0) return null
+  const names = unknown.slice(0, 8).map(pkgLabel).join(', ') + (unknown.length > 8 ? `, …và ${unknown.length - 8} thư viện nữa` : '')
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      additionalContext: `Chưa kiểm được độ an toàn của thư viện mới (mạng lỗi hoặc quá giờ): ${names}. Lệnh commit vẫn chạy. ` +
+        'Hãy báo user MỘT dòng: các thư viện này chưa được kiểm tra, bạn xem lại trước khi dùng; kiểm lại khi có mạng bằng node ~/.claude/hooks/deps-check.mjs --vet npm:<tên>.',
+    },
+  }
 }
 
 // Chạy một cổng; lỗi nội bộ ⇒ ghi log và coi như cho qua (vẫn xét các cổng/đoạn lệnh sau).
@@ -697,36 +834,268 @@ function safely(name, fn) {
   }
 }
 
-function hookBash(input) {
-  const cmd = input.tool_input?.command
-  if (typeof cmd !== 'string' || !/merge|commit|push|reset|branch|checkout|restore|clean/.test(cmd)) return null
-  let cwd = path.resolve(toNative(input.cwd || process.cwd()))
+async function safelyAsync(name, fn) {
+  try {
+    return await fn()
+  } catch (e) {
+    log(`${name}: ${e?.stack ?? e}`)
+    return null
+  }
+}
+
+const GIT_WORDS = /merge|commit|push|reset|branch|checkout|restore|clean/
+const APPLY_PATCH_WORD = /\bapply_patch\b/ // Codex/Devin sửa file bằng `apply_patch <<'EOF' … EOF`, `cat <<EOF | apply_patch`, bash -c "…" … qua shell
+const APPLY_PATCH_TOKEN = /(^|[\\/])apply_patch(\.\w+)?$/
+const PATCH_WRAPPERS = new Set(['command', 'env', 'exec', 'sudo', 'doas', 'time', 'nice', 'nohup', 'builtin', 'xargs', 'stdbuf', 'timeout', 'setsid', 'ionice', 'then', 'do', 'else', 'elif'])
+const SHELL_RUNNERS = /^(?:(?:ba|z|da|k|c|fi)?sh|eval|pwsh|powershell|cmd)$/i
+const baseCmd = (t) => path.posix.basename(t.replace(/\\/g, '/')).replace(/\.(exe|cmd|bat)$/i, '').replace(/^`+/, '')
+
+// Đoạn lệnh (toks, đã bỏ nháy) có GỌI apply_patch không? 'direct' = apply_patch đứng ở vị trí lệnh (sau các phép gán VAR=, và nếu có thì sau từ bọc
+// command/env/exec/sudo/time/xargs/… cùng cờ + đối số của chúng); 'nested' = nằm trong chuỗi mà shell con sẽ chạy (bash -c "…", eval "…");
+// null = chỉ nhắc tên (echo apply_patch, grep apply_patch f, command -v apply_patch, git commit -m "…apply_patch…").
+function patchInvocation(toks) {
+  let k = 0
+  while (/^[A-Za-z_]\w*=/.test(toks[k] ?? '')) k++
+  const first = toks[k]
+  if (first === undefined) return null
+  if (APPLY_PATCH_TOKEN.test(first.replace(/^`+/, ''))) return 'direct'
+  const name = baseCmd(first)
+  if (PATCH_WRAPPERS.has(name)) {
+    if (name === 'command' && /^-[vV]/.test(toks[k + 1] ?? '')) return null // command -v apply_patch chỉ hỏi có cài không
+    const rest = toks.slice(k + 1)
+    if (rest.some((t) => APPLY_PATCH_TOKEN.test(t.replace(/^`+/, '')))) return 'direct'
+    const sh = rest.findIndex((t) => SHELL_RUNNERS.test(baseCmd(t))) // sudo bash -c "… apply_patch …"
+    return sh >= 0 && rest.slice(sh + 1).some((t) => APPLY_PATCH_WORD.test(t)) ? 'nested' : null
+  }
+  if (SHELL_RUNNERS.test(name) && toks.slice(k + 1).some((t) => APPLY_PATCH_WORD.test(t))) return 'nested'
+  return null
+}
+
+// Đoạn lệnh có thể chạy apply_patch mà patchInvocation không nhận ra: tên lệnh lấy từ biến/$(…)/`…`, hoặc lệnh khác (alias, find -exec, xargs…) mang
+// chữ apply_patch làm đối số. Lệnh chỉ nhắc tên (echo, grep, which, git…) thì không tính.
+const MENTION_ONLY = new Set(['echo', 'printf', 'grep', 'egrep', 'fgrep', 'rg', 'which', 'type', 'command', 'git', 'man', 'cat', 'less', 'head', 'tail', 'wc', 'ls'])
+function hiddenPatchCall(toks) {
+  let k = 0
+  while (/^[A-Za-z_]\w*=/.test(toks[k] ?? '')) k++
+  const first = toks[k]
+  if (first === undefined) return false
+  if (/^["'`]*[$`]/.test(first)) return true
+  return !MENTION_ONLY.has(baseCmd(first)) && toks.slice(k + 1).some((t) => APPLY_PATCH_WORD.test(t))
+}
+
+// Lệnh con (bash -c "…", eval "…", sudo bash -c "…") có tự đổi thư mục (cd/pushd/popd, kể cả sau builtin/command) ở tầng nào không? strs = token của
+// lệnh ngoài, mỗi token coi như một đoạn script. Cổng chỉ biết cwd của shell ngoài, nên lệnh con tự cd rồi apply_patch với đường dẫn tương đối là mù.
+// Lồng quá sâu thì coi như có (không đọc nổi).
+function innerCd(strs, depth = 0) {
+  if (depth > 4) return true
+  for (const s of strs) {
+    for (const seg of tokenize(s)) {
+      let k = 0
+      while (/^[A-Za-z_]\w*=/.test(seg[k] ?? '')) k++
+      if (/^(builtin|command)$/.test(seg[k] ?? '')) k++
+      if (/^(cd|pushd|popd)$/.test(seg[k] ?? '')) return true
+      for (const t of seg) if (t !== s && /[\s;&|()<>]/.test(t) && innerCd([t], depth + 1)) return true
+    }
+  }
+  return false
+}
+
+// Gọi apply_patch: đọc được file từ lệnh (patchFiles) ⇒ kiểm từng file tại các thư mục `states` ([{cwd, known}]); không đọc được file nào
+// (patch đến từ file, biến, printf, $(…)) ⇒ không biết file nào sẽ bị sửa ⇒ deny.
+function denyPatchUse(patch, states, host) {
+  if (patch.length === 0) {
+    return permission('deny',
+      'Không xác định được file sẽ bị sửa nên chưa chạy; AI sẽ ghi nội dung sửa ngay trong lệnh rồi chạy lại. ' +
+      'apply_patch được gọi nhưng lệnh không có dòng *** Add File / Update File / Delete File nào để cổng kiểm (nội dung patch đến từ file, biến hoặc lệnh khác). ' +
+      'Dùng apply_patch <<\'EOF\' … EOF với patch viết thẳng trong lệnh.')
+  }
+  for (const s of states) {
+    const out = denyPatchTargets(patch, s.cwd, s.known, host)
+    if (out) return out
+  }
+  return null
+}
+
+// Kiểm các file trong heredoc patch như hookEdit, tại thư mục `cwd`. known=false (đứng sau cd tới chỗ không tính ra được) thì đường dẫn
+// tương đối không có nghĩa ⇒ deny; đường dẫn tuyệt đối vẫn xét như thường.
+function denyPatchTargets(patch, cwd, known, host) {
+  const isAbs = (p) => path.isAbsolute(toNative(p))
+  const out = denyDirectEdit(known ? patch : patch.filter(isAbs), cwd, host)
+  const rel = patch.filter((p) => !isAbs(p))
+  if (out || known || rel.length === 0) return out
+  return permission('deny',
+    'Chưa rõ lệnh này sửa file ở thư mục nào nên chưa chạy; AI sẽ ghi đường dẫn đầy đủ của từng file rồi chạy lại. ' +
+    `apply_patch đứng sau lệnh cd tới chỗ không tính ra được (biến, ~, -, $(…)) nên không biết đường dẫn tương đối ${rel.join(', ')} trỏ vào đâu. ` +
+    'Dùng đường dẫn tuyệt đối trong patch, hoặc cd tới đường dẫn cụ thể.')
+}
+
+// AC-42: quét thư mục bằng `grep -r`/`grep -R`/`--recursive` hoặc `find <dir> … -name` ⇒ nhắc MỘT dòng dùng Grep/rg.
+// Chỉ nhắc (additionalContext, không permissionDecision) — có chỗ vẫn cần grep (đọc pipe, một file).
+const SLOW_SEARCH = /(?:^|[;&|(]\s*)(?:grep\s+(?:-[A-Za-z]*[rR][A-Za-z]*|--recursive)\b|find\s+\S+[^;&|]*\s-i?(?:name|path)\s)/
+const SEARCH_NUDGE = {
+  hookSpecificOutput: {
+    hookEventName: 'PreToolUse',
+    additionalContext: 'Tìm trong thư mục nên dùng công cụ Grep có sẵn hoặc `rg` (nhanh hơn nhiều, đỡ CPU khi nhiều worker chạy); ' +
+      'thư mục bị git bỏ qua (worktree trong .claude/worktrees, thư mục nội bộ) thì thêm `-uu` kẻo tìm sót.',
+  },
+}
+
+// Ghi NỘI DUNG file qua lệnh shell (heredoc/echo/printf vào file, sed chèn nhiều dòng, node/python -e ghi file) ⇒ chặn,
+// chỉ AI dùng công cụ sửa file. Lý do: bộ lọc an toàn của app đọc cả nội dung trong lệnh — chữ như "push --force" trong
+// fixture test làm bật hộp hỏi user dù lệnh chỉ ghi file (dính 3 lần 2026-10-11). Hook chạy TRƯỚC hộp hỏi nên chặn ở đây
+// thì user không phải bấm. Không chặn: ghi kết quả lệnh ra file (`cmd > out.txt`), /dev/null, heredoc đưa vào lệnh khác
+// (`git commit -F - <<EOF`, `cat <<EOF | apply_patch`).
+const FILE_REDIRECT = /(?<![0-9&<>])>>?\s*(?!\s*(?:\/dev\/null|&\d))["']?[^\s;&|"'<>]+/
+function contentWriteDeny(cmd, host) {
+  const lines = cmd.split(/\r?\n/)
+  const heredocToFile = lines.some((l) => /<<-?\s*["']?[A-Za-z_][\w-]*["']?/.test(l) && (FILE_REDIRECT.test(l.replace(/<<-?\s*["']?[A-Za-z_][\w-]*["']?/, '')) || /\btee\s+(?:-a\s+)?["']?[^\s|;&-]/.test(l)))
+  const echoToFile = cmd.split(/[;&|]+|\r?\n/).some((seg) => /^\s*(?:echo|printf)\b/.test(seg) && FILE_REDIRECT.test(seg))
+  const sedMultiline = /\bsed\s+(?:-[a-zA-Z]*i[a-zA-Z]*|--in-place)\b[^\n]*\\n/.test(cmd)
+  const scriptWrite = /\b(?:node\s+(?:(?:-e|-p|--eval|--input-type=\S+\s+-e)\b|-(?=\s|$))|python3?\s+-c\b)/.test(cmd) && /\b(?:writeFileSync|appendFileSync|writeFile\(|open\([^)]*['"][wa]['"])/.test(cmd)
+  if (!heredocToFile && !echoToFile && !sedMultiline && !scriptWrite) return null
+  const tool = host === 'codex' ? 'apply_patch' : 'công cụ Write/Edit'
+  return permission('deny',
+    'Nội dung file nên ghi bằng công cụ sửa file thay vì gõ qua dòng lệnh, để bạn không phải bấm duyệt; AI sẽ ghi lại đúng cách. ' +
+    `Dùng ${tool}. Ghi qua lệnh (heredoc/echo/printf vào file, sed chèn nhiều dòng, node/python -e ghi file) làm bộ lọc an ` +
+    'toàn bật hộp hỏi user mỗi khi nội dung có chữ giống lệnh nguy hiểm. Ghi kết quả lệnh ra file (`lệnh > out.txt`) vẫn được.')
+}
+
+// Xoá cả thư mục (rm -r/-rf, Remove-Item -Recurse, rmdir|rd /s), kể cả trong bash -c / eval / powershell -c / cmd /c ⇒ chặn: bộ lọc an toàn của app bật
+// hộp hỏi user cho mỗi lệnh như vậy. Dọn chỗ chạy test thì tạo thư mục mới; thật sự cần xoá thì hỏi user.
+const CMD_WRAPPERS = new Set(['sudo', 'command', 'builtin', 'exec', 'env', 'time', 'nice', 'nohup'])
+function deletesDir(toks, depth = 0) {
+  if (depth > 4) return false
+  let k = 0
+  while (k < toks.length && (/^[A-Za-z_]\w*=/.test(toks[k]) || CMD_WRAPPERS.has(baseCmd(toks[k])))) k++
+  if (k >= toks.length) return false
+  const name = baseCmd(toks[k]).toLowerCase()
+  const rest = toks.slice(k + 1)
+  if (name === 'rm') return rest.some((t) => /^-[a-zA-Z]*[rR]/.test(t) || t === '--recursive')
+  if (/^(remove-item|ri|del|erase)$/.test(name)) return rest.some((t) => /^-r(ecurse)?$/i.test(t))
+  if (/^(rmdir|rd)$/.test(name)) return rest.some((t) => /^\/s$/i.test(t) || /^-r(ecurse)?$/i.test(t))
+  if (SHELL_RUNNERS.test(name)) {
+    const inner = rest.filter((t, i) => i >= rest.findIndex((x) => !/^[-/]/.test(x))).join(' ')
+    return tokenize(inner).some((t) => deletesDir(t, depth + 1))
+  }
+  return false
+}
+const DIR_DELETE_DENY = permission('deny',
+  'Xoá cả một thư mục cần bạn đồng ý nên AI không tự chạy; AI sẽ tạo thư mục mới để làm tiếp thay vì xoá. ' +
+  'Lệnh xoá đệ quy (rm -r/-rf, Remove-Item -Recurse, rmdir /s) làm bộ lọc an toàn bật hộp hỏi user. Cần chỗ trống để chạy test/build ⇒ tạo thư mục ' +
+  'mới (tên khác, vd thêm hậu tố thời gian) trong scratchpad hoặc thư mục tạm. Thật sự phải xoá ⇒ hỏi user trong chat và đưa lệnh để user tự chạy.')
+
+async function hookBash(input) {
+  const n = normalize(input, process.env)
+  const cmd = n.command ?? input.tool_input?.command
+  if (typeof cmd !== 'string') return null
+  const cw = contentWriteDeny(cmd, n.host)
+  if (cw) return cw
+  if (safely('dirDelete', () => tokenize(cmd).some((t) => deletesDir(t)))) return DIR_DELETE_DENY
+  const nudge = SLOW_SEARCH.test(cmd) ? SEARCH_NUDGE : null
+  const mentionsPatch = APPLY_PATCH_WORD.test(cmd)
+  // Nội dung patch nằm ngay trong lệnh (dòng *** Add/Update/Delete File:) ⇒ LUÔN kiểm file, không phụ thuộc nhận ra cách gọi apply_patch
+  // (`p=apply_patch; $p`, alias, find -exec, ghép tên…).
+  const patch = patchFiles(cmd)
+  if (!mentionsPatch && patch.length === 0 && !GIT_WORDS.test(cmd)) return nudge
+  let cwd = path.resolve(toNative(n.cwd))
   let ask = null // ask chỉ được trả khi không đoạn nào khác bị deny (deny thắng ask)
+  let note = null // lời nhắc không chặn (vd thư viện mới chưa kiểm được); trả khi không có deny/ask
+  let sawAdd = false // đã có `git add` đứng trước trong cùng lệnh: index lúc này chưa phản ánh commit sắp tạo
+  let cwdKnown = true // false sau một cd/pushd/popd tới chỗ không tính ra được (biến, ~, -, $(…), cd trần)
+  const dirs = [{ cwd, known: true }] // các thư mục lệnh đi qua, để kiểm patch khi apply_patch nằm trong chuỗi (bash -c "…") không biết chạy ở đâu
+  let patchCalls = 0 // số lời gọi apply_patch nhận ra được (đã kiểm theo chỗ gọi)
   for (const toks of tokenize(cmd)) {
-    if (toks[0] === 'cd' && toks[1] && !/^[-~$]/.test(toks[1])) { cwd = path.resolve(cwd, toNative(toks[1])); continue }
+    if (/^(cd|pushd|popd)$/.test(toks[0] ?? '')) {
+      const to = toks[0] === 'popd' ? null : toks[1]
+      if (to && !/^[-~$]/.test(to)) { cwd = path.resolve(cwd, toNative(to)); cwdKnown = !/[$`]/.test(to) } else cwdKnown = false
+      dirs.push({ cwd, known: cwdKnown })
+      continue
+    }
+    // gọi apply_patch dưới BẤT KỲ dạng nào (heredoc, pipe, command/env/exec/sudo …, bash -c "…") ⇒ kiểm file trong patch; không đọc được file nào ⇒ deny
+    const use = mentionsPatch ? patchInvocation(toks) : null
+    if (use) {
+      patchCalls++
+      // lệnh con không cho biết nó cd đi đâu: có cd/pushd bên trong ⇒ coi như thư mục không xác định (đường dẫn tương đối ⇒ deny, tuyệt đối xét như thường)
+      const states = use !== 'nested' ? [{ cwd, known: cwdKnown }] : innerCd(toks.slice(1)) ? dirs.map((d) => ({ cwd: d.cwd, known: false })) : dirs
+      const out = safely('denyDirectEdit', () => denyPatchUse(patch, states, n.host))
+      if (out) return out
+    }
     const g = parseGitSub(toks, cwd)
     if (!g) continue
     let out = null
-    if (g.sub === 'merge') {
+    if (g.sub === 'add') {
+      sawAdd = true
+    } else if (g.sub === 'merge') {
       const m = parseGitMerge(g)
       if (m) out = gateMerge(m)
     } else if (g.sub === 'commit') {
-      out = safely(`gateSecrets ${g.sub}`, () => gateSecrets(g))
+      out = safely(`gateSecrets ${g.sub}`, () => gateSecrets(g)) ?? await safelyAsync('gateDeps', () => gateDeps(g, sawAdd))
     } else if (g.sub === 'push') {
       out = safely(`gateSecrets ${g.sub}`, () => gateSecrets(g)) ??
         safely('gateForcePush', () => gateForcePush(g)) ??
         safely('gateDeleteMainPush', () => gateDeleteMainPush(g)) ??
-        safely('gateAskMainPush', () => gateAskMainPush(g))
+        safely('gateAskMainPush', () => gateAskMainPush(g, n.host))
     } else if (DESTRUCTIVE_SUBS.has(g.sub)) {
       out = safely(`gateDestructive ${g.sub}`, () => gateDestructive(g))
     }
     if (out?.hookSpecificOutput?.permissionDecision === 'ask') ask ??= out
+    else if (out && !out.hookSpecificOutput?.permissionDecision) note ??= out // chỉ nhắc (additionalContext): không cắt ngang các cổng sau
     else if (out) return out
   }
-  return ask
+  // Có nội dung patch mà số lời gọi nhận ra được ít hơn số khối patch (gồm trường hợp không nhận ra lời gọi nào: biến, alias, find -exec…) ⇒ không biết patch
+  // chạy ở đâu ⇒ kiểm file tại MỌI thư mục lệnh đi qua (đường dẫn tương đối tính theo từng chỗ; cd không xác định ⇒ deny như thường).
+  // Không có nội dung patch, không nhận ra lời gọi nào, nhưng apply_patch có thể vẫn chạy (`$p < x.patch`, alias, find -exec, xargs) ⇒ không biết file nào sẽ sửa ⇒ deny.
+  if (mentionsPatch && patch.length === 0 && patchCalls === 0 && tokenize(cmd).some(hiddenPatchCall)) return denyPatchUse([], [], n.host)
+  const patchBlocks = (cmd.match(/^[ \t]*\*\*\* Begin Patch\b/gm) ?? []).length
+  if (patch.length > 0 && patchCalls < Math.max(1, patchBlocks)) {
+    const out = safely('denyDirectEdit', () => denyPatchUse(patch, dirs, n.host))
+    if (out) return out
+  }
+  if (ask) { // ask thắng note nhưng không được làm rơi lời nhắc: kèm additionalContext cho AI, và một dòng trong hộp hỏi để user thấy
+    const extra = [note, nudge].filter(Boolean).map((x) => x.hookSpecificOutput.additionalContext)
+    if (extra.length === 0) return ask
+    const o = ask.hookSpecificOutput
+    return { hookSpecificOutput: {
+      ...o,
+      permissionDecisionReason: note ? `${o.permissionDecisionReason}\nLưu ý: lệnh này còn lưu thư viện mới chưa kiểm được độ an toàn (mạng lỗi hoặc quá giờ).` : o.permissionDecisionReason,
+      additionalContext: extra.join('\n'),
+    } }
+  }
+  if (note && nudge) { // hai lời nhắc: gộp thành một đầu ra
+    return { hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: `${note.hookSpecificOutput.additionalContext}\n${nudge.hookSpecificOutput.additionalContext}` } }
+  }
+  return note ?? nudge
 }
 
-function hookStop(input) {
+// Sổ tiến độ (docs/specs/*/progress.md) có mục `Làn:` còn dòng "- [ ]" ⇒ vẫn đang thi công dở. Mục Làn: là các dòng danh sách (hoặc thụt lề)
+// ngay dưới dòng `Làn:`; gặp dòng không phải danh sách (vd `Ghi chú:`) là hết mục.
+function hasOpenLane(text) {
+  const lines = String(text).normalize('NFC').split(/\r?\n/)
+  const start = lines.findIndex((l) => /^[ \t>*_#-]*Làn[ \t*_]*[:：]/u.test(l))
+  if (start < 0) return false
+  for (const l of lines.slice(start + 1)) {
+    if (l.trim() === '') continue
+    if (/^[ \t]*[-*+][ \t]+\[ \]/.test(l)) return true
+    if (!/^[ \t]*[-*+][ \t]/.test(l) && !/^[ \t]+\S/.test(l)) break
+  }
+  return false
+}
+
+// Nhánh hiện tại có sổ tiến độ CHƯA xong (openProgress của lib so-chot: sổ ghi đúng nhánh này) mà mục Làn: còn "- [ ]"? Lỗi đọc ⇒ false (nhắc như cũ).
+async function lanesStillOpen(info) {
+  if (!info.branch || info.branch === 'HEAD') return false
+  try {
+    const { openProgress } = await import('./lib/so-chot.mjs')
+    const hit = openProgress(info.toplevel, info.branch)
+    if (!hit || fs.statSync(hit.file).size > 1024 * 1024) return false
+    return hasOpenLane(fs.readFileSync(hit.file, 'utf8'))
+  } catch (e) {
+    log(`lanesStillOpen: ${e?.message ?? e}`)
+    return false
+  }
+}
+
+async function hookStop(input) {
   if (input.stop_hook_active) return null
   const info = repoInfo(input.cwd || process.cwd())
   if (!info || !info.linked) return null
@@ -736,13 +1105,15 @@ function hookStop(input) {
   if (status === null || status.trim() !== '') return null
   const st = tryGateState(info, base, 'HEAD')
   if (!st || st.missing.length === 0) return null
+  if (await lanesStillOpen(info)) return null // đang thi công dở (còn làn "- [ ]"): chưa tới lúc đòi dấu review/qa/test
   const nudged = path.join(info.gatesDir, `nudged-${st.pid}`)
   if (fs.existsSync(nudged)) return null
   fs.mkdirSync(info.gatesDir, { recursive: true })
   fs.writeFileSync(nudged, new Date().toISOString())
   return {
     decision: 'block',
-    reason: `${info.branch} đã commit xong nhưng thiếu: ${st.missing.join(', ')}. Chạy skill flow-qa / flow-review trước khi báo user.` +
+    reason: 'Việc đã lưu xong nhưng chưa qua các bước kiểm tra cuối nên AI sẽ chạy nốt chúng trước khi báo bạn. ' +
+      `${info.branch} đã commit xong nhưng thiếu: ${st.missing.join(', ')}. Chạy skill flow-qa / flow-review trước khi báo user.` +
       (st.missing.includes('test') ? ' Dấu test: node ~/.claude/hooks/flow-gate.mjs stamp test -- <lệnh test đủ bộ>.' : ''),
   }
 }
@@ -793,7 +1164,8 @@ function firstUserMessage(file) {
 }
 
 // Worker coder nộp bài: brief (tin nhắn user đầu trong transcript) có plan= và lane= ⇒ chạy lane-check audit trong cwd của worker.
-// Phát hiện file ngoài scope (exit 1) ⇒ block; lane-check không chạy được (exit 2/lỗi) hoặc brief không có plan=/lane= ⇒ cho qua.
+// Phát hiện file ngoài scope (exit 1) ⇒ block. AC-09: lane-check không chạy được (exit 2/lỗi) ⇒ cũng block (không cho qua âm thầm); lặp vô hạn
+// không xảy ra vì lượt sau stop_hook_active=true ⇒ cho qua. Brief không có plan=/lane= ⇒ không có gì để audit ⇒ cho qua.
 function auditScope(input) {
   if (typeof input.agent_transcript_path !== 'string' || !input.agent_transcript_path) return null
   const brief = firstUserMessage(input.agent_transcript_path)
@@ -809,21 +1181,31 @@ function auditScope(input) {
   const args = [path.join(HOOK_DIR, 'lane-check.mjs'), 'audit', plan, lane, '--repo', cwd, '--worktree', cwd, '--branch', 'HEAD', '--base', base]
   const r = spawnSync(process.execPath, args, { cwd, encoding: 'utf8', timeout: 30000, windowsHide: true })
   if (r.error || (r.status !== 0 && r.status !== 1)) {
-    log(`lane-check audit lane ${lane}: ${r.error?.message ?? `exit ${r.status}: ${(r.stderr || r.stdout || '').trim()}`}`)
-    return null
+    const full = r.error?.message ?? `exit ${r.status}: ${(r.stderr || r.stdout || '').trim()}`
+    log(`lane-check audit lane ${lane}: ${full}`)
+    const why = (r.error?.message ?? `lane-check thoát mã ${r.status}: ${(r.stderr || r.stdout || '').split(/\r?\n/).find((l) => l.trim()) ?? 'không có thông báo'}`).trim().slice(0, 300)
+    return {
+      decision: 'block',
+      reason: 'Chưa kiểm được AI phụ có làm lố phần việc được giao hay không nên chưa nhận bài; AI sẽ chạy lại phần kiểm tra, hoặc báo lại cho người điều phối. ' +
+        `Chi tiết: không kiểm được phạm vi làn ${lane} vì ${why}, chạy lại với --repo đúng hoặc báo captain.`,
+    }
   }
   if (r.status === 0) return null
   const lines = r.stdout.split(/\r?\n/).filter(Boolean)
   const shown = lines.slice(0, 30).join('\n') + (lines.length > 30 ? `\n…và ${lines.length - 30} dòng nữa` : '')
   return {
     decision: 'block',
-    reason: `Audit phạm vi làn ${lane} không đạt:\n${shown}\nHãy gỡ thay đổi ngoài scope, hoặc trả return=needs_context kèm tên file.`,
+    reason: 'AI phụ đã sửa cả những file nằm ngoài phần việc được giao nên chưa nhận bài; AI sẽ gỡ phần ngoài phạm vi rồi nộp lại. ' +
+      `Audit phạm vi làn ${lane} không đạt:\n${shown}\nHãy gỡ thay đổi ngoài scope, hoặc trả return=needs_context kèm tên file.`,
   }
 }
 
-function hookSubagentStop(input) {
+async function hookSubagentStop(input) {
   if (input.stop_hook_active) return null
-  if (!RECEIPT_AGENTS.has(input.agent_type)) return null
+  // Vai đòi receipt / audit phạm vi lấy từ kit/roles.json (một nguồn với flow-dispatch, hostgen); registry hỏng ⇒ ném ⇒ cho qua + log.
+  const { loadRoles, roleSet } = await import('./lib/models.mjs')
+  const reg = loadRoles()
+  if (!roleSet('receipt', reg).has(input.agent_type)) return null
   const last = input.last_assistant_message
   let receipt = receiptValue(last)
   if (receipt === null) {
@@ -843,11 +1225,12 @@ function hookSubagentStop(input) {
       if (report === null) return null
       return {
         decision: 'block',
-        reason: 'Thiếu receipt: kết thúc bằng đúng một dòng return=…; paths=…; checks=…; blocker=…; stop',
+        reason: 'Bản báo cáo của AI phụ chưa đúng mẫu nên chưa nhận bài; AI sẽ yêu cầu nộp lại cho đúng. ' +
+          'Thiếu receipt: kết thúc bằng đúng một dòng return=…; paths=…; checks=…; blocker=…; stop',
       }
     }
   }
-  if (!AUDIT_AGENTS.has(input.agent_type) || receipt === 'needs_context' || receipt === 'blocked') return null
+  if (!roleSet('audit', reg).has(input.agent_type) || receipt === 'needs_context' || receipt === 'blocked') return null
   return safely('audit', () => auditScope(input))
 }
 
@@ -944,7 +1327,7 @@ const [, , mode, arg1, arg2] = process.argv
 
 if (HOOKS[mode]) {
   try {
-    const out = HOOKS[mode](JSON.parse(fs.readFileSync(0, 'utf8').replace(/^\uFEFF/, '')))
+    const out = await HOOKS[mode](JSON.parse(fs.readFileSync(0, 'utf8').replace(/^\uFEFF/, '')))
     if (out) process.stdout.write(JSON.stringify(out))
   } catch (e) {
     log(e?.stack ?? e)

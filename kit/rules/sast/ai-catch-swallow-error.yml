@@ -1,0 +1,25 @@
+id: ai-catch-swallow-error
+language: Tsx
+severity: error
+message: "Nuốt lỗi: catch rỗng hoặc .catch(() => {})"
+note: |
+  Lỗi biến mất không dấu vết nên người dùng thấy hỏng mà không ai biết vì sao.
+  Sửa: ghi log kèm ngữ cảnh rồi ném lại, hoặc xử lý cụ thể (báo người dùng, thử lại); không để khối catch trống.
+rule:
+  any:
+    - kind: catch_clause
+      has:
+        field: body
+        kind: statement_block
+        regex: '(?s)^\{\s*(//[^\n]*\s*|/\*.*?\*/\s*)*\}$'
+    - pattern: '$P.catch(() => {})'
+    - pattern: '$P.catch(($E) => {})'
+ignores:
+  - '**/node_modules/**'
+  - '**/dist/**'
+  - '**/build/**'
+  - '**/.next/**'
+  - '**/out/**'
+  - '**/kit/rules/fixtures/**'
+  - '**/*.test.*'
+  - '**/*.spec.*'

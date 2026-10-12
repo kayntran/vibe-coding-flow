@@ -1,6 +1,6 @@
 ---
 name: flow-review
-description: Review code bằng Grok 4.7 / Codex gpt-6.1-sol (+ Gemini 3.8 Flash) — ĐÚNG MỘT LẦN cho cả tính năng, trước khi hỏi user gộp; máy kiểm trước (lint/typecheck/test) rồi mới gọi AI; mức suy luận theo rủi ro; captain chỉ kiểm sâu lỗi nặng; đóng dấu review. Tự chạy khi nhánh đã xanh test và QA (hook chặn gộp nếu thiếu dấu). Cũng dùng khi user nói "review", "soát code", "kiểm bảo mật", "code này ổn chưa". KHÔNG dùng cho review plan (nằm trong flow-spec), KHÔNG chạy sau từng giai đoạn/làn.
+description: Review code bằng Grok (qua Cursor) / Codex Sol mới nhất (+ Gemini Flash mới nhất) — ĐÚNG MỘT LẦN cho cả tính năng, trước khi hỏi user gộp; máy kiểm trước (lint/typecheck/test) rồi mới gọi AI; mức suy luận theo rủi ro; captain chỉ kiểm sâu lỗi nặng; đóng dấu review. Tự chạy khi nhánh đã xanh test và QA (hook chặn gộp nếu thiếu dấu). Cũng dùng khi user nói "review", "soát code", "kiểm bảo mật", "code này ổn chưa". KHÔNG dùng cho review plan (nằm trong flow-spec), KHÔNG chạy sau từng giai đoạn/làn.
 ---
 
 # Flow — review code (tiết kiệm token, vẫn kỹ)
@@ -9,8 +9,10 @@ description: Review code bằng Grok 4.7 / Codex gpt-6.1-sol (+ Gemini 3.8 Flash
 giai đoạn, từng làn, từng commit. Plan chỉ có MỘT bước "review code", ở cuối.
 
 ## 0. Máy kiểm trước (bắt buộc, miễn phí)
-Lint, typecheck, test đủ bộ (dấu test xanh), quét secret đã xanh rồi mới gọi model review — không tốn token cho thứ
-công cụ đã bắt.
+`node ~/.claude/hooks/flow-check.mjs --dir <WT>` (lint, typecheck, SAST, lỗ hổng thư viện, khoá trong bản build…) +
+test đủ bộ (dấu test xanh) + `node ~/.claude/hooks/deps-check.mjs --repo <WT> --base main --head HEAD` (thư viện mới) đã
+xanh rồi mới gọi model review — không tốn token cho thứ công cụ đã bắt. Diff đụng database ⇒ dùng
+`review-brief-security.md` (có checklist DB) cho lượt bảo mật.
 
 ## 1. Chọn mức theo rủi ro
 **Nhạy cảm** = diff đụng đăng nhập/phân quyền, tiền/license/thanh toán, dữ liệu (migration, xoá, transaction), đồng
@@ -23,34 +25,25 @@ bắt lỗi khác nhau ⇒ lượt thứ hai dùng họ khác thay vì chạy Co
 
 | Diff | Lượt (chạy song song) |
 |---|---|
-| Thường | 1 lượt chất lượng — **Grok 4.7 high** (brief đã gồm mục bảo mật cơ bản). Không gọi Codex |
-| Nhạy cảm | **Codex `high`** lượt bảo mật + **Grok** lượt chất lượng |
-| Tiền / auth / dữ liệu có rủi ro mất mát | như Nhạy cảm + **Gemini 3.8 Flash** lượt chất lượng thứ hai |
+| Thường | 1 lượt chất lượng — **Grok high** (brief đã gồm mục bảo mật cơ bản). Không gọi Codex |
+| Nhạy cảm | **Codex Sol `high`** lượt bảo mật + **Grok** lượt chất lượng |
+| Tiền / auth / dữ liệu có rủi ro mất mát | như Nhạy cảm + **Gemini Flash** lượt chất lượng thứ hai |
 
 **Dự phòng:** lượt nào lỗi/hết giờ/không ra JSON ⇒ chạy lại lượt đó bằng model kế tiếp CHƯA dùng cho nhánh này theo
 thứ tự Codex → Grok → Gemini Flash → Agent `code-reviewer`; báo user một dòng.
-Grok CLI gói miễn phí có hạn mức: hết lượt ⇒ wrapper báo "HẾT LƯỢT" và exit 1 ⇒ sang Gemini Flash như trên.
+Model luôn là bản mới nhất của dòng (`kit/roles.json` + `models.mjs`); hết lượt ⇒ wrapper báo "HẾT LƯỢT", exit 1 ⇒ dự phòng.
 
 Lệnh (Bash `run_in_background`; `<S>` scratchpad, `<WT>` gốc worktree, `<BRIEF>` = `review-brief.md` hoặc
 `review-brief-security.md`):
 
-**Grok / Gemini Flash** — wrapper lo hết: diff, prompt, tắt cấu hình Claude/Cursor mà Grok tự nạp (nguyên nhân treo),
-chế độ chỉ đọc, bóc JSON. Exit 1 ⇒ dùng dự phòng.
+MỌI model đi qua MỘT wrapper (`--model grok|flash|codex|opus`): kiểm CLI sẵn sàng, chọn model mới nhất của dòng,
+**gửi sạch** (bỏ file bí mật/dữ liệu riêng khỏi diff và workspace, quét khoá cả dòng đã xoá, reviewer đọc thư mục tạm
+chứ không phải worktree thật, không nhận biến môi trường dạng khoá), bóc JSON đúng `review-schema.json`.
 ```bash
-node ~/.claude/hooks/review-ext.mjs --model grok|flash --wt "<WT>" --brief <BRIEF> \
-  --out "<S>/review-<tên>.json" --note "<1–2 câu nhánh làm gì>" < /dev/null
+node ~/.claude/hooks/review-ext.mjs --model grok|flash|codex|opus --wt "<WT>" --brief <BRIEF>   --out "<S>/review-<tên>.json" --note "<1–2 câu nhánh làm gì>" < /dev/null
 ```
-
-**Codex** (ghi thẳng ra file, KHÔNG pipe vào tail/head, luôn `< /dev/null`; kiểm `command -v codex`):
-```bash
-codex exec --sandbox read-only -m gpt-6.1-sol -c model_reasoning_effort="high" -C "<WT>" \
-  --output-schema ~/.claude/workers/review-schema.json -o "<S>/review-<tên>.json" \
-  "$(cat ~/.claude/workers/<BRIEF>)
-
-Phạm vi: git diff main...HEAD (bỏ qua file sinh tự động, lockfile). <1–2 câu nhánh làm gì>
-Trả lời theo JSON schema đã cho (bỏ qua khuôn markdown ở trên)." < /dev/null
-```
-Brief giữ nguyên phần đầu (tĩnh ⇒ cache được), phần riêng của nhánh để cuối. Codex >30 phút không ra file ⇒ dự phòng.
+Exit 0 xong · 1 lỗi/CLI chưa sẵn sàng/hết giờ ⇒ dự phòng · **3 = có khoá/dữ liệu riêng, KHÔNG gửi** ⇒ dừng, gỡ khoá khỏi
+code (và lịch sử nếu đã commit) rồi chạy lại; không lách bằng cách đổi model. Codex >30 phút không ra file ⇒ dự phòng.
 
 ## 2. Captain xử lý finding — kiểm sâu chỉ lỗi nặng
 - **BLOCKER/MAJOR:** mở code tại `path:line`, dựng lại kịch bản hỏng. Thật ⇒ Agent `coder` viết test đỏ tái hiện

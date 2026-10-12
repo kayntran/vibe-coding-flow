@@ -14,6 +14,14 @@ output của LLM) tới nơi dùng nguy hiểm. Soát:
 5. Desktop/IPC: binding lộ hàm ghi file/chạy lệnh cho frontend, đường dẫn từ frontend không chuẩn hoá.
 6. Phụ thuộc: package mới thêm có CVE đã biết hoặc tên gần giống package phổ biến (typosquat).
 7. Licence/khoá bản quyền (nếu dự án có): kiểm ở client có thể vượt, so sánh không hằng thời gian.
+8. Database (khi diff đụng schema, migration, policy, truy vấn có dữ liệu người dùng):
+   - Phân quyền theo hàng: bảng mới/đổi có bật RLS/policy chưa; policy có lọc theo người dùng thật (vd `auth.uid()`),
+     không `using (true)`; quyền chỉ ẩn ở giao diện mà server/DB vẫn cho đọc ⇒ lỗi.
+   - Khoá quản trị (`service_role`, chuỗi kết nối admin) chỉ ở server; lọt vào code chạy phía người dùng/bản build ⇒ lỗi.
+   - Truy vấn ghép chuỗi/nội suy dữ liệu người dùng vào SQL thay vì tham số ⇒ lỗi.
+   - Migration xoá/đổi kiểu/đổi tên cột hoặc bảng có dữ liệu, `DELETE`/`UPDATE` không `WHERE` ⇒ báo, đòi sao lưu trước
+     và bước quay lại; thêm cột NOT NULL không default trên bảng có dữ liệu ⇒ báo.
+   - Gán hàng loạt trường (mass assignment): cho người dùng ghi trường quyền/vai/số dư ⇒ lỗi.
 
 Phạm vi đọc: CHỈ diff + đường dữ liệu đi vào/ra phần bị đổi. Không khám phá phần khác của repo. Bỏ qua thứ quét
 secret/lint đã bắt. Diff < 200 dòng ⇒ tối đa 5 finding.

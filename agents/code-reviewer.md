@@ -1,7 +1,7 @@
 ---
 name: code-reviewer
 description: DỰ PHÒNG CUỐI cho review code — chỉ dùng khi Codex, Grok và Gemini Flash (skill flow-review) đều lỗi/không có. Review diff trước khi gộp + security audit. Chỉ đọc, tối đa 10 finding xếp theo mức nghiêm trọng, mỗi finding một path:line.
-model: claude-opus-5-5
+model: opus
 effort: medium
 tools: Read, Glob, Grep, Bash
 color: red

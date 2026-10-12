@@ -1,0 +1,7 @@
+# Cấu hình ast-grep của kit: flow-check chạy `ast-grep scan --config kit/rules/sgconfig.yml .` ở gốc dự án.
+# Luật nằm ở sast/*.yml; mỗi luật có fixture đỏ + xanh ở fixtures/<id>/ (hooks/flow-check.test.mjs kiểm).
+ruleDirs:
+  - sast
+# Parser tsx đọc được cả .ts/.js/.jsx nên một luật phủ hết mã web.
+languageGlobs:
+  tsx: ['*.ts', '*.mts', '*.cts', '*.js', '*.mjs', '*.cjs', '*.jsx']

@@ -1,0 +1,276 @@
+{
+  "version": 1,
+  "_doc": "Registry vai: MỘT nguồn cho flow-gate (receipt/audit), flow-dispatch (writesCode), hostgen (TOML Codex) và models.mjs (vai -> dòng model). Chỉ ghi TÊN DÒNG (opus, sonnet, haiku, sol, luna, astra, flash...), không ghi số phiên bản hay id model: hooks/lib/models.mjs chọn bản mới nhất có trên máy lúc chạy [vmdk]. Bảng theo sổ chốt [bbzh] [50zu] [69u6] [csb8]. User đổi model cho vai bằng 'node hooks/models.mjs set' (ghi ở ~/.claude/flow.local.json, không đụng file này). agent:false = vai gọi qua wrapper (review-ext), không có file agents/*.md.",
+  "hosts": {
+    "claude": {
+      "lines": [
+        "opus",
+        "sonnet",
+        "haiku"
+      ]
+    },
+    "codex": {
+      "lines": {
+        "sol": [
+          "astra",
+          "luna"
+        ],
+        "astra": [
+          "sol",
+          "luna"
+        ],
+        "luna": [
+          "terra",
+          "sol"
+        ],
+        "terra": [
+          "sol",
+          "luna"
+        ]
+      }
+    },
+    "agy": {
+      "lines": {
+        "opus": [
+          "sonnet",
+          "pro"
+        ],
+        "sonnet": [
+          "opus",
+          "pro"
+        ],
+        "flash": [
+          "pro"
+        ],
+        "pro": [
+          "flash"
+        ]
+      }
+    }
+  },
+  "roles": {
+    "coder": {
+      "desc": "viết code logic khó, dữ liệu, bảo mật, sửa bug đã khoanh vùng",
+      "writesCode": true,
+      "receipt": true,
+      "audit": true,
+      "models": {
+        "claude": {
+          "line": "sonnet",
+          "effort": "xhigh",
+          "escalate": {
+            "line": "opus",
+            "effort": "high"
+          }
+        },
+        "codex": {
+          "line": "sol",
+          "effort": "high",
+          "escalate": {
+            "line": "astra",
+            "effort": "high"
+          }
+        }
+      }
+    },
+    "coder-lite": {
+      "desc": "việc code có mẫu sẵn: i18n, docs, sửa lặp theo mẫu, lỗi lint/type",
+      "writesCode": true,
+      "receipt": true,
+      "audit": true,
+      "models": {
+        "claude": {
+          "line": "sonnet",
+          "effort": "high",
+          "escalate": {
+            "line": "opus",
+            "effort": "high"
+          }
+        },
+        "codex": {
+          "line": "sol",
+          "effort": "medium",
+          "escalate": {
+            "line": "sol",
+            "effort": "high"
+          }
+        }
+      }
+    },
+    "coder-mini": {
+      "desc": "việc nhỏ, mini project, thay đổi một vài dòng",
+      "writesCode": true,
+      "receipt": true,
+      "audit": true,
+      "models": {
+        "claude": {
+          "line": "haiku",
+          "effort": "medium",
+          "escalate": {
+            "line": "sonnet",
+            "effort": "high"
+          }
+        },
+        "codex": {
+          "line": "luna",
+          "effort": "medium",
+          "escalate": {
+            "line": "luna",
+            "effort": "high"
+          }
+        }
+      }
+    },
+    "debugger": {
+      "desc": "tìm nguyên nhân lỗi từ log, test đỏ, CI",
+      "writesCode": false,
+      "receipt": true,
+      "audit": false,
+      "models": {
+        "claude": {
+          "line": "sonnet",
+          "effort": "xhigh",
+          "escalate": {
+            "line": "opus",
+            "effort": "high"
+          }
+        },
+        "codex": {
+          "line": "sol",
+          "effort": "high",
+          "escalate": {
+            "line": "astra",
+            "effort": "high"
+          }
+        }
+      }
+    },
+    "recon": {
+      "desc": "đọc thô repo/tài liệu để trả lời một câu hỏi",
+      "writesCode": false,
+      "receipt": true,
+      "audit": false,
+      "models": {
+        "claude": {
+          "line": "sonnet",
+          "effort": "high"
+        },
+        "codex": {
+          "line": "sol",
+          "effort": "medium"
+        }
+      }
+    },
+    "researcher": {
+      "desc": "tìm repo/thư viện/cách làm có sẵn cho một ý tưởng",
+      "writesCode": false,
+      "receipt": true,
+      "audit": false,
+      "models": {
+        "claude": {
+          "line": "sonnet",
+          "effort": "high"
+        },
+        "codex": {
+          "line": "sol",
+          "effort": "high"
+        }
+      }
+    },
+    "test-runner": {
+      "desc": "chạy test và báo xanh/đỏ",
+      "writesCode": false,
+      "receipt": true,
+      "audit": false,
+      "models": {
+        "claude": {
+          "line": "haiku",
+          "effort": "medium"
+        },
+        "codex": {
+          "line": "luna",
+          "effort": "low"
+        }
+      }
+    },
+    "qa-tester": {
+      "desc": "chạy thử app như người dùng thật, chụp ảnh, ghi báo cáo",
+      "writesCode": false,
+      "receipt": true,
+      "audit": false,
+      "models": {
+        "claude": {
+          "line": "sonnet",
+          "effort": "high"
+        },
+        "codex": {
+          "line": "sol",
+          "effort": "medium"
+        }
+      }
+    },
+    "code-reviewer": {
+      "desc": "review code dự phòng cuối (chỉ đọc)",
+      "writesCode": false,
+      "receipt": true,
+      "audit": false,
+      "models": {
+        "claude": {
+          "line": "opus",
+          "effort": "medium"
+        },
+        "codex": {
+          "line": "sol",
+          "effort": "high"
+        }
+      }
+    },
+    "plan-reviewer": {
+      "desc": "soát kế hoạch kỹ thuật bằng model khác dòng [69u6]",
+      "agent": false,
+      "writesCode": false,
+      "receipt": false,
+      "audit": false,
+      "models": {
+        "claude": {
+          "line": "opus",
+          "effort": "high"
+        },
+        "codex": {
+          "line": "sol",
+          "effort": "high"
+        },
+        "agy": {
+          "line": "opus",
+          "effort": "high"
+        }
+      }
+    },
+    "security-reviewer": {
+      "desc": "lượt review bảo mật khi diff nhạy cảm [csb8]",
+      "agent": false,
+      "writesCode": false,
+      "receipt": false,
+      "audit": false,
+      "models": {
+        "codex": {
+          "line": "sol",
+          "effort": "high"
+        }
+      }
+    },
+    "sensitive-reviewer": {
+      "desc": "lượt review thêm khi đụng tiền, đăng nhập, dữ liệu [csb8]",
+      "agent": false,
+      "writesCode": false,
+      "receipt": false,
+      "audit": false,
+      "models": {
+        "agy": {
+          "line": "flash",
+          "effort": "high"
+        }
+      }
+    }
+  }
+}

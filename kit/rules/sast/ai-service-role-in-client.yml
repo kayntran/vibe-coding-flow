@@ -1,0 +1,29 @@
+id: ai-service-role-in-client
+language: Tsx
+severity: error
+message: "Khoá service_role / bí mật được đọc trong file chạy ở trình duyệt (use client)"
+note: |
+  File có dòng use client chạy ở trình duyệt; khoá service_role bỏ qua mọi quy tắc bảo vệ dữ liệu (RLS) của Supabase.
+  Sửa: chuyển phần dùng khoá này sang máy chủ (API route, server action, Edge Function); ở trình duyệt chỉ dùng khoá anon hoặc publishable.
+rule:
+  any:
+    - pattern: process.env.$NAME
+    - pattern: import.meta.env.$NAME
+  inside:
+    kind: program
+    stopBy: end
+    has:
+      kind: expression_statement
+      regex: '^["'']use client["''];?$'
+constraints:
+  NAME:
+    regex: 'SERVICE_ROLE|SECRET|PRIVATE'
+ignores:
+  - '**/node_modules/**'
+  - '**/dist/**'
+  - '**/build/**'
+  - '**/.next/**'
+  - '**/out/**'
+  - '**/kit/rules/fixtures/**'
+  - '**/*.test.*'
+  - '**/*.spec.*'

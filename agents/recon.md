@@ -1,7 +1,7 @@
 ---
 name: recon
 description: Đọc thô trong repo và tra tài liệu/web để trả lời MỘT câu hỏi, trả về kết luận kèm bằng chứng path:line hoặc URL. Dùng khi vật liệu thô >30KB và captain chỉ cần kết luận. Chỉ đọc — không sửa file nguồn.
-model: claude-sonnet-5-5
+model: sonnet
 effort: high
 tools: Read, Glob, Grep, Bash, WebFetch, WebSearch, Write
 color: cyan

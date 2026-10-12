@@ -1,0 +1,21 @@
+id: ai-eval-dynamic-code
+language: Tsx
+severity: error
+message: "eval / new Function chạy chuỗi như mã lệnh"
+note: |
+  Chuỗi đến từ người dùng hoặc mạng sẽ thành mã chạy trên máy chủ hay trình duyệt của bạn.
+  Sửa: đọc dữ liệu bằng JSON.parse, chọn hành động bằng bảng tra (object hoặc switch), không dựng mã từ chuỗi.
+rule:
+  any:
+    - pattern: eval($$$ARGS)
+    - pattern: new Function($$$ARGS)
+    - pattern: Function($$$ARGS)
+ignores:
+  - '**/node_modules/**'
+  - '**/dist/**'
+  - '**/build/**'
+  - '**/.next/**'
+  - '**/out/**'
+  - '**/kit/rules/fixtures/**'
+  - '**/*.test.*'
+  - '**/*.spec.*'

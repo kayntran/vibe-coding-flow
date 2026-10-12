@@ -35,9 +35,17 @@ Mọi tài liệu của một tính năng nằm trong `docs/specs/<YYYY-MM-DD>-<
    bảo mật/input độc, khôi phục sau lỗi, tương thích bản cũ/dữ liệu cũ, truy cập bằng bàn phím/màn hẹp. Lặp tới khi hai
    vòng liên tiếp không thêm gì. Mỗi edge case giữ lại ⇒ một acceptance criteria hoặc một dòng "ngoài phạm vi".
    Có thể giao `researcher` gom thêm edge case người khác từng gặp với bài tương tự.
-6. **Cổng 1:** user duyệt SPEC.
+6. **Cổng 1:** user duyệt SPEC — cổng DUY NHẤT user phải duyệt trước khi thi công. Viết/sửa SPEC xong ⇒ tóm tắt ngắn
+   trong chat + chép bản xem vào thư mục mở phiên và mở sẵn (khung xem file không mở được file trong worktree).
 
-## Pha 2 — Plan kỹ thuật (plan mode)
+## Pha 2 — Plan kỹ thuật
+
+**Trước khi viết PLAN — kiểm skill/MCP của thư viện chính** (stack đã biết: dự án có sẵn đọc file cấu hình; dự án mới
+ngay sau khi chọn stack): `node ~/.claude/hooks/skills-check.mjs --host claude|codex --dir <repo> --lib <a,b>`.
+`installed` + `ok` ⇒ đọc skill/MCP đó khi viết plan · `missing` ⇒ hỏi user MỘT câu đời thường rồi chạy lệnh cài nó in
+(chỉ bản chính hãng trong `kit/official.json`; bản cộng đồng: đọc, soát, viết lại thành skill dự án — không cài) ·
+`needs-login` ⇒ đưa đúng lệnh đăng nhập · `misconfigured` ⇒ báo một dòng · `unknown` ⇒ thử một lệnh đọc rẻ trước khi
+dựa vào. Cài xong cần mở lại phiên ⇒ ghi sổ tiến độ trước. Thư viện thật của dự án (vd `shadcn init`) là task đầu của PLAN.
 
 Viết `PLAN.md` cạnh SPEC.md, mọi path phải kiểm có thật trong code:
 - **Kiến trúc**: module nào, trách nhiệm, contract (type/interface/API) giữa chúng; data model/migration.
@@ -61,7 +69,7 @@ Viết `PLAN.md` cạnh SPEC.md, mọi path phải kiểm có thật trong code:
   - Mỗi task có test của nó; mỗi làn có `accept`.
   - Plan chỉ có **MỘT** bước "review code" (skill `flow-review`), ở cuối, sau khi các làn đã gộp vào nhánh
     tích hợp — không review sau từng giai đoạn/làn.
-  - **Kiểm bằng máy, bắt buộc trước cổng 2:** `node ~/.claude/hooks/lane-check.mjs plan <PLAN.md>` — báo làn trùng file
+  - **Kiểm bằng máy, bắt buộc trước khi soát plan:** `node ~/.claude/hooks/lane-check.mjs plan <PLAN.md>` — báo làn trùng file
     (`OVERLAP`), file nóng hai chủ (`HOT`), phụ thuộc sai/vòng, rồi in các **wave**. Exit 1 ⇒ sửa bảng tới khi sạch.
     Hai làn cùng đụng một symbol (vd A `replace` còn B `extend` cùng `PaymentService`) git không thấy được ⇒ captain
     soát cột `ops`, gộp hai làn làm một hoặc cho chạy nối tiếp.
@@ -69,26 +77,33 @@ Viết `PLAN.md` cạnh SPEC.md, mọi path phải kiểm có thật trong code:
 - **Kế hoạch test**: unit/integration/e2e cần thêm + **QA charter** (từ acceptance criteria: vai, trạng thái đầu,
   dữ liệu, bằng chứng cần có) cho pha 6.
 
-## Pha 3 — Review plan
+## Pha 3 — Soát plan bằng model khác (user KHÔNG duyệt plan kỹ thuật)
 
-**Cỡ S/M: KHÔNG gọi Codex.** Captain tự soát 4 câu, ghi một dòng kết quả cuối PLAN.md: (1) mọi acceptance criteria của
-SPEC có task phủ? (2) tính năng anh em (`flow-impact`) đã vào plan hoặc ghi "để sau"? (3) `lane-check plan` sạch?
-(4) có quyết định khó đảo ngược nào thiếu ADR?
+User chỉ duyệt thứ họ đánh giá được (SPEC đời thường, bản vẽ); plan kỹ thuật do model khác soát.
 
-**Cỡ L: MỘT lượt Codex, mức `medium`, chỉ tìm lỗi thiết kế khó sửa về sau** (Bash `run_in_background`, ghi file,
-luôn `< /dev/null`):
+**Cỡ S/M:** captain tự soát 4 câu, ghi một dòng kết quả cuối PLAN.md: (1) mọi acceptance criteria của SPEC có task
+phủ? (2) tính năng anh em (`flow-impact`) đã vào plan hoặc ghi "để sau"? (3) `lane-check plan` sạch? (4) có quyết định
+khó đảo ngược nào thiếu ADR?
+
+**Cỡ L: MỘT lượt soát, mức high, chỉ tìm lỗi thiết kế khó sửa về sau.** Chuỗi model (kiểm `node
+~/.claude/hooks/cli-check.mjs <tên>` trước, chưa sẵn sàng thì sang bậc sau):
+- Đang ở Claude: **Codex** (`pick codex plan-reviewer`) → **Opus qua agy** (`pick agy plan-reviewer`) → Agent
+  `code-reviewer` với `model: "opus"`.
+- Đang ở Codex: **Sol high** (`pick codex plan-reviewer`).
 
 ```bash
-codex exec --sandbox read-only -m gpt-6.1-sol -c model_reasoning_effort="medium" -C "<gốc repo>" \
-  -o "<scratchpad>/plan-review-codex.md" "Review plan: <đường SPEC.md> và <đường PLAN.md>. Kiểm chéo SPEC↔PLAN.
-Chỉ báo lỗi thiết kế KHÓ SỬA SAU khi đã code: sai kiến trúc/contract, yêu cầu bị sót, tính năng anh em dùng chung
-registry/danh sách mà plan quên hoặc thiếu test đối chiếu, làn giao file, rủi ro bảo mật/dữ liệu.
-KHÔNG báo câu chữ, đặt tên, chi tiết code. CẤM đề xuất thêm tính năng. Tối đa 7 mục: mức, vấn đề, bằng chứng, hướng sửa." < /dev/null
+codex exec --sandbox read-only -m "$(node ~/.claude/hooks/models.mjs pick codex plan-reviewer)" \
+  -c model_reasoning_effort="high" -C "<gốc repo>" -o "<scratchpad>/plan-review.md" "<ĐỀ>" < /dev/null
+# agy: cd vào thư mục trống, agy -p "<ĐỀ, kèm đường dẫn tuyệt đối SPEC/PLAN>" --model "$(node ~/.claude/hooks/models.mjs pick agy plan-reviewer)" --mode plan
 ```
-agy/Grok không dùng review plan. Codex lỗi ⇒ Agent `code-reviewer` review plan.
+`<ĐỀ>`: "Review plan: <SPEC.md> và <PLAN.md>. Kiểm chéo SPEC↔PLAN. Chỉ báo lỗi thiết kế KHÓ SỬA SAU khi đã code: sai
+kiến trúc/contract, yêu cầu bị sót, tính năng anh em dùng chung registry/danh sách mà plan quên hoặc thiếu test đối
+chiếu, làn giao file, rủi ro bảo mật/dữ liệu. KHÔNG báo câu chữ, đặt tên, chi tiết code. CẤM đề xuất thêm tính năng.
+Tối đa 7 mục: mức, vấn đề, bằng chứng path:line, hướng sửa." (Bash `run_in_background`, ghi file, luôn `< /dev/null`.)
 
-Hợp nhất (cỡ L): kiểm từng mục vào SPEC/PLAN/code; sửa plan; mục bác bỏ ghi một dòng lý do cuối PLAN.md.
-**Cổng 2:** user duyệt plan (ExitPlanMode) ⇒ mở sổ tiến độ ⇒ thi công theo skill `flow-team`.
+Hợp nhất: kiểm từng mục vào SPEC/PLAN/code; sửa plan; ghi kết quả (đúng/bác + lý do) cuối PLAN.md ⇒ tóm tắt 2–4 dòng
+cho user trong chat (lỗi nặng nhất, đã sửa thế nào) ⇒ mở sổ tiến độ ⇒ thi công theo skill `flow-team`. Không hỏi user
+duyệt plan; chỉ hỏi khi phát hiện mới đụng mục tiêu, dữ liệu, bảo mật hoặc kiến trúc lớn đã chốt.
 
 ## Sổ tiến độ — `progress.md` cạnh SPEC.md
 

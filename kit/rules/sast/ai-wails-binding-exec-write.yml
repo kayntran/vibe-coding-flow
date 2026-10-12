@@ -1,0 +1,31 @@
+id: ai-wails-binding-exec-write
+language: Go
+severity: error
+message: "Hàm Wails đưa ra cho giao diện web lại ghi file hoặc chạy lệnh trực tiếp"
+note: |
+  Mọi hàm viết hoa đầu trên struct được Wails bind đều gọi được từ JavaScript, nên mã web (kể cả mã bị chèn) ghi đè file hay chạy lệnh tuỳ ý trên máy người dùng.
+  Sửa: để hàm bind chỉ gọi lớp dịch vụ nhận tham số hẹp (mã việc, id) và tự quyết đường dẫn, lệnh; không nhận đường dẫn hay lệnh từ giao diện.
+rule:
+  kind: method_declaration
+  all:
+    - has:
+        field: name
+        regex: '^[A-Z]'
+    - has:
+        field: receiver
+        regex: '(App|Service|Bindings?)\s*\)$'
+    - has:
+        field: body
+        has:
+          stopBy: end
+          # Bộ đọc Go hiểu `exec.Command(x)` đứng một mình là đổi kiểu (type conversion) ⇒ pattern không khớp
+          # (đã kiểm với ast-grep 0.45.3). Bắt theo tên hàm của lời gọi thay vì pattern.
+          kind: call_expression
+          has:
+            field: function
+            regex: '^(exec.Command(Context)?|os.(WriteFile|Create|OpenFile|Remove|RemoveAll)|ioutil.WriteFile)$'
+ignores:
+  - '**/vendor/**'
+  - '**/node_modules/**'
+  - '**/kit/rules/fixtures/**'
+  - '**/*_test.go'

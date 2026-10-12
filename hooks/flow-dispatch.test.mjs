@@ -90,6 +90,15 @@ function assertBlock(r) {
   return r.json.reason
 }
 
+// AC-24: lời chặn mở đầu bằng MỘT câu đời thường (bị chặn vì gì + AI sẽ tự làm gì), chi tiết kỹ thuật để sau.
+function assertPlainOpening(reason, label = '') {
+  const first = reason.split(/\.\s|\n/)[0]
+  assert.match(first, /\bAI\b/, `${label} câu đầu phải nói AI sẽ làm gì: ${first}`)
+  assert.doesNotMatch(first, /[`<>=\\/]|--|\.mjs|PORT_BASE|return=/, `${label} câu đầu còn ký hiệu kỹ thuật: ${first}`)
+  assert.doesNotMatch(first, /\b(?:git|commit|push|merge|worktree|receipt|scope|lane|hook|diff|patch|plan|brief|port)\b/i, `${label} câu đầu còn thuật ngữ: ${first}`)
+  assert.ok(first.length >= 20 && first.length <= 240, `${label} câu đầu dài ${first.length} ký tự: ${first}`)
+}
+
 // ---------- agent: coder / coder-lite ----------
 
 describe('agent: coder/coder-lite có lane=', () => {
@@ -136,6 +145,45 @@ describe('agent: coder/coder-lite có lane=', () => {
   test('plan= tương đối nhưng sai thư mục ⇒ deny (không tìm thấy)', () => {
     const fx = repoWithPlan(CLEAN_PLAN, 'docs/PLAN.md')
     assertDeny(agent(fx, 'coder', 'plan=PLAN.md lane=A'))
+  })
+})
+
+// ---------- agent: vai lấy từ kit/roles.json (flow v7) ----------
+
+describe('agent: vai writesCode lấy từ kit/roles.json (coder-mini đi qua đủ cổng như coder)', () => {
+  test('flow-dispatch không còn danh sách vai cứng', () => {
+    const src = fs.readFileSync(SCRIPT, 'utf8')
+    assert.doesNotMatch(src, /'coder-lite'/)
+    assert.match(src, /roleSet\(['"]writesCode['"]/)
+  })
+
+  test('coder-mini có lane= ⇒ cũng đòi plan= và kiểm bảng làn: sạch qua, OVERLAP/thiếu plan/bảng hỏng deny', () => {
+    const fx = repoWithPlan()
+    assertPass(agent(fx, 'coder-mini', `outcome=x scope=src/a.txt plan=${fx.plan} lane=A base=main`))
+    assert.match(assertDeny(agent(fx, 'coder-mini', 'outcome=x lane=A')), /lane= phải kèm plan=/)
+    const bad = repoWithPlan(TABLE(['| A | src/a.txt | - | node a |', '| B | src/a.txt | - | node b |']))
+    assert.match(assertDeny(agent(bad, 'coder-mini', `plan=${bad.plan} lane=A`)), /OVERLAP src\/a\.txt lanes: A B/)
+    const broken = repoWithPlan('# không có bảng làn\n')
+    assert.match(assertDeny(agent(broken, 'coder-mini', `plan=${broken.plan} lane=A`)), /Không kiểm được bảng làn/)
+  })
+
+  test('vai không viết code (kể cả vai chỉ có trong roles.json như plan-reviewer) ⇒ qua dù có lane= không plan=', () => {
+    const fx = repoWithPlan()
+    for (const t of ['plan-reviewer', 'security-reviewer', 'debugger', 'researcher', 'qa-tester-x']) assertPass(agent(fx, t, 'lane=A'))
+  })
+})
+
+// ---------- AC-24: lời chặn mở đầu bằng câu đời thường ----------
+
+describe('AC-24: lời chặn của flow-dispatch mở đầu bằng một câu đời thường', () => {
+  test('thiếu plan= / bảng làn chồng chéo / bảng hỏng / qa-tester thiếu cổng', () => {
+    const fx = repoWithPlan()
+    assertPlainOpening(assertDeny(agent(fx, 'coder', 'outcome=x lane=A')), 'thiếu plan')
+    const bad = repoWithPlan(TABLE(['| A | src/a.txt | - | node a |', '| B | src/a.txt | - | node b |']))
+    assertPlainOpening(assertDeny(agent(bad, 'coder', `plan=${bad.plan} lane=A`)), 'overlap')
+    const broken = repoWithPlan('# không có bảng làn\n')
+    assertPlainOpening(assertDeny(agent(broken, 'coder-lite', `plan=${broken.plan} lane=A`)), 'bảng hỏng')
+    assertPlainOpening(assertDeny(agent(fx, 'qa-tester', 'chạy QA, không có cổng')), 'qa-tester')
   })
 })
 
@@ -220,7 +268,8 @@ describe('stop: nhắc cập nhật sổ tiến độ', () => {
     commit(fx.repo, 'src/a.txt', 'a2\n', 'đổi a')
     const head = git(fx.repo, 'rev-parse', 'HEAD').trim()
     const reason = assertBlock(stop(fx, fx.repo))
-    assert.ok(reason.startsWith('Có commit mới mà sổ docs/specs/feat/progress.md chưa cập nhật:'), reason)
+    assert.ok(reason.includes('Có commit mới mà sổ docs/specs/feat/progress.md chưa cập nhật:'), reason)
+    assertPlainOpening(reason, 'stop')
     assert.ok(fs.existsSync(path.join(fx.gates, `progress-nudged-${head}`)), 'marker phải được ghi')
     assertPass(stop(fx, fx.repo)) // cùng HEAD: không nhắc nữa
     commit(fx.repo, 'src/b.txt', 'b2\n', 'đổi b') // HEAD mới

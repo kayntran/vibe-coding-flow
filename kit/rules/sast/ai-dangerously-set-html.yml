@@ -1,0 +1,34 @@
+id: ai-dangerously-set-html
+language: Tsx
+severity: error
+message: "dangerouslySetInnerHTML nhận chuỗi động chưa lọc"
+note: |
+  React không tự lọc HTML ở đây; dữ liệu từ ngoài có thể chèn script vào trang (XSS).
+  Sửa: render bằng JSX thường; bắt buộc có HTML thì lọc qua DOMPurify.sanitize, hoặc chỉ truyền chuỗi cố định.
+rule:
+  kind: pair
+  all:
+    - has:
+        field: key
+        regex: '^__html$'
+    - has:
+        field: value
+        not:
+          any:
+            - kind: string
+            - pattern: DOMPurify.sanitize($$$S)
+  inside:
+    kind: jsx_attribute
+    stopBy: end
+    has:
+      kind: property_identifier
+      regex: '^dangerouslySetInnerHTML$'
+ignores:
+  - '**/node_modules/**'
+  - '**/dist/**'
+  - '**/build/**'
+  - '**/.next/**'
+  - '**/out/**'
+  - '**/kit/rules/fixtures/**'
+  - '**/*.test.*'
+  - '**/*.spec.*'

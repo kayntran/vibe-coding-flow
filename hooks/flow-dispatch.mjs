@@ -1,15 +1,18 @@
 // flow-dispatch: ép các bước hay bị bỏ sót khi giao worker và khi kết thúc phiên. Một script, chế độ chọn bằng argv[2].
 //   agent : PreToolUse matcher `Agent|Task`. Đọc tool_input.subagent_type + tool_input.prompt (field của Agent tool, docs hooks mục Agent).
-//           coder/coder-lite có `lane=` ⇒ đòi `plan=` rồi chạy `lane-check.mjs plan <plan>`; qa-tester ⇒ đòi PORT_BASE=<n> hoặc port=<n>.
+//           vai viết code (writesCode trong kit/roles.json: coder, coder-lite, coder-mini…) có `lane=` ⇒ đòi `plan=` rồi chạy
+//           `lane-check.mjs plan <plan>`; qa-tester ⇒ đòi PORT_BASE=<n> hoặc port=<n>.
 //   stop  : Stop. Sổ docs/specs/*/progress.md chưa "xong" mà commit HEAD mới hơn sổ ⇒ block MỘT lần cho mỗi HEAD. Sổ được chọn như session-start:
 //           sổ ghi đúng nhánh git hiện tại (openProgress của lib so-chot, quét mọi thư mục); nhánh không xác định / chưa sổ nào nhận ⇒ sổ chưa xong sửa gần nhất.
-// Spec: ~/.claude/plans/flow-v5-hooks-spec.md (Làn B). Docs: https://code.claude.com/docs/en/hooks
+// Spec: ~/.claude/plans/flow-v5-hooks-spec.md (Làn B); flow v7: docs/specs/2026-10-11-flow-v7-nocode (AC-24, làn D). Docs: https://code.claude.com/docs/en/hooks
+// Mọi lời chặn mở đầu bằng MỘT câu đời thường (bị chặn vì gì + AI sẽ tự làm gì) rồi mới tới chi tiết kỹ thuật (AC-24).
 // Lỗi nội bộ luôn CHO QUA (exit 0, không in gì) và ghi một dòng vào flow-dispatch.log.
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { briefPlan, briefWord } from './lib/brief.mjs'
+import { roleSet } from './lib/models.mjs'
 import { openProgress } from './lib/so-chot.mjs'
 
 const HOOK_DIR = path.dirname(fileURLToPath(import.meta.url))
@@ -47,19 +50,29 @@ const deny = (reason) => ({
 function gateLane(prompt, cwd) {
   if (briefWord(prompt, 'lane') === null) return null
   const plan = briefPlan(prompt, cwd)
-  if (plan === null) return deny('Brief có lane= phải kèm plan=<đường PLAN.md> (để kiểm bảng làn trước khi giao và audit phạm vi khi worker nộp).')
+  if (plan === null) {
+    return deny('Chưa giao việc được vì phần mô tả công việc thiếu đường dẫn tới kế hoạch; AI sẽ bổ sung rồi giao lại. ' +
+      'Brief có lane= phải kèm plan=<đường PLAN.md> (để kiểm bảng làn trước khi giao và audit phạm vi khi worker nộp).')
+  }
   const r = spawnSync(process.execPath, [LANE_CHECK, 'plan', plan], { cwd, encoding: 'utf8', timeout: 10000, windowsHide: true })
   if (r.error) { log(`lane-check: ${r.error.message}`); return null }
   const cap = (s) => (s.length > MAX_REASON ? `${s.slice(0, MAX_REASON)}\n…(cắt)` : s)
-  if (r.status === 1) return deny(cap(`Bảng làn trong ${plan} chưa sạch, sửa PLAN.md rồi giao lại:\n${r.stdout.trim()}`))
-  if (r.status === 2) return deny(cap(`Không kiểm được bảng làn trong ${plan} (bảng hỏng hoặc không đọc được): ${(r.stderr || r.stdout).trim()}`))
+  if (r.status === 1) {
+    return deny(cap('Chưa giao việc được vì bảng chia việc trong kế hoạch đang chồng chéo hoặc chưa hợp lệ; AI sẽ sửa kế hoạch rồi giao lại. ' +
+      `Bảng làn trong ${plan} chưa sạch, sửa PLAN.md rồi giao lại:\n${r.stdout.trim()}`))
+  }
+  if (r.status === 2) {
+    return deny(cap('Chưa giao việc được vì không đọc được bảng chia việc trong kế hoạch; AI sẽ kiểm tra lại kế hoạch rồi giao lại. ' +
+      `Không kiểm được bảng làn trong ${plan} (bảng hỏng hoặc không đọc được): ${(r.stderr || r.stdout).trim()}`))
+  }
   if (r.status !== 0) log(`lane-check plan exit ${r.status}: ${(r.stderr || '').trim()}`) // lỗi bất thường: cho qua
   return null
 }
 
 function gateQa(prompt) {
   if (QA_PORT_RE.test(prompt)) return null
-  return deny('Brief qa-tester phải có PORT_BASE=<n> (node ~/.claude/hooks/wt-env.mjs alloc <worktree>) hoặc port=<n> của app đã chạy sẵn.')
+  return deny('Chưa giao việc kiểm thử được vì chưa có cổng chạy thử riêng cho bản này; AI sẽ cấp cổng rồi giao lại. ' +
+    'Brief qa-tester phải có PORT_BASE=<n> (node ~/.claude/hooks/wt-env.mjs alloc <worktree>) hoặc port=<n> của app đã chạy sẵn.')
 }
 
 function hookAgent(input) {
@@ -67,7 +80,7 @@ function hookAgent(input) {
   if (typeof ti?.subagent_type !== 'string' || typeof ti.prompt !== 'string') return null
   let cwd = process.cwd()
   try { if (typeof input.cwd === 'string' && fs.statSync(input.cwd).isDirectory()) cwd = input.cwd } catch {}
-  if (ti.subagent_type === 'coder' || ti.subagent_type === 'coder-lite') return gateLane(ti.prompt, cwd)
+  if (roleSet('writesCode').has(ti.subagent_type)) return gateLane(ti.prompt, cwd) // vai viết code lấy từ kit/roles.json, không danh sách cứng
   if (ti.subagent_type === 'qa-tester') return gateQa(ti.prompt)
   return null
 }
@@ -169,7 +182,8 @@ function hookStop(input) {
   }
   return {
     decision: 'block',
-    reason: `Có commit mới mà sổ ${prog.rel} chưa cập nhật: ghi pha/làn/bước tiếp theo rồi mới kết thúc.`,
+    reason: 'Tiến độ chưa được ghi lại nên AI sẽ cập nhật sổ tiến độ rồi mới kết thúc. ' +
+      `Có commit mới mà sổ ${prog.rel} chưa cập nhật: ghi pha/làn/bước tiếp theo rồi mới kết thúc.`,
   }
 }
 

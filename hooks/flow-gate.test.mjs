@@ -50,10 +50,10 @@ function fixture() {
   return { root, main, wt, gates: path.join(main, '.git', 'flow-gates'), log: path.join(root, 'flow-gate.log') }
 }
 
-function run(fx, args, { input, cwd } = {}) {
+function run(fx, args, { input, cwd, env } = {}) {
   const r = spawnSync(process.execPath, [SCRIPT, ...args], {
     input: input === undefined ? undefined : typeof input === 'string' ? input : JSON.stringify(input),
-    encoding: 'utf8', cwd: cwd ?? fx.root, env: { ...ENV, FLOW_GATE_LOG: fx.log },
+    encoding: 'utf8', cwd: cwd ?? fx.root, env: { ...ENV, FLOW_GATE_LOG: fx.log, ...env },
   })
   assert.equal(r.error, undefined)
   let json = null
@@ -61,7 +61,7 @@ function run(fx, args, { input, cwd } = {}) {
   return { status: r.status, stdout: r.stdout, stderr: r.stderr, json }
 }
 
-const hook = (fx, mode, input) => run(fx, [mode], { input })
+const hook = (fx, mode, input, env) => run(fx, [mode], { input, env })
 const cli = (fx, cwd, ...args) => run(fx, args, { cwd })
 
 function assertPass(r) {
@@ -270,7 +270,8 @@ describe('bash merge', () => {
   test('thân heredoc không phải lệnh; lệnh thật sau/cùng dòng heredoc vẫn bị bắt', () => {
     const fx = featFixture()
     assertPass(hook(fx, 'bash', bashIn(fx.main, 'cat <<EOF\ngit merge feat\nEOF')))
-    assertPass(hook(fx, 'bash', bashIn(fx.main, "cat <<'EOF' > note.txt\ngit merge feat\nEOF\necho xong")))
+    // heredoc đưa vào lệnh khác (ghi heredoc thẳng vào file nay bị chặn riêng: phải dùng công cụ sửa file)
+    assertPass(hook(fx, 'bash', bashIn(fx.main, "cat <<'EOF' | wc -l\ngit merge feat\nEOF\necho xong")))
     assertPass(hook(fx, 'bash', bashIn(fx.main, 'cat <<-END\n\tgit merge feat\n\tEND\n')))
     assertPass(hook(fx, 'bash', bashIn(fx.main, 'cat <<EOF\ngit merge feat\n'))) // heredoc không đóng: hết lệnh
     assertDeny(hook(fx, 'bash', bashIn(fx.main, 'cat <<EOF\nxin chào\nEOF\ngit merge feat')))
@@ -505,7 +506,7 @@ describe('bash secret scan', () => {
   const GHP = 'ghp_' + 'a'.repeat(36)
   const SAMPLES = [
     ['private-key', '-----BEGIN ' + 'RSA PRIVATE KEY-----'],
-    ['aws', 'AKIA' + 'IOSFODNN7EXAMPLE'],
+    ['aws', 'AKIA' + 'Q3EGRDLMZ7XK2PWN'],
     ['github', GHP],
     ['github', 'github_pat_' + 'b'.repeat(60)],
     ['anthropic', 'sk-ant-' + 'c'.repeat(24)],
@@ -619,6 +620,16 @@ describe('bash secret scan', () => {
     assertPass(sh(fx, fx.main, 'git commit -m x'))
     stage(fx.main, 'bad.yml', 'url: ' + 'https://' + 'deploy:Xk9mP2qLr8@git.example.com/r.git\n')
     assert.match(assertDeny(sh(fx, fx.main, 'git commit -m x')), /bad\.yml:1 — url-credential/)
+  })
+
+  test('mẫu báo nhầm đã biết cho qua: khoá ví dụ AWS, URL mẫu user:password; khoá AWS khác vẫn chặn', () => {
+    const fx = fixture()
+    stage(fx.main, 'ok.json', '{"p": "' + 'http://' + 'user:password@host:port"}\n' + 'k = "AKIA' + 'IOSFODNN7EXAMPLE"\n')
+    assertPass(sh(fx, fx.main, 'git commit -m x'))
+    stage(fx.main, 'bad.go', 'k = "AKIA' + 'IOSFODNN7EXAMPLF"\n' + 'u = "' + 'http://' + 'user:passwordX1@h"\n')
+    const reason = assertDeny(sh(fx, fx.main, 'git commit -m x'))
+    assert.match(reason, /bad\.go:1 — aws/)
+    assert.match(reason, /bad\.go:2 — url-credential/)
   })
 
   test('nhận lệnh trong chuỗi: cd, -C, ; ; bỏ qua nhắc trong chuỗi/comment', () => {
@@ -947,7 +958,9 @@ describe('stamp test (dấu test xanh)', () => {
 
   test('chạy trong cwd của worktree; một token duy nhất được chạy nguyên văn như dòng lệnh (có &&)', () => {
     const fx = featFx()
-    const line = "node -e 0 && node -e require('fs').writeFileSync('ran.txt','x')"
+    // Dòng lệnh đi qua shell của máy (cmd.exe trên Windows, /bin/sh trên macOS/Linux) ⇒ chỉ dùng cú pháp cả hai hiểu:
+    // JS phải nằm trong nháy kép, nếu không sh báo lỗi cú pháp ở dấu "(".
+    const line = `node -e 0 && node -e "require('fs').writeFileSync('ran.txt','x')"`
     const r = stampTest(fx, line)
     assert.equal(r.status, 0, r.stderr)
     assert.ok(fs.existsSync(path.join(fx.wt, 'ran.txt')), 'lệnh phải chạy với cwd = worktree')
@@ -1417,20 +1430,26 @@ describe('subagent-stop: audit phạm vi làn', () => {
     assert.match(reason, /OUTSIDE feat\.go/)
   })
 
-  test('base= được chuyển cho lane-check (base không tồn tại ⇒ lane-check exit 2 ⇒ cho qua + log)', () => {
+  test('base= được chuyển cho lane-check (base không tồn tại ⇒ lane-check exit 2 ⇒ block, AC-09 không cho qua âm thầm)', () => {
     const { fx, plan } = auditFx()
     commit(fx.wt, 'extra.js', 'x\n', 'ngoài scope')
     assertBlock(go(fx, tx(fx, briefOf(plan, 'lane=A base=main'))))
-    assertPass(go(fx, tx(fx, briefOf(plan, 'lane=A base=khong-co-nhanh-nay'))))
+    assert.match(assertBlock(go(fx, tx(fx, briefOf(plan, 'lane=A base=khong-co-nhanh-nay')))), /không kiểm được phạm vi làn A/)
     assert.match(fs.readFileSync(fx.log, 'utf8'), /lane-check/)
   })
 
-  test('lane-check lỗi (không có plan, lane lạ, bảng hỏng) ⇒ cho qua + log, không chặn oan', () => {
+  test('lane-check lỗi (không có plan, lane lạ, bảng hỏng) ⇒ block kèm lý do + cách xử lý (AC-09), vẫn ghi log', () => {
     const { fx, plan } = auditFx()
     commit(fx.wt, 'extra.js', 'x\n', 'ngoài scope')
-    assertPass(go(fx, tx(fx, briefOf(path.join(fx.root, 'khong-co.md')))))
-    assertPass(go(fx, tx(fx, briefOf(plan, 'lane=Z'))))
-    assertPass(go(fx, tx(fx, briefOf(write(fx.root, 'hong.md', '# không có bảng\n')))))
+    for (const [brief, lane] of [
+      [briefOf(path.join(fx.root, 'khong-co.md')), 'A'],
+      [briefOf(plan, 'lane=Z'), 'Z'],
+      [briefOf(write(fx.root, 'hong.md', '# không có bảng\n')), 'A'],
+    ]) {
+      const reason = assertBlock(go(fx, tx(fx, brief)))
+      assert.match(reason, new RegExp(`không kiểm được phạm vi làn ${lane} vì`))
+      assert.match(reason, /--repo đúng hoặc báo captain/)
+    }
     assert.match(fs.readFileSync(fx.log, 'utf8'), /lane-check/)
   })
 
@@ -1512,4 +1531,841 @@ describe('bash: push refspec matching (`:`, `+:`, push.default=matching)', () =>
     commit(fx.wt, 'cfg.js', `const t = "${GHP}"\n`, 'secret trên feat') // origin/feat chưa có commit này
     for (const c of ['git push origin :', 'git push origin +:']) assert.match(assertDeny(sh(fx, fx.main, c)), /cfg\.js:1 — github/, c)
   })
+})
+
+// ======================================================================================================
+// Làn D (flow v7): host.normalize, secrets.mjs, roles.json, cổng thư viện mới, ask theo host, AC-09, AC-24, Stop theo sổ
+// ======================================================================================================
+
+const codexIn = (cwd, tool_name, tool_input) => ({ hook_event_name: 'PreToolUse', cwd, turn_id: 't-1', model: 'gpt-6.1-sol', tool_name, tool_input })
+const devinIn = (cwd, tool_name, tool_input) => ({ hook_event_name: 'PreToolUse', cwd, prompt_id: 'p-1', tool_name, tool_input })
+const patchOf = (...files) => ['*** Begin Patch', ...files.flatMap((f) => [`*** Update File: ${f}`, '@@', '-line1', '+line1x']), '*** End Patch'].join('\n')
+
+// AC-24: lời chặn mở đầu bằng MỘT câu đời thường (bị chặn vì gì + AI sẽ tự làm gì), chi tiết kỹ thuật để sau.
+function assertPlainOpening(reason, label = '') {
+  const first = reason.split(/\.\s|\n/)[0]
+  assert.match(first, /\bAI\b/, `${label} câu đầu phải nói AI sẽ làm gì: ${first}`)
+  assert.doesNotMatch(first, /[`<>=\\/]|--|\.mjs|FLOW_OK|EnterWorktree|patch-id|return=/, `${label} câu đầu còn ký hiệu kỹ thuật: ${first}`)
+  assert.doesNotMatch(first, /\b(?:git|commit|push|merge|secret|worktree|receipt|scope|lane|hook|diff|patch|stamp|token)\b/i, `${label} câu đầu còn thuật ngữ: ${first}`)
+  assert.ok(first.length >= 20 && first.length <= 240, `${label} câu đầu dài ${first.length} ký tự: ${first}`)
+}
+
+describe('v7 host: sửa file qua Codex apply_patch / tên tool Devin', () => {
+  test('Codex apply_patch vào file của thư mục chính bị chặn (đường dẫn tương đối theo cwd, và tuyệt đối)', () => {
+    const fx = fixture()
+    const rel = assertDeny(hook(fx, 'edit', codexIn(fx.main, 'apply_patch', { command: patchOf('a.txt') })))
+    assert.match(rel, /a\.txt/)
+    assertDeny(hook(fx, 'edit', codexIn(fx.wt, 'apply_patch', { command: patchOf(path.join(fx.main, 'a.txt')) })))
+    assertDeny(hook(fx, 'edit', codexIn(fx.wt, 'apply_patch', { command: patchOf('../main/a.txt') })))
+  })
+
+  test('Codex apply_patch trong worktree cho qua; có allow-direct-edit cho qua', () => {
+    const fx = fixture()
+    assertPass(hook(fx, 'edit', codexIn(fx.wt, 'apply_patch', { command: patchOf('a.txt') })))
+    assertPass(hook(fx, 'edit', codexIn(fx.main, 'apply_patch', { command: patchOf(path.join(fx.wt, 'a.txt')) })))
+    write(fx.main, '.claude/allow-direct-edit', '')
+    assertPass(hook(fx, 'edit', codexIn(fx.main, 'apply_patch', { command: patchOf('a.txt') })))
+  })
+
+  test('patch nhiều file: một file trong thư mục chính là đủ để chặn; Add File ở thư mục mới, Move to, Delete File cũng bị kiểm', () => {
+    const fx = fixture()
+    const mixed = patchOf(path.join(fx.wt, 'a.txt'), path.join(fx.main, 'a.txt'))
+    assert.match(assertDeny(hook(fx, 'edit', codexIn(fx.wt, 'apply_patch', { command: mixed }))), /a\.txt/)
+    const add = `*** Begin Patch\n*** Add File: ${path.join(fx.main, 'new', 'deep', 'f.ts')}\n+x\n*** End Patch`
+    assertDeny(hook(fx, 'edit', codexIn(fx.wt, 'apply_patch', { command: add })))
+    const move = `*** Begin Patch\n*** Update File: ${path.join(fx.wt, 'a.txt')}\n*** Move to: ${path.join(fx.main, 'moved.txt')}\n@@\n-line1\n+line1\n*** End Patch`
+    assertDeny(hook(fx, 'edit', codexIn(fx.wt, 'apply_patch', { command: move })))
+    const del = `*** Begin Patch\n*** Delete File: ${path.join(fx.main, 'a.txt')}\n*** End Patch`
+    assertDeny(hook(fx, 'edit', codexIn(fx.wt, 'apply_patch', { command: del })))
+  })
+
+  test('patch không đọc được file nào / ngoài git repo ⇒ cho qua', () => {
+    const fx = fixture()
+    assertPass(hook(fx, 'edit', codexIn(fx.main, 'apply_patch', { command: 'không phải patch' })))
+    assertPass(hook(fx, 'edit', codexIn(fx.main, 'apply_patch', {})))
+    assertPass(hook(fx, 'edit', codexIn(fx.root, 'apply_patch', { command: patchOf(path.join(fx.root, 'plain', 'x.txt')) })))
+  })
+
+  test('lời chặn cho Codex chỉ cách tạo worktree bằng git (không có EnterWorktree); Claude vẫn nhắc EnterWorktree', () => {
+    const fx = fixture()
+    const codex = assertDeny(hook(fx, 'edit', codexIn(fx.main, 'apply_patch', { command: patchOf('a.txt') })))
+    assert.match(codex, /git worktree add/)
+    assert.doesNotMatch(codex, /EnterWorktree/)
+    assert.match(codex, /allow-direct-edit/)
+    const claude = assertDeny(hook(fx, 'edit', { tool_name: 'Edit', cwd: fx.main, tool_input: { file_path: path.join(fx.main, 'a.txt') } }))
+    assert.match(claude, /EnterWorktree/)
+  })
+
+  test('tên tool Devin: write/edit (file_path hoặc path), notebook_edit, apply_patch', () => {
+    const fx = fixture()
+    const target = path.join(fx.main, 'a.txt')
+    assertDeny(hook(fx, 'edit', devinIn(fx.main, 'write', { file_path: target })))
+    assertDeny(hook(fx, 'edit', devinIn(fx.main, 'edit', { path: target })))
+    assertDeny(hook(fx, 'edit', devinIn(fx.main, 'notebook_edit', { notebook_path: path.join(fx.main, 'n.ipynb') })))
+    assertDeny(hook(fx, 'edit', devinIn(fx.main, 'apply_patch', { command: patchOf('a.txt') })))
+    assertPass(hook(fx, 'edit', devinIn(fx.wt, 'write', { file_path: path.join(fx.wt, 'a.txt') })))
+  })
+
+  test('Bash chứa `apply_patch <<` ⇒ kiểm từng file trong patch (Codex/Devin gọi apply_patch qua shell)', () => {
+    const fx = fixture()
+    const cmd = (patch) => `apply_patch <<'EOF'\n${patch}\nEOF`
+    assert.match(assertDeny(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: cmd(patchOf('a.txt')) }))), /a\.txt/)
+    assertDeny(hook(fx, 'bash', devinIn(fx.main, 'exec', { command: cmd(patchOf('a.txt')) })))
+    assertDeny(hook(fx, 'bash', bashIn(fx.wt, `cd ${fx.main.replace(/\\/g, '/')} && apply_patch <<'PATCH'\n${patchOf(path.join(fx.main, 'a.txt'))}\nPATCH`)))
+    assertPass(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: cmd(patchOf('a.txt')) })))
+    assertPass(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: 'echo apply_patch and *** Update File: a.txt' }))) // không có heredoc
+    assertPass(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: 'ls' })))
+  })
+
+  test('apply_patch đi sau tiền tố (command / env / exec / sudo / đường dẫn tuyệt đối / bash -c) vẫn bị kiểm file trong patch', () => {
+    const fx = fixture()
+    const body = `\n${patchOf('a.txt')}\nEOF`
+    const heads = [
+      "command apply_patch <<'EOF'", "env FOO=1 apply_patch <<'EOF'", '/usr/local/bin/apply_patch <<EOF', "exec apply_patch <<'EOF'",
+      "sudo -n apply_patch <<'EOF'", "FOO=1 command -- apply_patch <<'EOF'", "time apply_patch <<'EOF'",
+    ]
+    for (const head of heads) {
+      assert.match(assertDeny(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: head + body }))), /a\.txt/, head)
+      assertDeny(hook(fx, 'bash', devinIn(fx.main, 'exec', { command: head + body })))
+      assertPass(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: head + body })))
+    }
+    assertDeny(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: `bash -c "apply_patch <<'EOF'${body}"` })))
+    assertDeny(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `cd ${fx.main.replace(/\\/g, '/')} && env X=1 apply_patch <<'EOF'${body}` })))
+    assertPass(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: `cd ${fx.wt.replace(/\\/g, '/')} && command apply_patch <<'EOF'${body}` })))
+  })
+
+  test('apply_patch không xác định được thư mục đích (cd $VAR, cd ~, cd -, cd trần, cd $(…)) ⇒ deny với đường dẫn tương đối; đường dẫn tuyệt đối vẫn xét như thường', () => {
+    const fx = fixture()
+    const rel = `\n${patchOf('a.txt')}\nEOF`
+    for (const cd of ['cd "$TARGET"', 'cd ~/proj', 'cd -', 'cd', 'cd $(git rev-parse --show-toplevel)', 'cd `pwd`/x', 'pushd "$TARGET"', 'popd']) {
+      const reason = assertDeny(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `${cd} && apply_patch <<'EOF'${rel}` })))
+      assertPlainOpening(reason, cd)
+    }
+    const abs = (f) => `\n${patchOf(f)}\nEOF`
+    assertPass(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `cd "$TARGET" && apply_patch <<'EOF'${abs(path.join(fx.wt, 'a.txt'))}` })))
+    assertDeny(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `cd "$TARGET" && apply_patch <<'EOF'${abs(path.join(fx.main, 'a.txt'))}` })))
+    // cd sau đó về chỗ biết rõ thì lại xét bình thường
+    assertPass(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: `cd "$TARGET"; cd ${fx.wt.replace(/\\/g, '/')} && apply_patch <<'EOF'${rel}` })))
+  })
+
+  test('apply_patch nhận patch qua pipe (cat <<EOF | apply_patch) ⇒ vẫn kiểm file trong patch như heredoc trực tiếp', () => {
+    const fx = fixture()
+    const piped = `cat <<'EOF' | apply_patch\n${patchOf('a.txt')}\nEOF`
+    assert.match(assertDeny(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: piped }))), /a\.txt/)
+    assertPass(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: piped })))
+    assertDeny(hook(fx, 'bash', devinIn(fx.main, 'exec', { command: `cat <<EOF | command apply_patch\n${patchOf('a.txt')}\nEOF` })))
+    assertDeny(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `cd ${fx.main.replace(/\\/g, '/')} && cat <<'EOF' | sudo -n apply_patch\n${patchOf('a.txt')}\nEOF` })))
+    assertDeny(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: `bash -c "cat <<'EOF' | apply_patch\n${patchOf('a.txt')}\nEOF"` })))
+  })
+
+  // Review lượt 2 (BLOCKER): gọi apply_patch qua biến/alias/find -exec thì cổng không nhận ra "cách gọi" nên bỏ qua kiểm file dù patch nằm ngay trong lệnh.
+  test('lệnh CHỨA nội dung patch (*** Update File: …) thì luôn kiểm file, dù cách gọi apply_patch không nhận ra được (biến, alias, $(…), ghép tên, find -exec, eval)', () => {
+    const fx = fixture()
+    const main = fx.main.replace(/\\/g, '/')
+    const body = (f) => `\n${patchOf(f)}\nEOF`
+    const heads = [
+      "p=apply_patch; $p <<'EOF'", "p=apply_patch; \"$p\" <<'EOF'", "p=apply_patch\ncommand $p <<'EOF'", "alias ap=apply_patch; ap <<'EOF'",
+      "$(command -v apply_patch) <<'EOF'", "a=apply_; b=patch; $a$b <<'EOF'", "eval \"$CMD\" <<'EOF'", "find . -maxdepth 0 -exec apply_patch {} \\; <<'EOF'",
+      "env \"$P\" <<'EOF'", "cat <<'EOF' | xargs -I{} sh -c \"$APPLY\"",
+    ]
+    for (const head of heads) {
+      const reason = assertDeny(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: head + body('a.txt') })))
+      assert.match(reason, /a\.txt/, head)
+      assertDeny(hook(fx, 'bash', devinIn(fx.main, 'exec', { command: head + body('a.txt') })))
+      assertPass(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: head + body('a.txt') }))) // trong worktree thì đường dẫn tương đối là của worktree
+      assertDeny(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: head + body(`${main}/a.txt`) }))) // đường dẫn tuyệt đối vào thư mục chính
+    }
+  })
+
+  test('nội dung patch nằm sau cd tới thư mục chính / chỗ không biết, cách gọi không nhận ra ⇒ vẫn deny; cd về worktree rồi gọi thì xét theo chỗ cd', () => {
+    const fx = fixture()
+    const main = fx.main.replace(/\\/g, '/')
+    const wt = fx.wt.replace(/\\/g, '/')
+    const rel = `\n${patchOf('a.txt')}\nEOF`
+    assertDeny(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `cd ${main} && p=apply_patch && $p <<'EOF'${rel}` })))
+    const unknown = assertDeny(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `cd "$X" && p=apply_patch && $p <<'EOF'${rel}` })))
+    assertPlainOpening(unknown)
+    // có lời gọi nhận ra được thì vẫn xét theo chỗ gọi (không bị coi là không nhận ra)
+    assertPass(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: `cd ${wt} && apply_patch <<'EOF'${rel}` })))
+    assertDeny(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `cd ${main} && apply_patch <<'EOF'${rel}` })))
+  })
+
+  test('gọi apply_patch không nhận ra được (biến, alias, find -exec, xargs) với patch từ FILE (không có nội dung trong lệnh) ⇒ deny, ở cả worktree', () => {
+    const fx = fixture()
+    const cmds = [
+      'p=apply_patch; $p < x.patch', 'p=apply_patch; "$p" < x.patch', 'p=apply_patch && cat x.patch | $p', 'p=apply_patch; `echo $p` < x.patch',
+      'alias ap=apply_patch; ap < x.patch', 'find . -name x.patch -exec apply_patch {} \\;', 'ls *.patch | xargs apply_patch',
+    ]
+    for (const command of cmds) {
+      assertDeny(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command })), command)
+      assertDeny(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command })), command)
+    }
+    for (const command of ['p=apply_patch; echo $p', 'command -v apply_patch', 'rg -n apply_patch hooks', 'git log --grep apply_patch', 'which apply_patch']) {
+      assertPass(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command })), command)
+    }
+  })
+
+  test('lệnh không chứa nội dung patch (chỉ nhắc *** trong chuỗi một dòng, echo, commit message) vẫn qua', () => {
+    const fx = fixture()
+    for (const command of ['echo "*** Update File: a.txt"', 'git commit -m "*** Update File: a.txt"', 'p=apply_patch; echo $p', 'ls *** ']) {
+      assertPass(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command })))
+    }
+  })
+
+  // Review lượt 2 (MAJOR): shell con tự cd rồi apply_patch với đường dẫn tương đối — cổng chỉ biết cwd của shell ngoài.
+  test('bash/sh -c, eval, sudo bash -c có cd/pushd BÊN TRONG + patch đường dẫn tương đối ⇒ deny như cd không xác định; đường dẫn tuyệt đối vẫn xét như thường', () => {
+    const fx = fixture()
+    const main = fx.main.replace(/\\/g, '/')
+    const wt = fx.wt.replace(/\\/g, '/')
+    const rel = `\n${patchOf('a.txt')}\nEOF`
+    const inner = (cd) => `${cd} && apply_patch <<'EOF'${rel}`
+    const cmds = [
+      `bash -c "${inner(`cd ${main}`)}"`, `sh -c "${inner(`cd ${main}`)}"`, `bash -lc "${inner(`pushd ${main}`)}"`, `eval "${inner(`cd ${main}`)}"`,
+      `sudo -n bash -c "${inner(`cd ${main}`)}"`, `bash -c 'bash -c "cd ${main} && apply_patch <<EOF${rel}"'`, `bash -c "cd ${main}; apply_patch <<'EOF'${rel}"`,
+      `bash -c "cd ${wt} && cd ${main} && apply_patch <<'EOF'${rel}"`, `env X=1 bash -c "${inner('builtin cd ' + main)}"`,
+    ]
+    for (const command of cmds) {
+      const reason = assertDeny(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command })))
+      assert.match(reason, /a\.txt/, command)
+      assert.match(reason, /cd/, command)
+      assertDeny(hook(fx, 'bash', devinIn(fx.wt, 'exec', { command })))
+    }
+    // đường dẫn tuyệt đối: trong worktree qua, vào thư mục chính bị chặn — dù có cd bên trong
+    const abs = (f) => `\n${patchOf(f)}\nEOF`
+    assertPass(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `bash -c "cd ${main} && apply_patch <<'EOF'${abs(`${wt}/a.txt`)}"` })))
+    assertDeny(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `bash -c "cd ${wt} && apply_patch <<'EOF'${abs(`${main}/a.txt`)}"` })))
+  })
+
+  test('bash -c KHÔNG có cd bên trong: đường dẫn tương đối vẫn xét theo cwd ngoài (worktree qua, thư mục chính chặn)', () => {
+    const fx = fixture()
+    const rel = `\n${patchOf('a.txt')}\nEOF`
+    assertPass(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `bash -c "apply_patch <<'EOF'${rel}"` })))
+    assertPass(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `sudo -n sh -c "echo cd-not-a-command; apply_patch <<'EOF'${rel}"` })))
+    assertDeny(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: `bash -c "apply_patch <<'EOF'${rel}"` })))
+  })
+
+  test('có gọi apply_patch mà không đọc được file nào từ lệnh (patch từ file / biến / printf / $(…)) ⇒ deny "không xác định được file sẽ bị sửa", ở cả thư mục chính lẫn worktree', () => {
+    const fx = fixture()
+    const cmds = [
+      'apply_patch < /tmp/p.diff', 'cat /tmp/p.diff | apply_patch', 'echo "$PATCH" | apply_patch', 'apply_patch "$(cat /tmp/p.diff)"',
+      "printf '*** Begin Patch\\n*** Update File: a.txt\\n*** End Patch\\n' | apply_patch", 'command apply_patch < p.diff', 'env X=1 apply_patch < p.diff',
+      'bash -c "apply_patch < /tmp/p.diff"', 'sudo -n bash -c "apply_patch < /tmp/p.diff"', 'cat p.diff | xargs apply_patch', '/usr/bin/apply_patch --help',
+      `apply_patch <<'EOF'\nnội dung không phải patch\nEOF`,
+    ]
+    for (const command of cmds) {
+      for (const cwd of [fx.main, fx.wt]) {
+        const reason = assertDeny(hook(fx, 'bash', codexIn(cwd, 'Bash', { command })))
+        assertPlainOpening(reason, command)
+        assert.match(reason, /không xác định được file sẽ bị sửa/i, command)
+      }
+    }
+  })
+
+  test('chỉ NHẮC TÊN apply_patch (echo, grep, rg, command -v, which, commit message) không phải là gọi ⇒ qua', () => {
+    const fx = fixture()
+    for (const command of ['echo apply_patch', 'echo "dùng apply_patch <<EOF để sửa"', 'grep apply_patch notes.txt', 'rg apply_patch .', 'command -v apply_patch',
+      'which apply_patch', 'git commit -m "fix apply_patch"', 'ls apply_patch.md', 'printf "%s" apply_patch']) {
+      assertPass(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command })))
+    }
+  })
+
+  test('ca cũ giữ nguyên: payload thiếu tool_name vẫn kiểm file_path, MultiEdit; tool Bash gửi vào chế độ edit thì qua', () => {
+    const fx = fixture()
+    assertDeny(hook(fx, 'edit', { cwd: fx.main, tool_input: { file_path: path.join(fx.main, 'a.txt') } }))
+    assertDeny(hook(fx, 'edit', { tool_name: 'MultiEdit', cwd: fx.main, tool_input: { file_path: path.join(fx.main, 'a.txt') } }))
+    assertPass(hook(fx, 'edit', codexIn(fx.main, 'Bash', { command: 'ls' })))
+  })
+})
+
+describe('v7 secret: mẫu lấy từ lib/secrets.mjs', () => {
+  const src = fs.readFileSync(SCRIPT, 'utf8')
+  const sh = (fx, cwd, command) => hook(fx, 'bash', bashIn(cwd, command))
+  const stage = (dir, rel, content) => { write(dir, rel, content); git(dir, 'add', '--', rel) }
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url')
+  const jwtOf = (role) => `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ iss: 'supabase', role })}.${'s'.repeat(24)}`
+
+  test('flow-gate không còn bản sao mẫu secret / danh sách vai cứng; import host, secrets, models', () => {
+    assert.doesNotMatch(src, /SECRET_PATTERNS\s*=|KNOWN_FALSE_POSITIVES\s*=|AKIA\[|function scanLine|function isSensitiveFile|function scanPatch/)
+    assert.doesNotMatch(src, /RECEIPT_AGENTS|AUDIT_AGENTS/)
+    assert.match(src, /from '\.\/lib\/secrets\.mjs'/)
+    assert.match(src, /from '\.\/lib\/host\.mjs'/)
+    assert.match(src, /lib\/models\.mjs/)
+  })
+
+  test('mẫu mới của secrets.mjs có hiệu lực ở cổng commit: Stripe live, JWT service_role; JWT anon thì qua', () => {
+    const fx = fixture()
+    stage(fx.main, 'pay.js', `const k = "${'sk_live_' + 'aB3dE5gH7jK9mN1pQ3sT5vX7'}"\n`)
+    assert.match(assertDeny(sh(fx, fx.main, 'git commit -m x')), /pay\.js:1 — stripe/)
+    git(fx.main, 'reset', '-q')
+    stage(fx.main, 'sb.js', `const k = "${jwtOf('service_role')}"\n`)
+    assert.match(assertDeny(sh(fx, fx.main, 'git commit -m x')), /sb\.js:1 — jwt-service-role/)
+    git(fx.main, 'reset', '-q')
+    stage(fx.main, 'anon.js', `const k = "${jwtOf('anon')}"\n`)
+    assertPass(sh(fx, fx.main, 'git commit -m x'))
+  })
+
+  test('hành vi cũ giữ nguyên: dòng allow, file nhạy cảm', () => {
+    const fx = fixture()
+    const GHP = 'ghp_' + 'a'.repeat(36)
+    stage(fx.main, 'cfg.js', `x\nconst t = "${GHP}" // flow-gate: allow-secret\n`)
+    assertPass(sh(fx, fx.main, 'git commit -m x'))
+    git(fx.main, 'reset', '-q')
+    stage(fx.main, '.env.production', 'A=1\n')
+    assert.match(assertDeny(sh(fx, fx.main, 'git commit -m x')), /\.env\.production — file nhạy cảm/)
+  })
+})
+
+describe('v7 vai: lấy từ kit/roles.json (coder-mini đi qua đủ cổng như coder)', () => {
+  const RECEIPT = 'return=done; paths=feat.go; checks=ok; blocker=; stop'
+  const jsonl = (fx, name, entries) => write(fx.root, name, entries.map((e) => JSON.stringify(e)).join('\n') + '\n')
+  const userMsg = (content) => ({ type: 'user', message: { role: 'user', content } })
+  const asst = (...content) => ({ type: 'assistant', message: { role: 'assistant', content } })
+  function auditFx() {
+    const fx = fixture()
+    commit(fx.wt, 'feat.go', 'package x\n', 'feat')
+    const plan = write(fx.root, 'PLAN.md', '| lane | files | depends_on |\n|---|---|---|\n| A | feat.go | - |\n')
+    const brief = `outcome=x\nscope=feat.go\nplan=${plan} lane=A`
+    const transcript = jsonl(fx, 'tx.jsonl', [userMsg(brief), asst({ type: 'text', text: 'làm' })])
+    return { fx, transcript }
+  }
+  const subIn = (fx, agent_type, extra = {}) => ({
+    hook_event_name: 'SubagentStop', stop_hook_active: false, agent_id: 'a1', agent_type, cwd: fx.wt, last_assistant_message: RECEIPT, ...extra,
+  })
+
+  test('coder-mini thiếu receipt bị chặn; vai không đòi receipt (plan-reviewer, security-reviewer) thì qua', () => {
+    const fx = fixture()
+    assert.match(assertBlock(hook(fx, 'subagent-stop', subIn(fx, 'coder-mini', { last_assistant_message: 'Xong rồi.' }))), /Thiếu receipt/)
+    assertPass(hook(fx, 'subagent-stop', subIn(fx, 'coder-mini')))
+    for (const role of ['plan-reviewer', 'security-reviewer', 'sensitive-reviewer', 'Explore']) {
+      assertPass(hook(fx, 'subagent-stop', subIn(fx, role, { last_assistant_message: 'không có receipt' })))
+    }
+  })
+
+  test('coder-mini nộp bài ⇒ bị audit phạm vi làn như coder (file ngoài scope ⇒ block)', () => {
+    const { fx, transcript } = auditFx()
+    assertPass(hook(fx, 'subagent-stop', subIn(fx, 'coder-mini', { agent_transcript_path: transcript })))
+    commit(fx.wt, 'extra.js', 'x\n', 'ngoài scope')
+    for (const agent of ['coder', 'coder-lite', 'coder-mini']) {
+      assert.match(assertBlock(hook(fx, 'subagent-stop', subIn(fx, agent, { agent_transcript_path: transcript }))), /OUTSIDE extra\.js/, agent)
+    }
+    assertPass(hook(fx, 'subagent-stop', subIn(fx, 'debugger', { agent_transcript_path: transcript })))
+  })
+})
+
+describe('v7 push nhánh chính theo host: ask chỉ cho Claude, Codex/Devin ⇒ deny, user tự chạy lệnh (không có tiền tố tự duyệt)', () => {
+  const GHP = 'ghp_' + 'a'.repeat(36)
+  function remoteFx() {
+    const fx = fixture()
+    const bare = path.join(fx.root, 'remote.git')
+    git(fx.root, 'init', '--bare', '-b', 'main', bare)
+    git(fx.main, 'remote', 'add', 'origin', bare)
+    git(fx.main, 'push', '-u', 'origin', 'main')
+    commit(fx.main, 'x1.txt', 'x\n', 'thêm x1')
+    commit(fx.main, 'x2.txt', 'x\n', 'thêm x2')
+    return fx
+  }
+  const claudeSh = (fx, cwd, command) => hook(fx, 'bash', bashIn(cwd, command))
+  const codexSh = (fx, cwd, command) => hook(fx, 'bash', codexIn(cwd, 'Bash', { command }))
+  const devinSh = (fx, cwd, command) => hook(fx, 'bash', devinIn(cwd, 'exec', { command }))
+
+  test('Claude vẫn nhận ask như cũ', () => {
+    const fx = remoteFx()
+    assert.match(assertAsk(claudeSh(fx, fx.main, 'git push origin main')), /^Sắp push 2 commit lên origin\/main:\n/)
+  })
+
+  test('Codex: deny, mở đầu đời thường nói user tự chạy lệnh, kèm danh sách commit và đúng lệnh push để chép', () => {
+    const fx = remoteFx()
+    for (const c of ['git push', 'git push origin main', 'git push origin HEAD', 'git push --all origin', 'git push --mirror origin']) {
+      const reason = assertDeny(codexSh(fx, fx.main, c))
+      assertPlainOpening(reason, c)
+      assert.match(reason.split(/\.\s|\n/)[0], /chính bạn chạy lệnh/, c)
+      assert.match(reason, /Sắp push 2 commit lên origin\/main:\n[0-9a-f]+ thêm x2\n[0-9a-f]+ thêm x1/, c)
+      assert.match(reason, /\ngit push origin main\s*$/, `${c}: phải in đúng lệnh push ở dòng cuối để user chép`)
+      assert.doesNotMatch(reason, /FLOW_OK/, c)
+    }
+  })
+
+  test('Devin (exec) cũng deny như Codex', () => {
+    const fx = remoteFx()
+    const reason = assertDeny(devinSh(fx, fx.main, 'git push origin main'))
+    assertPlainOpening(reason)
+    assert.match(reason, /\ngit push origin main\s*$/)
+    assert.doesNotMatch(reason, /FLOW_OK/)
+  })
+
+  test('tiền tố FLOW_OK=push-main (agent tự viết được) KHÔNG còn tự duyệt: mọi cách viết đều vẫn deny; tiền tố không lách quét secret, push ép, xoá nhánh chính', () => {
+    const fx = remoteFx()
+    for (const c of ['FLOW_OK=push-main git push origin main', 'FLOW_OK=push-main git push', 'A=1 FLOW_OK=push-main git -C . push origin main', 'echo ok && FLOW_OK=push-main git push origin main',
+      'FLOW_OK=other git push origin main', 'FLOW_OK=push-mainx git push origin main', 'FLOW_OK=push-main true && git push origin main', 'echo FLOW_OK=push-main; git push origin main']) {
+      assert.doesNotMatch(assertDeny(codexSh(fx, fx.main, c)), /FLOW_OK/, c)
+      assertDeny(devinSh(fx, fx.main, c))
+    }
+    assertDeny(codexSh(fx, fx.main, 'FLOW_OK=push-main git push --force origin main'))
+    assertDeny(codexSh(fx, fx.main, 'FLOW_OK=push-main git push origin --delete main'))
+    commit(fx.main, 'cfg.js', `const t = "${GHP}"\n`, 'secret')
+    assert.match(assertDeny(codexSh(fx, fx.main, 'FLOW_OK=push-main git push origin main')), /cfg\.js:1 — github/)
+  })
+
+  // Review lượt 2 (BLOCKER): tên remote lấy nguyên văn từ lệnh/cấu hình của AI; in vào dòng "chép rồi dán" thì `origin; calc` chạy thêm lệnh khi user dán vào terminal.
+  test('remote có ký tự shell (; | $( ) ` & > xuống dòng, bắt đầu bằng -, dấu cách) ⇒ deny nhưng KHÔNG in dòng lệnh push; dặn user tự kiểm tên remote trong terminal', () => {
+    const fx = remoteFx()
+    for (const remote of ['origin; calc', 'o|sh', '$(x)', 'a\nb', 'x`id`', 'o&c', '-bad', 'o r', 'o>f', 'o"q', "o'q"]) {
+      const quoted = `"${remote.replace(/"/g, '\\"')}"`
+      for (const sh of [codexSh, devinSh]) {
+        const reason = assertDeny(sh(fx, fx.main, `git push --repo=${remote.includes('"') ? `'${remote}'` : quoted} main`))
+        assertPlainOpening(reason, remote)
+        assert.doesNotMatch(reason, /(^|\n)\s*git push\b/, `${JSON.stringify(remote)}: không được in dòng lệnh push`)
+        assert.ok(!reason.includes(remote), `${JSON.stringify(remote)}: không được in lại tên remote lạ`)
+        assert.match(reason, /remote/i)
+        assert.match(reason, /terminal/i)
+        assert.match(reason, /Sắp push \d+ commit/, 'vẫn liệt kê commit để user biết')
+      }
+    }
+  })
+
+  test('remote lấy từ cấu hình nhánh (branch.main.remote) có ký tự shell ⇒ cũng không in lệnh; remote sạch có . _ - / vẫn in đúng', () => {
+    const fx = remoteFx()
+    git(fx.main, 'config', 'branch.main.remote', 'origin; calc')
+    const reason = assertDeny(codexSh(fx, fx.main, 'git push'))
+    assert.doesNotMatch(reason, /(^|\n)\s*git push\b/)
+    assert.ok(!reason.includes('calc'))
+    git(fx.main, 'config', '--unset', 'branch.main.remote')
+    git(fx.main, 'remote', 'add', 'up-stream_1.x', path.join(fx.root, 'remote.git'))
+    assert.match(assertDeny(codexSh(fx, fx.main, 'git push up-stream_1.x main')), /\ngit push up-stream_1\.x main\s*$/)
+  })
+
+  test('Claude (ask) không bị đổi: vẫn hỏi, lý do vẫn nêu remote/nhánh', () => {
+    const fx = remoteFx()
+    assert.match(assertAsk(claudeSh(fx, fx.main, 'git push --repo="o|sh" main')), /^Sắp push \d+ commit lên /)
+  })
+
+  test('Claude có tiền tố vẫn bị ask (ask là chốt của user, AI không tự duyệt); đã đồng bộ / nhánh khác main ⇒ qua ở mọi host', () => {
+    const fx = remoteFx()
+    assertAsk(claudeSh(fx, fx.main, 'FLOW_OK=push-main git push origin main'))
+    git(fx.main, 'push', 'origin', 'main')
+    assertPass(codexSh(fx, fx.main, 'git push')) // đã đồng bộ
+    commit(fx.wt, 'f.go', 'package f\n', 'feat commit')
+    assertPass(codexSh(fx, fx.wt, 'git push origin feat'))
+  })
+})
+
+describe('v7 cổng thư viện mới khi commit (deps.mjs newPackages + vetAll)', () => {
+  const sh = (fx, cwd, command, env) => hook(fx, 'bash', bashIn(cwd, command), env)
+  const pkg = (deps) => JSON.stringify({ name: 'x', version: '1.0.0', dependencies: deps }, null, 2) + '\n'
+  const stage = (dir, rel, content) => { write(dir, rel, content); git(dir, 'add', '--', rel) }
+  const BAD = { react: '^19.0.0', 'Bad Name!': '1.0.0' } // tên không hợp lệ: vet ra 'bad' không cần mạng
+  const GIT_DEP = { react: '^19.0.0', 'zq-internal-lib': 'git+https://example.invalid/zq.git' } // nguồn git: vet ra 'bad' không cần mạng
+
+  function depsFx(initial = { react: '^19.0.0' }) {
+    const fx = fixture()
+    commit(fx.main, 'package.json', pkg(initial), 'package.json')
+    return fx
+  }
+
+  test('commit thêm package có vấn đề ⇒ deny: mở đầu đời thường, nêu tên + lý do', () => {
+    const fx = depsFx()
+    stage(fx.main, 'package.json', pkg(BAD))
+    const reason = assertDeny(sh(fx, fx.main, 'git commit -m "thêm thư viện"'))
+    assertPlainOpening(reason)
+    assert.match(reason, /Bad Name!/)
+    assert.match(reason, /không phải tên package hợp lệ/)
+  })
+
+  test('không có package mới (đổi phiên bản, file khác) ⇒ qua', () => {
+    const fx = depsFx({ react: '^19.0.0', zod: '^3.0.0' })
+    stage(fx.main, 'package.json', pkg({ react: '^19.1.0' }))
+    assertPass(sh(fx, fx.main, 'git commit -m x'))
+    git(fx.main, 'reset', '-q')
+    stage(fx.main, 'other.txt', 'x\n')
+    assertPass(sh(fx, fx.main, 'git commit -m x'))
+  })
+
+  test('package nguồn git/URL chưa được duyệt ⇒ deny: mở đầu đời thường, nêu tên + "nguồn ngoài kho chính thức, chưa kiểm chứng" + cách duyệt', () => {
+    const fx = depsFx()
+    for (const spec of ['git+https://example.invalid/zq.git', 'https://example.invalid/zq.tgz', 'o/r']) {
+      stage(fx.main, 'package.json', pkg({ react: '^19.0.0', 'zq-internal-lib': spec }))
+      const reason = assertDeny(sh(fx, fx.main, 'git commit -m x'))
+      assertPlainOpening(reason, spec)
+      assert.match(reason, /zq-internal-lib — nguồn ngoài kho chính thức, chưa kiểm chứng/, spec)
+      assert.match(reason, /trustedDepSources/, spec)
+    }
+  })
+
+  // Review lượt 2 (MAJOR): allowlist phải đọc từ bản SẮP COMMIT (index / index tạm), mỗi mục ghim "tên@nguồn" — không đọc đĩa, không chỉ tên.
+  const SRC = 'git+https://example.invalid/zq.git'
+  const trust = (...entries) => JSON.stringify({ trustedDepSources: entries })
+
+  test('"tên@nguồn" có trong .claude/flow.json ĐÃ STAGE ⇒ nguồn git qua; tên khác trong cùng commit vẫn bị chặn; flow.json hỏng / sai kiểu ⇒ không tin ai', () => {
+    const fx = depsFx()
+    stage(fx.main, '.claude/flow.json', trust(`zq-internal-lib@${SRC}`))
+    stage(fx.main, 'package.json', pkg(GIT_DEP))
+    assertPass(sh(fx, fx.main, 'git commit -m x'))
+    stage(fx.main, 'package.json', pkg({ ...GIT_DEP, 'zq-other-lib': 'github:o/other' }))
+    assert.match(assertDeny(sh(fx, fx.main, 'git commit -m x')), /zq-other-lib — nguồn ngoài/)
+    stage(fx.main, '.claude/flow.json', '{ hỏng')
+    assert.match(assertDeny(sh(fx, fx.main, 'git commit -m x')), /zq-internal-lib — nguồn ngoài/)
+    stage(fx.main, '.claude/flow.json', JSON.stringify({ trustedDepSources: `zq-internal-lib@${SRC}` }))
+    assertDeny(sh(fx, fx.main, 'git commit -m x'))
+  })
+
+  test('flow.json chỉ nằm trên đĩa (chưa git add) KHÔNG có hiệu lực: AI tự ghi allowlist rồi commit package.json vẫn bị chặn; lời chặn chỉ cách ghi đúng "tên@nguồn" + git add', () => {
+    const fx = depsFx()
+    write(fx.main, '.claude/flow.json', trust(`zq-internal-lib@${SRC}`)) // file mới, chưa stage
+    stage(fx.main, 'package.json', pkg(GIT_DEP))
+    const reason = assertDeny(sh(fx, fx.main, 'git commit -m x'))
+    assert.match(reason, /zq-internal-lib — nguồn ngoài/)
+    assert.match(reason, /tên@nguồn/)
+    assert.match(reason, /zq-internal-lib@git\+https:\/\/example\.invalid\/zq\.git/, 'ví dụ đúng mục cần ghi cho thư viện đang bị chặn')
+    assert.match(reason, /git add/)
+  })
+
+  test('mục chỉ có tên (cách cũ) hoặc cùng tên khác nguồn ⇒ vẫn bị chặn; nguồn trong package.json phải y hệt mục đã ghim', () => {
+    const fx = depsFx()
+    stage(fx.main, 'package.json', pkg(GIT_DEP))
+    for (const entry of ['zq-internal-lib', `zq-internal-lib@git+https://other.invalid/zq.git`, `zq-internal-lib@${SRC}#abc`, `other-lib@${SRC}`, SRC]) {
+      stage(fx.main, '.claude/flow.json', trust(entry))
+      assert.match(assertDeny(sh(fx, fx.main, 'git commit -m x')), /zq-internal-lib — nguồn ngoài/, entry)
+    }
+    const sha = 'a'.repeat(40)
+    stage(fx.main, '.claude/flow.json', trust(`zq-internal-lib@${SRC}#${sha}`))
+    stage(fx.main, 'package.json', pkg({ react: '^19.0.0', 'zq-internal-lib': `${SRC}#${sha}` }))
+    assertPass(sh(fx, fx.main, 'git commit -m x'))
+    stage(fx.main, 'package.json', pkg({ react: '^19.0.0', 'zq-internal-lib': `${SRC}#${'b'.repeat(40)}` })) // đổi sha ⇒ nguồn khác ⇒ phải duyệt lại
+    assertDeny(sh(fx, fx.main, 'git commit -m x'))
+  })
+
+  test('commit -a / commit <path>: flow.json tính theo bản SẼ nằm trong commit (index tạm), không phải đĩa; git add trong cùng lệnh thì flow.json phải stage từ trước', () => {
+    const fx = depsFx()
+    commit(fx.main, '.claude/flow.json', JSON.stringify({ tests: 'none' }), 'flow.json')
+    write(fx.main, '.claude/flow.json', JSON.stringify({ tests: 'none', trustedDepSources: [`zq-internal-lib@${SRC}`] })) // sửa chưa stage
+    stage(fx.main, 'package.json', pkg(GIT_DEP))
+    assert.match(assertDeny(sh(fx, fx.main, 'git commit -m x')), /zq-internal-lib — nguồn ngoài/, 'commit thường: flow.json chưa stage')
+    assertDeny(sh(fx, fx.main, 'git commit -m x package.json'))
+    assertPass(sh(fx, fx.main, 'git commit -am x'))
+    assertPass(sh(fx, fx.main, 'git commit -m x package.json .claude/flow.json'))
+    assert.equal(git(fx.main, 'diff', '--cached', '--name-only').trim(), 'package.json', 'cổng không được đụng index thật')
+    // `git add …` đứng trước: không đoán được nó add gì ⇒ không tin bản flow.json chưa stage (chọn thừa chặt còn hơn để AI tự duyệt)
+    assertDeny(sh(fx, fx.main, 'git add -A && git commit -m x'))
+    git(fx.main, 'add', '.claude/flow.json')
+    assertPass(sh(fx, fx.main, 'git add package.json && git commit -m x'))
+    // flow.json mới (chưa theo dõi, chưa stage): git add -A cùng lệnh cũng không đủ; stage trước thì qua
+    const fx2 = depsFx()
+    write(fx2.main, '.claude/flow.json', trust(`zq-internal-lib@${SRC}`))
+    write(fx2.main, 'package.json', pkg(GIT_DEP))
+    assertDeny(sh(fx2, fx2.main, 'git add -A && git commit -m x'))
+    git(fx2.main, 'add', '.claude/flow.json')
+    assertPass(sh(fx2, fx2.main, 'git add package.json && git commit -m x'))
+  })
+
+  // unknown = mạng lỗi/quá giờ: KHÔNG chặn nhưng cũng không im lặng — trả additionalContext liệt kê gói chưa kiểm được và dặn AI báo user một dòng.
+  const contextOf = (r) => {
+    assert.equal(r.status, 0, r.stderr)
+    const out = JSON.parse(r.stdout).hookSpecificOutput
+    assert.equal(out.permissionDecision, undefined, 'chỉ nhắc, không có quyết định cho/chặn')
+    assert.equal(out.hookEventName, 'PreToolUse')
+    return out.additionalContext
+  }
+
+  test('hết giờ kiểm (mạng chậm) ⇒ unknown ⇒ không chặn nhưng báo AI (additionalContext) + log, không treo hook', () => {
+    const fx = depsFx()
+    stage(fx.main, 'package.json', pkg({ react: '^19.0.0', 'zq-unique-pkg-9': '1.0.0' }))
+    const t = Date.now()
+    const ctx = contextOf(sh(fx, fx.main, 'git commit -m x', { FLOW_GATE_DEPS_MS: '1' }))
+    assert.ok(Date.now() - t < 15000)
+    assert.match(ctx, /chưa kiểm được/i)
+    assert.match(ctx, /npm zq-unique-pkg-9/)
+    assert.match(ctx, /báo user/i)
+    assert.match(fs.readFileSync(fx.log, 'utf8'), /deps.*zq-unique-pkg-9/)
+  })
+
+  test('unknown không nuốt các đoạn lệnh sau: `git commit && git push --force origin main` vẫn bị chặn push ép', () => {
+    const fx = depsFx()
+    stage(fx.main, 'package.json', pkg({ react: '^19.0.0', 'zq-unique-pkg-9': '1.0.0' }))
+    assertDeny(sh(fx, fx.main, 'git commit -m x && git push --force origin main', { FLOW_GATE_DEPS_MS: '1' }))
+  })
+
+  // Review lượt 2 (MAJOR): ask (push nhánh chính) cùng lệnh với commit thư viện chưa kiểm được — lời nhắc unknown không được rơi mất.
+  test('commit thư viện chưa kiểm được + push nhánh chính trong MỘT lệnh ⇒ Claude nhận ask KÈM additionalContext về thư viện chưa kiểm, và hộp hỏi nói rõ có thư viện chưa kiểm; Codex ⇒ deny', () => {
+    const fx = depsFx()
+    const bare = path.join(fx.root, 'remote.git')
+    git(fx.root, 'init', '--bare', '-b', 'main', bare)
+    git(fx.main, 'remote', 'add', 'origin', bare)
+    git(fx.main, 'push', '-u', 'origin', 'main')
+    commit(fx.main, 'x1.txt', 'x\n', 'thêm x1')
+    stage(fx.main, 'package.json', pkg({ react: '^19.0.0', 'zq-unique-pkg-9': '1.0.0' }))
+    const r = sh(fx, fx.main, 'git commit -m x && git push origin main', { FLOW_GATE_DEPS_MS: '1' })
+    const reason = assertAsk(r)
+    assert.match(reason, /^Sắp push 1 commit lên origin\/main:/)
+    assert.match(reason, /thư viện mới chưa kiểm được/i, 'user thấy trong hộp hỏi')
+    const ctx = r.json.hookSpecificOutput.additionalContext
+    assert.match(ctx, /chưa kiểm được/i)
+    assert.match(ctx, /npm zq-unique-pkg-9/)
+    assert.match(ctx, /báo user/i)
+    const codex = hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: 'git commit -m x && git push origin main' }), { FLOW_GATE_DEPS_MS: '1' })
+    assertDeny(codex)
+    // không có thư viện chưa kiểm ⇒ ask như cũ, không thêm gì
+    git(fx.main, 'reset', '-q')
+    const plain = sh(fx, fx.main, 'git commit -m x && git push origin main')
+    assert.equal(assertAsk(plain).includes('chưa kiểm được'), false)
+    assert.equal(plain.json.hookSpecificOutput.additionalContext, undefined)
+  })
+
+  test('package.json mới hỏng ⇒ newPackages ném ⇒ deny kèm lý do (không cho qua)', () => {
+    const fx = depsFx()
+    stage(fx.main, 'package.json', '{ không phải json')
+    const reason = assertDeny(sh(fx, fx.main, 'git commit -m x'))
+    assertPlainOpening(reason)
+    assert.match(reason, /package\.json/)
+  })
+
+  test('go.mod: module mới có vấn đề ⇒ deny', () => {
+    const fx = fixture()
+    commit(fx.main, 'go.mod', 'module example.com/x\n\ngo 1.22\n', 'go.mod')
+    stage(fx.main, 'go.mod', 'module example.com/x\n\ngo 1.22\n\nrequire example.com/Bad%20Name v1.0.0\n')
+    const reason = assertDeny(sh(fx, fx.main, 'git commit -m x'))
+    assert.match(reason, /Bad%20Name/)
+  })
+
+  test('commit -a, commit <path>, git add … && git commit: tính cả package.json chưa stage (nội dung thật của commit)', () => {
+    const fx = depsFx()
+    write(fx.main, 'package.json', pkg(BAD)) // sửa chưa stage
+    write(fx.main, 'other.txt', 'x\n')
+    assertPass(sh(fx, fx.main, 'git commit -m x')) // không có gì staged
+    assert.match(assertDeny(sh(fx, fx.main, 'git commit -am x')), /Bad Name!/)
+    assert.match(assertDeny(sh(fx, fx.main, 'git commit -a -m x')), /Bad Name!/)
+    assert.match(assertDeny(sh(fx, fx.main, 'git commit -m x package.json')), /Bad Name!/)
+    assert.match(assertDeny(sh(fx, fx.main, 'git add -A && git commit -m x')), /Bad Name!/)
+    assert.match(assertDeny(sh(fx, fx.main, 'git add package.json; git commit -m x')), /Bad Name!/)
+    assertPass(sh(fx, fx.main, 'git commit -m x other.txt')) // commit path khác: package.json không nằm trong commit
+    assert.equal(git(fx.main, 'diff', '--cached', '--name-only').trim(), '', 'cổng không được đụng index thật')
+  })
+
+  test('--dry-run không kiểm; secret bị chặn trước (lý do secret, không phải deps)', () => {
+    const fx = depsFx()
+    stage(fx.main, 'package.json', pkg(BAD))
+    assertPass(sh(fx, fx.main, 'git commit --dry-run -m x'))
+    stage(fx.main, 'cfg.js', `const t = "${'ghp_' + 'a'.repeat(36)}"\n`)
+    assert.match(assertDeny(sh(fx, fx.main, 'git commit -m x')), /cfg\.js:1 — github/)
+  })
+
+  test('repo chưa có commit: package.json đầu tiên cũng được kiểm', () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'flow-gate-')))
+    roots.push(root)
+    git(root, 'init', '-b', 'main')
+    stage(root, 'package.json', pkg(BAD))
+    const fx = { log: path.join(root, 'flow-gate.log'), root }
+    assert.match(assertDeny(hook(fx, 'bash', bashIn(root, 'git commit -m first'))), /Bad Name!/)
+  })
+})
+
+describe('v7 AC-24: lời chặn mở đầu bằng một câu đời thường', () => {
+  const sh = (fx, cwd, command) => hook(fx, 'bash', bashIn(cwd, command))
+  const stage = (dir, rel, content) => { write(dir, rel, content); git(dir, 'add', '--', rel) }
+
+  test('sửa thẳng thư mục chính / gộp thiếu dấu / push ép / xoá nhánh chính / lệnh phá huỷ / secret', () => {
+    const fx = fixture()
+    assertPlainOpening(assertDeny(hook(fx, 'edit', { tool_name: 'Edit', cwd: fx.main, tool_input: { file_path: path.join(fx.main, 'a.txt') } })), 'edit')
+    commit(fx.wt, 'feat.go', 'package x\n', 'feat')
+    assertPlainOpening(assertDeny(sh(fx, fx.main, 'git merge feat')), 'merge')
+    for (const c of ['git push --force origin main', 'git push origin --delete main', 'git branch -D main', 'git branch -M feat main', 'git reset --hard', 'git clean -fd', 'git restore .', 'git checkout -- .']) {
+      assertPlainOpening(assertDeny(sh(fx, fx.main, c)), c)
+    }
+    stage(fx.main, 'cfg.js', `const t = "${'ghp_' + 'a'.repeat(36)}"\n`)
+    const secret = assertDeny(sh(fx, fx.main, 'git commit -m x'))
+    assertPlainOpening(secret, 'secret commit')
+    assert.match(secret, /Phát hiện secret trong phần sắp commit/)
+    assert.match(secret, /cfg\.js:1 — github/)
+    assert.match(secret, /flow-gate: allow-secret/)
+    git(fx.main, 'commit', '-q', '-m', 'secret')
+    assertPlainOpening(assertDeny(sh(fx, fx.main, 'git push origin main')), 'secret push')
+  })
+
+  test('Stop nhắc thiếu dấu / thiếu receipt / audit phạm vi làn / lane-check lỗi', () => {
+    const fx = fixture()
+    commit(fx.wt, 'feat.go', 'package x\n', 'feat')
+    assertPlainOpening(assertBlock(hook(fx, 'stop', { hook_event_name: 'Stop', cwd: fx.wt, stop_hook_active: false })), 'stop')
+    const sub = (extra) => ({ hook_event_name: 'SubagentStop', stop_hook_active: false, agent_id: 'a1', agent_type: 'coder', cwd: fx.wt, ...extra })
+    assertPlainOpening(assertBlock(hook(fx, 'subagent-stop', sub({ last_assistant_message: 'Xong rồi.' }))), 'receipt')
+    const plan = write(fx.root, 'PLAN.md', '| lane | files | depends_on |\n|---|---|---|\n| A | feat.go | - |\n')
+    commit(fx.wt, 'extra.js', 'x\n', 'ngoài scope')
+    const mk = (name, brief) => write(fx.root, name, JSON.stringify({ type: 'user', message: { role: 'user', content: brief } }) + '\n')
+    const receipt = 'return=done; paths=feat.go; checks=ok; blocker=; stop'
+    assertPlainOpening(assertBlock(hook(fx, 'subagent-stop', sub({ last_assistant_message: receipt, agent_transcript_path: mk('t1.jsonl', `plan=${plan} lane=A`) }))), 'audit')
+    assertPlainOpening(assertBlock(hook(fx, 'subagent-stop', sub({ last_assistant_message: receipt, agent_transcript_path: mk('t2.jsonl', `plan=${plan} lane=Z`) }))), 'audit lỗi')
+  })
+})
+
+describe('v7 AC-09: lane-check không chạy được ⇒ block, không cho qua âm thầm', () => {
+  const jsonl = (fx, name, entries) => write(fx.root, name, entries.map((e) => JSON.stringify(e)).join('\n') + '\n')
+  const sub = (fx, transcript, extra = {}) => ({
+    hook_event_name: 'SubagentStop', stop_hook_active: false, agent_id: 'a1', agent_type: 'coder', cwd: fx.wt,
+    last_assistant_message: 'return=done; paths=feat.go; checks=ok; blocker=; stop', agent_transcript_path: transcript, ...extra,
+  })
+
+  test('lời chặn nêu lý do thật của lane-check + cách xử lý; stop_hook_active ⇒ vẫn cho qua (không lặp vô hạn)', () => {
+    const fx = fixture()
+    commit(fx.wt, 'feat.go', 'package x\n', 'feat')
+    const t = jsonl(fx, 'tx.jsonl', [{ type: 'user', message: { role: 'user', content: `outcome=x\nplan=${path.join(fx.root, 'khong-co.md')} lane=A` } }])
+    const reason = assertBlock(hook(fx, 'subagent-stop', sub(fx, t)))
+    assertPlainOpening(reason)
+    assert.match(reason, /không kiểm được phạm vi làn A vì /)
+    assert.match(reason, /chạy lại với --repo đúng hoặc báo captain/)
+    assert.match(fs.readFileSync(fx.log, 'utf8'), /lane-check audit lane A/)
+    assertPass(hook(fx, 'subagent-stop', sub(fx, t, { stop_hook_active: true })))
+  })
+
+  test('coder trả needs_context/blocked thì không audit nên không bị chặn; brief không có plan=/lane= vẫn qua', () => {
+    const fx = fixture()
+    const t = jsonl(fx, 'tx.jsonl', [{ type: 'user', message: { role: 'user', content: `plan=${path.join(fx.root, 'khong-co.md')} lane=A` } }])
+    assertPass(hook(fx, 'subagent-stop', sub(fx, t, { last_assistant_message: 'return=needs_context; blocker=x; stop' })))
+    const none = jsonl(fx, 'none.jsonl', [{ type: 'user', message: { role: 'user', content: 'outcome=x' } }])
+    assertPass(hook(fx, 'subagent-stop', sub(fx, none)))
+  })
+})
+
+describe('v7 Stop: nhánh có sổ tiến độ chưa xong mà mục Làn: còn "- [ ]" ⇒ không nhắc thiếu dấu', () => {
+  const stopIn = (cwd) => ({ hook_event_name: 'Stop', cwd, stop_hook_active: false, last_assistant_message: 'xong' })
+  const SHEET = 'docs/specs/x/progress.md'
+  const sheet = ({ state = 'đang làm', branch = 'feat, C:/wt', body = 'Làn:\n- [x] A đã gộp\n- [ ] B đang làm\nGhi chú: đang thi công\n' } = {}) =>
+    `# Tiến độ: x\nTrạng thái: ${state}\nPha: 4 — thi công\nNhánh / worktree: ${branch}\n${body}`
+  function sheetFx(opts) {
+    const fx = fixture()
+    commit(fx.wt, SHEET, sheet(opts), 'sổ')
+    commit(fx.wt, 'feat.go', 'package x\n', 'feat') // có code ⇒ cổng Stop đòi review/qa/test
+    return fx
+  }
+
+  test('còn làn "- [ ]" ⇒ không nhắc, không ghi marker nudged; hết "- [ ]" ⇒ nhắc như thường', () => {
+    const fx = sheetFx()
+    assertPass(hook(fx, 'stop', stopIn(fx.wt)))
+    assert.ok(!fs.existsSync(fx.gates) || !fs.readdirSync(fx.gates).some((n) => n.startsWith('nudged-')))
+    commit(fx.wt, SHEET, sheet({ body: 'Làn:\n- [x] A đã gộp\n- [x] B đã gộp\nGhi chú: xong hết làn\n' }), 'sổ: xong làn')
+    assert.match(assertBlock(hook(fx, 'stop', stopIn(fx.wt))), /feat đã commit xong nhưng thiếu: review, qa/)
+  })
+
+  test('sổ đã "xong", sổ của nhánh khác, không có mục Làn:, "- [ ]" nằm ngoài mục Làn: ⇒ vẫn nhắc', () => {
+    for (const [name, opts] of [
+      ['xong', { state: 'xong' }],
+      ['nhánh khác', { branch: 'khac, C:/wt' }],
+      ['không có Làn', { body: 'Bước tiếp theo: - [ ] làm gì đó\n' }],
+      ['ngoài Làn', { body: 'Làn:\n- [x] A đã gộp\nCòn lại:\n- [ ] việc khác\n' }],
+      ['Làn rỗng', { body: 'Làn:\n\nGhi chú: chưa có làn\n- [ ] ngoài mục\n' }],
+    ]) {
+      const fx = sheetFx(opts)
+      assert.match(assertBlock(hook(fx, 'stop', stopIn(fx.wt))), /thiếu: review, qa/, name)
+    }
+  })
+
+  test('mục Làn: có dòng phụ thụt lề / dòng trống giữa các làn vẫn được đọc; "* [ ]" cũng tính', () => {
+    const fx = sheetFx({ body: 'Làn:\n- [x] A đã gộp\n\n  ghi chú thụt lề\n* [ ] B đang làm\n' })
+    assertPass(hook(fx, 'stop', stopIn(fx.wt)))
+  })
+
+  test('không có sổ nào ⇒ nhắc như cũ (không ảnh hưởng nhánh bình thường)', () => {
+    const fx = fixture()
+    commit(fx.wt, 'feat.go', 'package x\n', 'feat')
+    assertBlock(hook(fx, 'stop', stopIn(fx.wt)))
+  })
+})
+
+describe('AC-42: quét thư mục bằng grep -r / find ⇒ nhắc dùng Grep/rg, không chặn', () => {
+  const ctxOf = (r) => {
+    assert.equal(r.status, 0, r.stderr)
+    if (!r.stdout.trim()) return null
+    const out = JSON.parse(r.stdout).hookSpecificOutput
+    assert.equal(out.permissionDecision, undefined, 'chỉ nhắc, không có quyết định cho/chặn')
+    return out.additionalContext
+  }
+  for (const command of ['grep -rn "TODO" src', 'grep -R foo .', 'grep --recursive foo .', 'cd x && grep -ril bar .',
+    'find . -name "*.ts"', 'find src -type f -iname "*.md"', 'find . -path "*/node_modules" -prune']) {
+    test(`nhắc: ${command}`, () => {
+      const fx = fixture()
+      const ctx = ctxOf(hook(fx, 'bash', bashIn(fx.main, command)))
+      assert.ok(ctx && ctx.includes('rg') && ctx.includes('-uu'), ctx)
+    })
+  }
+  for (const command of ['grep foo file.txt', 'git log | grep fix', 'rg -n foo', 'ls -la', 'find . -maxdepth 1 -type d', 'echo grep -r']) {
+    test(`không nhắc: ${command}`, () => {
+      const fx = fixture()
+      assert.equal(ctxOf(hook(fx, 'bash', bashIn(fx.main, command))), null)
+    })
+  }
+  test('lệnh bị chặn vẫn bị chặn (nhắc không che quyết định deny)', () => {
+    const fx = fixture()
+    write(fx.main, 'k.js', 'const k = "' + 'sk_' + 'live_' + '4eC39HqLyjWDarjtT1zdp7dc"\n')
+    git(fx.main, 'add', 'k.js')
+    assertDeny(hook(fx, 'bash', bashIn(fx.main, 'grep -r foo . ; git commit -m x')))
+  })
+})
+
+describe('ghi nội dung file qua lệnh shell ⇒ chặn, dặn dùng Write/Edit (bộ lọc an toàn của app bật hộp hỏi user)', () => {
+  const HD = '<' + '<'
+  const mustDeny = [
+    `cat > notes.md ${HD}'EOF'\nxin chào\nEOF`,
+    `cat ${HD}'EOF' > notes.md\nxin chào\nEOF`,
+    `cd x && cat >> a.txt ${HD}EOF\nnội dung\nEOF`,
+    `tee out.md ${HD}EOF\nnội dung\nEOF`,
+    'echo "- [ghi nhớ](x.md)" >> MEMORY.md',
+    "printf 'a\\nb\\n' > file.txt",
+    "sed -i 's|^dòng$|dòng\\nthêm dòng|' agents/coder.md",
+    'node -e "require(\'fs\').writeFileSync(\'a.txt\', \'x\')"',
+    `node - ${HD}'EOF'\nconst fs=require('fs');fs.writeFileSync('a','b')\nEOF`,
+    'python -c "open(\'a.txt\',\'w\').write(\'x\')"',
+  ]
+  const mustPass = [
+    'node --test hooks/x.test.mjs > /tmp/out.txt 2>&1',
+    `git commit -q -F - ${HD}'EOF'\nthông điệp\nEOF`,
+    `cat ${HD}'EOF' | wc -l\nabc\nEOF`,
+    'echo EXIT=$?',
+    'echo hi > /dev/null',
+    'echo lỗi >&2',
+    "sed -i 's/a/b/' file.txt",
+    "printf '%s\\0' a b | xargs -0 ls",
+    'node -e "console.log(1)"',
+    'ls > list.txt',
+  ]
+  for (const command of mustDeny) {
+    test(`chặn: ${command.split('\n')[0]}`, () => {
+      const fx = fixture()
+      const reason = assertDeny(hook(fx, 'bash', bashIn(fx.root, command)))
+      assert.match(reason, /Write\/Edit/)
+      assertPlainOpening(reason, command)
+    })
+  }
+  for (const command of mustPass) {
+    test(`không chặn: ${command.split('\n')[0]}`, () => {
+      const fx = fixture()
+      const r = hook(fx, 'bash', bashIn(fx.root, command))
+      assert.equal(r.json?.hookSpecificOutput?.permissionDecision, undefined, r.stdout)
+    })
+  }
+  test('Codex ⇒ dặn dùng apply_patch', () => {
+    const fx = fixture()
+    const reason = assertDeny(hook(fx, 'bash', codexIn(fx.root, 'Bash', { command: 'echo x > a.txt' })))
+    assert.match(reason, /apply_patch/)
+  })
+})
+
+describe('xoá cả thư mục qua lệnh shell ⇒ chặn, dặn tạo thư mục mới; thật sự cần xoá thì hỏi user', () => {
+  const mustDeny = [
+    'rm -rf /tmp/x', 'rm -r build', 'rm -fr out', 'rm -Rf a b', 'rm --recursive dist', 'cd x && rm -rf node_modules',
+    'sudo rm -rf /var/x', '/bin/rm -rf x', 'FOO=1 rm -rf x', 'git status; rm -r -f tmp', 'bash -c "rm -rf x"',
+    'powershell -c "Remove-Item -Recurse -Force x"', 'cmd /c rmdir /s /q x',
+  ]
+  const mustPass = ['rm a.txt', 'rm -f a.txt b.txt', 'rmdir empty', 'git rm -r --cached x', 'echo "rm -rf x"', 'git commit -m "bỏ rm -rf"', 'mkdir -p new-dir']
+  for (const command of mustDeny) {
+    test(`chặn: ${command}`, () => {
+      const fx = fixture()
+      const reason = assertDeny(hook(fx, 'bash', bashIn(fx.root, command)))
+      assert.match(reason, /thư mục mới/)
+      assertPlainOpening(reason, command)
+    })
+  }
+  for (const command of mustPass) {
+    test(`không chặn: ${command}`, () => {
+      const fx = fixture()
+      const r = hook(fx, 'bash', bashIn(fx.root, command))
+      assert.equal(r.json?.hookSpecificOutput?.permissionDecision, undefined, r.stdout)
+    })
+  }
 })

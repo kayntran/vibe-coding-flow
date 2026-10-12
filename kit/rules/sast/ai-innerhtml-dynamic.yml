@@ -1,0 +1,29 @@
+id: ai-innerhtml-dynamic
+language: Tsx
+severity: error
+message: "Gán HTML động vào trang (innerHTML, outerHTML, insertAdjacentHTML, document.write)"
+note: |
+  Nếu chuỗi có dữ liệu từ ngoài, kẻ xấu chèn được script vào trang (XSS).
+  Sửa: dùng textContent cho chữ thường; bắt buộc có HTML thì lọc qua DOMPurify.sanitize trước khi gán.
+rule:
+  any:
+    - pattern: $EL.innerHTML = $V
+    - pattern: $EL.outerHTML = $V
+    - pattern: $EL.insertAdjacentHTML($POS, $V)
+    - pattern: document.write($V)
+constraints:
+  V:
+    all:
+      - not:
+          kind: string
+      - not:
+          pattern: DOMPurify.sanitize($$$S)
+ignores:
+  - '**/node_modules/**'
+  - '**/dist/**'
+  - '**/build/**'
+  - '**/.next/**'
+  - '**/out/**'
+  - '**/kit/rules/fixtures/**'
+  - '**/*.test.*'
+  - '**/*.spec.*'
