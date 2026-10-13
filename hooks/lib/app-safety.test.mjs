@@ -122,6 +122,14 @@ describe('headerProblems: _headers (Cloudflare/Netlify)', () => {
     assert.deepEqual(wide("'self' https://cdn.example.com"), [])
   })
 
+  test('CSP wildcard + một nhãn (https://*.com, *.net) = mọi tên miền ⇒ báo; https://*.example.com thì đạt', () => {
+    const csp = (v) => { const d = tmp(); put(d, 'public/_headers', headersFile(`Content-Security-Policy: ${v}; frame-ancestors 'none'`, H.nosniff, H.referrer)); return S.headerProblems(d) }
+    assert.equal(csp('script-src https://*.com').length, 1)
+    assert.equal(csp('default-src *.net').length, 1)
+    assert.equal(csp('script-src https://*.com:*').length, 1)
+    assert.deepEqual(csp('script-src https://*.example.com'), [])
+  })
+
   test('không có script-src mà default-src * ⇒ báo', () => {
     const d = tmp(); put(d, 'public/_headers', headersFile("Content-Security-Policy: default-src *; frame-ancestors 'none'", H.nosniff, H.referrer))
     assert.equal(S.headerProblems(d).length, 1)

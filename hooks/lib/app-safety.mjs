@@ -121,8 +121,10 @@ function cspDirectives(policy) {
   return map
 }
 
-// Nguồn "cho mọi nơi": `*`, `http:`, `https:` trơn, và `http://*`, `https://*`, `*://*` (kể cả `:*` cổng, `/` cuối). `https://*.example.com` thì không.
-const ANYWHERE = /^(?:\*|https?:|(?:\*|https?):\/\/\*(?::\*)?\/?)$/i
+// Nguồn "cho mọi nơi": `*`, `http:`, `https:` trơn, và `http://*`, `https://*`, `*://*` (kể cả `:*` cổng, `/` cuối),
+// và `[scheme://]*.<một nhãn không dấu chấm>[:cổng|:*][/]` (vd `*.com`, `https://*.net`, `https://*.com:*`) = mọi tên miền của đuôi đó.
+// `https://*.example.com` (hai nhãn trở lên) thì không.
+const ANYWHERE = /^(?:\*|https?:|(?:\*|https?):\/\/\*(?::\*)?\/?|(?:(?:\*|https?):\/\/)?\*\.[a-z0-9-]+(?::(?:\d+|\*))?\/?)$/i
 const isAnywhere = (s) => ANYWHERE.test(s)
 const SCRIPT_DIRECTIVES = ['script-src-elem', 'script-src-attr']
 
