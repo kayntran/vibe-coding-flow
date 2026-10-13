@@ -60,9 +60,10 @@ tích hợp.
 
 **Gom lần báo xong — tiết kiệm token.** Mỗi lần worker/lệnh nền báo xong, phiên chính thức dậy và gửi lại CẢ ngữ cảnh
 (đo 2026-10-13 trên kit: 53% lần thức là do báo xong, tốn ~64% chi phí phiên chính; ngữ cảnh lúc thức trung vị ~400k):
-- **≥3 việc độc lập chỉ cần kết quả cuối** (QA + review + test nhiều nền, nhiều lượt đánh giá, research nhiều góc,
-  quét nhiều file) ⇒ chạy bằng tool `Workflow` (user đã cho phép sẵn: allow `Workflow`): cả đợt chỉ báo MỘT lần. Việc
-  sửa code dùng bản sao riêng cho từng agent; giữ ≤4 agent viết code cùng lúc như trên. Không dùng Workflow khi giữa
+- **≥3 việc độc lập chỉ cần kết quả cuối** (test nhiều nền, nhiều lượt review độc lập trên CÙNG một diff đã xanh,
+  research nhiều góc, quét nhiều file) ⇒ chạy bằng tool `Workflow` (user đã cho phép sẵn: allow `Workflow`): cả đợt chỉ
+  báo MỘT lần. Việc sửa code dùng bản sao riêng cho từng agent; giữ ≤4 agent viết code cùng lúc như trên. KHÔNG gom các
+  bước có thứ tự cổng (test xanh → QA → user duyệt giao diện → review) vào một Workflow, và không dùng Workflow khi giữa
   chừng cần captain quyết hoặc hỏi user (Workflow không nhận ý kiến giữa chừng) — tách thành nhiều Workflow theo chặng.
 - Lệnh nền liên quan nhau (test Windows + Mac, build + test) ⇒ gộp vào MỘT lệnh nền in một tổng kết, không hai lệnh.
 - Một worker xong gửi HAI tín hiệu (báo cáo + thông báo "completed"): xử lý ở tín hiệu đầu; tín hiệu sau không có gì
