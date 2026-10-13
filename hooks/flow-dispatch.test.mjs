@@ -9,7 +9,12 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'flow-dispatch.mjs')
-const ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')))
+// Tắt bảo trì tự động của git cho MỌI lệnh git (của test lẫn của hook): git ≥2.47 trên Mac/Linux tách `git maintenance run --auto --detach` chạy nền sau
+// mỗi commit, nó tạo/xoá objects/maintenance.lock sau khi bài đã xong ⇒ rmSync ở `after` gặp ENOTEMPTY khi máy bận. Windows không tách nền nên không thấy.
+const ENV = {
+  ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_'))),
+  GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'maintenance.auto', GIT_CONFIG_VALUE_0: 'false', GIT_CONFIG_KEY_1: 'gc.auto', GIT_CONFIG_VALUE_1: '0',
+}
 const roots = []
 
 after(() => {
