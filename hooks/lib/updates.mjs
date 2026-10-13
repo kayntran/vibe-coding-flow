@@ -204,7 +204,8 @@ export function updateCommand(tool, o = {}) {
   const userRuns = Boolean(CATALOG[tool].affectsAll) || method === 'desktop'
   // Có công cụ tự đổi `npm` ⇒ `pnpm` trong lệnh (gặp thật 2026-10-12): cài thành bản thứ hai qua pnpm (thường hỏng) thay vì nâng bản npm đang dùng.
   // Đường npm-cli.js dựng từ Node đang chạy (đúng cả khi Node cài qua fnm/nvm), viết sẵn dạng chạy được trong PowerShell lẫn bash.
-  const npmCli = path.join(path.dirname(o.nodePath ?? process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')
+  // Ghi chú chỉ dành cho Windows ⇒ path.win32 (máy khác giả lập win32, `path` posix không tách được "C:\…\node.exe").
+  const npmCli = path.win32.join(path.win32.dirname(o.nodePath ?? process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')
   const npmNote = cmd && method === 'npm' && platform === 'win32' && /^npm /.test(cmd)
     ? `Có công cụ đổi npm→pnpm thì chạy npm gốc: node "${npmCli}" ${cmd.slice(4)}`
     : null
