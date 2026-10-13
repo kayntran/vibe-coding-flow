@@ -9,7 +9,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { extractReview, buildPrompt, parseArgs, GROK_ENV, sanitizeDiff, parseNameStatusZ, buildWorkspace, runReviewer, run, reviewerEnv } from './review-ext.mjs'
+import { extractReview, buildPrompt, parseArgs, GROK_ENV, sanitizeDiff, parseNameStatusZ, buildWorkspace, runReviewer, run, reviewerEnv, pickCursorModel, listCursorModels } from './review-ext.mjs'
 import { scanText } from './lib/secrets.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -347,9 +347,49 @@ describe('buildWorkspace (tầng 3)', () => {
   })
 })
 
+describe('pickCursorModel', () => {
+  test('dạng `cursor-agent --list-models`: bản grok mới nhất, mức high, không -fast', () => {
+    assert.equal(pickCursorModel(CURSOR_LIST), 'grok-4.7-high')
+    assert.equal(pickCursorModel(CURSOR_LIST, 'xhigh'), 'grok-4.7-xhigh')
+    assert.equal(pickCursorModel(`${CURSOR_LIST}\ngrok-4.8-high - Grok 4.8  High\ngrok-4.8-high-fast - Grok 4.8  High Fast`), 'grok-4.8-high', 'có bản mới hơn ⇒ lên đời')
+    assert.equal(pickCursorModel('grok-4.7-low - L\ngrok-4.7-medium - M\ngrok-4.7-medium-fast - MF'), 'grok-4.7-medium', 'thiếu high ⇒ hạ mức')
+    assert.equal(pickCursorModel('cursor-grok-4.6-high - Grok 4.6\ncursor-grok-4.6-high-fast - Grok 4.6 Fast'), 'cursor-grok-4.6-high', 'nhận cả tiền tố cursor-')
+  })
+
+  test('dạng thông báo lỗi "Available models: a, b, …" ⇒ grok-4.7-high, không bao giờ trả dạng cũ có [context=…]', () => {
+    const id = pickCursorModel(/Available models:([\s\S]*)/.exec(CURSOR_REJECT)[1])
+    assert.equal(id, 'grok-4.7-high')
+    assert.equal(pickCursorModel(CURSOR_REJECT), 'grok-4.7-high')
+    assert.doesNotMatch(id, /[[\]]/)
+  })
+
+  test('listCursorModels: hết giờ / exit ≠ 0 (danh sách có thể bị cắt, chỉ còn bản cũ) ⇒ ném; exit 0 ⇒ trả stdout', async () => {
+    const part = 'cursor-grok-4.5-high - Grok 4.5\n'
+    const fake = (r) => async () => ({ status: 0, stdout: part, stderr: '', timedOut: false, error: null, ...r })
+    await assert.rejects(listCursorModels(fake({ status: null, timedOut: true })), /hết giờ/)
+    await assert.rejects(listCursorModels(fake({ status: 1 })), /exit 1/)
+    assert.equal(await listCursorModels(fake({})), part)
+  })
+
+  test('không có model grok / chữ rác ⇒ null', () => {
+    for (const t of ['', null, 'Available models\n\nauto - Auto (default)\ngpt-5.5-high - GPT-5.5', 'Error: not logged in']) assert.equal(pickCursorModel(t), null)
+  })
+})
+
 // ---------- run (CLI giả, trong tiến trình) ----------
 
-function harness({ reply, check, resolve } = {}) {
+// Trích `cursor-agent --list-models` thật (2026.10.01-e373342, 2026-10-13): có ký tự rộng-0 sau tên "-fast", dòng cursor-grok-4.6 cũ hơn.
+const CURSOR_LIST = [
+  'Available models', '', 'auto - Auto (default)', 'gpt-5.3-codex-high - Codex 5.3 High', 'cursor-grok-4.5-high - Grok 4.5', 'cursor-grok-4.5-high-fast - Grok 4.5 Fast',
+  'grok-4.7-low - Grok 4.7  Low', 'grok-4.7-low-fast - Grok 4.7  Low Fast​​', 'grok-4.7-medium - Grok 4.7  Medium',
+  'grok-4.7-high - Grok 4.7  High', 'grok-4.7-high-fast - Grok 4.7  High Fast​​', 'grok-4.7-xhigh - Grok 4.7  Extra High',
+  'cursor-grok-4.6-high - Grok 4.6', 'cursor-grok-4.6-xhigh - Grok 4.6 Extra High', 'claude-opus-5-5-high - Claude Opus 5.5 1M High',
+].join('\n')
+// stderr thật khi gửi dạng tên cũ (2026-10-13 ~19h).
+const CURSOR_REJECT = 'Cannot use this model: grok-4.7[context=256k,reasoning_effort=high,fast=false]. Available models: auto, gpt-5.3-codex, cursor-grok-4.6-high, ' +
+  'grok-4.7, grok-4.7-high, grok-4.7-high-fast, grok-4.7-low, grok-4.7-medium, grok-4.7-xhigh, claude-opus-5-5-high.'
+
+function harness({ reply, check, resolve, cursorModels } = {}) {
   const tmpRoot = tmp('rx-tmproot-')
   const outDir = tmp('rx-out-')
   const logs = { out: [], err: [] }
@@ -370,6 +410,7 @@ function harness({ reply, check, resolve } = {}) {
       if (check) return check(name)
       return { name, ready: true, message: 'sẵn sàng', loginCmd: null, installHint: null }
     },
+    cursorModels: cursorModels ?? (async () => CURSOR_LIST),
   }
   if (resolve !== null) {
     deps.resolve = resolve ?? ((host, role) => {
@@ -633,11 +674,40 @@ describe('run: cái được gửi đi', () => {
     assert.equal(ws, c.cwd)
     assert.ok(!c.realCwd.startsWith(real(repo)))
     assert.ok(!c.args.includes('--add-dir'))
-    assert.equal(c.args[c.args.indexOf('--model') + 1], 'grok-4.7[context=256k,reasoning_effort=high,fast=false]')
+    assert.equal(c.args[c.args.indexOf('--model') + 1], 'grok-4.7-high', 'id lấy từ danh sách của Cursor')
     assert.ok(c.args.includes('--mode') && c.args.includes('plan') && c.args.includes('--trust'))
     const rel = /(\S*prompt\.txt)/.exec(c.args.at(-1))[1]
     assert.ok(c.snap[rel].includes('+export const b = 2'), 'prompt đầy đủ nằm trong workspace')
-    assert.match(JSON.parse(fs.readFileSync(h.out, 'utf8')).reviewer, /grok-4\.7 high 256k \(Cursor\)/)
+    assert.equal(JSON.parse(fs.readFileSync(h.out, 'utf8')).reviewer, 'grok-4.7-high (Cursor)')
+  })
+
+  test('grok: không đọc được danh sách model của Cursor (lỗi/rỗng) ⇒ dùng grok-4.7-high, có cảnh báo', async () => {
+    for (const cursorModels of [async () => { throw new Error('ETIMEDOUT') }, async () => '']) {
+      const h = harness({ cursorModels })
+      assert.equal(await run(h.args(makeRepo(), 'grok'), h.deps), 0, errText(h))
+      assert.equal(h.calls[0].args[h.calls[0].args.indexOf('--model') + 1], 'grok-4.7-high')
+      assert.match(errText(h), /Không đọc được danh sách model của Cursor/)
+    }
+  })
+
+  test('grok: Cursor từ chối id kèm danh sách ⇒ chọn lại từ lỗi, chạy lại đúng một lần', async () => {
+    const h = harness({
+      cursorModels: async () => 'cursor-grok-4.6-high - Grok 4.6', // danh sách cũ: chọn 4.6, Cursor từ chối
+      reply: (call) => (call.args.includes('cursor-grok-4.6-high') ? { status: 1, stdout: '', stderr: CURSOR_REJECT.replace('grok-4.7[context=256k,reasoning_effort=high,fast=false]', 'cursor-grok-4.6-high') } : {}),
+    })
+    assert.equal(await run(h.args(makeRepo(), 'grok'), h.deps), 0, errText(h))
+    assert.deepEqual(h.calls.map((c) => c.args[c.args.indexOf('--model') + 1]), ['cursor-grok-4.6-high', 'grok-4.7-high'])
+    assert.match(errText(h), /Cursor không nhận cursor-grok-4\.6-high, chạy lại với grok-4\.7-high/)
+    assert.equal(JSON.parse(fs.readFileSync(h.out, 'utf8')).reviewer, 'grok-4.7-high (Cursor)')
+  })
+
+  test('grok: lần chạy lại vẫn bị từ chối, hoặc danh sách trong lỗi chỉ có đúng id vừa dùng ⇒ không lặp, exit 1', async () => {
+    let h = harness({ reply: () => ({ status: 1, stdout: '', stderr: CURSOR_REJECT }), cursorModels: async () => 'cursor-grok-4.6-high - Grok 4.6' })
+    assert.equal(await run(h.args(makeRepo(), 'grok'), h.deps), 1)
+    assert.equal(h.calls.length, 2)
+    h = harness({ reply: () => ({ status: 1, stdout: '', stderr: CURSOR_REJECT }) })
+    assert.equal(await run(h.args(makeRepo(), 'grok'), h.deps), 1)
+    assert.equal(h.calls.length, 1, 'lỗi đề nghị đúng grok-4.7-high đang dùng ⇒ không chạy lại')
   })
 
   test('diff lớn ⇒ diff ra file trong workspace (đã lọc), prompt chỉ trỏ tới file', async () => {

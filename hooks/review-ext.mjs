@@ -1,11 +1,12 @@
-// Review code / soát plan bằng model ngoài, chỉ đọc: Grok 4.7 high 256k (Cursor CLI) · Gemini Flash (agy) · Codex (Sol, vai security/code) · Opus (agy).
+// Review code / soát plan bằng model ngoài, chỉ đọc: Grok mới nhất high (Cursor CLI) · Gemini Flash (agy) · Codex (Sol, vai security/code) · Opus (agy).
 // Dùng: node ~/.claude/hooks/review-ext.mjs --model grok|flash|codex|opus --wt <worktree> --out <file.json>
 //         [--brief review-brief.md|review-brief-security.md] [--role <vai>] [--base main] [--note "<nhánh làm gì>"] [--timeout <giây>]
 // Ghi <out> đúng schema review-schema.json (+ "reviewer"). Wrapper chỉ chạy MỘT model; thứ tự model do skill quyết.
 // Exit: 0 xong · 1 lỗi/chưa sẵn sàng/hết giờ/không ra JSON ⇒ dùng dự phòng · 3 KHÔNG GỬI vì còn secret/dữ liệu riêng (model ngoài chưa nhận gì), hoặc kết quả trả về chứa khoá (không ghi gì).
 //
 // Model: codex/opus/flash lấy từ hooks/lib/models.mjs resolve(host, vai) — codex: security-reviewer (brief bảo mật) | code-reviewer;
-// opus: plan-reviewer (agy); flash: sensitive-reviewer (agy); --role ghi đè. Grok chạy qua Cursor, không có trong kit/roles.json ⇒ giữ model cố định.
+// opus: plan-reviewer (agy); flash: sensitive-reviewer (agy); --role ghi đè. Grok chạy qua Cursor, không có trong kit/roles.json ⇒ id lấy từ
+// `cursor-agent --list-models` (bản grok mới nhất, mức high, không -fast); Cursor từ chối id kèm danh sách ⇒ chọn lại và chạy lại một lần.
 // Trước khi gọi: hooks/lib/clis.mjs check() — CLI chưa cài/chưa đăng nhập ⇒ exit 1 kèm lời của clis.
 //
 // Hợp đồng gửi sạch (AC-28), cả ba tầng đều phải qua mới gọi model:
@@ -22,7 +23,7 @@ import { dirname, join, resolve, basename, relative, isAbsolute } from "node:pat
 import { fileURLToPath } from "node:url";
 import { GROK_ENV } from "./grok.mjs";
 import { check as checkCli, classifyFailure, resolveBin } from "./lib/clis.mjs";
-import { resolve as resolveModel } from "./lib/models.mjs";
+import { resolve as resolveModel, parseAgyCatalog, pickModel } from "./lib/models.mjs";
 import { staleHint } from "./lib/updates.mjs";
 import { scanDiff, scanText, scanDir, isSensitiveFile, isPrivateData, unquoteGitPath, diffSectionPaths } from "./lib/secrets.mjs";
 
@@ -38,7 +39,7 @@ const IN_DIR = "flow-review-input"; // trong workspace tạm: prompt (grok), dif
 const EXTRA_PRIVATE = [".mcp.json", "Note/**"]; // luật kit: reviewer không được đọc (xem review-brief.md); thêm vào glob `private` của dự án
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // = mức scanDir chịu quét; file lớn hơn không quét được ⇒ không đưa vào workspace
 const MAX_OUTPUT = 64 << 20;
-const CURSOR_MODEL = "grok-4.7[context=256k,reasoning_effort=high,fast=false]";
+const CURSOR_FALLBACK = "grok-4.7-high"; // khi không đọc được `cursor-agent --list-models`
 const SAFE_ARG = /^[\w.:=/-]+$/;
 
 export function parseArgs(argv) {
@@ -263,8 +264,44 @@ export function runReviewer(file, args, { cwd, env = process.env, input, timeout
 const defaultRole = (model, brief) =>
   model === "codex" ? (/security/i.test(brief) ? "security-reviewer" : "code-reviewer") : model === "opus" ? "plan-reviewer" : "sensitive-reviewer";
 
+// Lệnh chạy cursor-agent. Windows: gọi thẳng cursor-agent.ps1 — đi qua .cmd thì prompt nhiều dòng vỡ ở hai lớp dòng lệnh.
+function cursorCmd(args) {
+  if (process.platform !== "win32") return { cmd: resolveBin("cursor-agent") ?? "cursor-agent", args };
+  const ps1 = join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "cursor-agent", "cursor-agent.ps1");
+  const root = process.env.SystemRoot ?? process.env.windir;
+  return {
+    cmd: root ? join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe") : "powershell.exe",
+    args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1, ...args],
+  };
+}
+
+// Env cho cursor-agent. Gọi từ Git Bash: có MSYSTEM ⇒ Cursor chạy hook Claude (~/.claude/settings.json) bằng bash nhưng bọc lệnh kiểu PowerShell
+// ⇒ hook lỗi cú pháp, chặn mọi lần đọc file (dính 2026-10-03). Bỏ đi để Cursor dùng PowerShell.
+function cursorEnv(env) {
+  const e = { ...env };
+  delete e.MSYSTEM; delete e.SHELL;
+  return e;
+}
+
+// Id Grok mà Cursor đang nhận, đọc từ `cursor-agent --list-models` ("grok-4.7-high - Grok 4.7  High") hoặc phần danh sách trong lỗi
+// "Available models: grok-4.7, grok-4.7-high, …". Bản mới nhất của dòng grok (kể cả tiền tố cursor-), mức `effort` (thiếu ⇒ hạ mức như models.mjs),
+// bỏ bản -fast. Không thấy ⇒ null. Dạng cũ grok-4.7[context=256k,reasoning_effort=high,fast=false] bị Cursor từ chối từ 2026-10-13.
+export function pickCursorModel(text, effort = "high") {
+  const ids = (String(text ?? "").match(/(?<![\w.-])(?:cursor-)?grok-\d[\w.-]*/g) ?? []).map((id) => id.replace(/[.-]+$/, ""));
+  const keep = [...new Set(ids)].filter((id) => !/-fast$/i.test(id));
+  return pickModel(parseAgyCatalog(keep.join("\n")), { line: "grok", effort })?.id ?? null;
+}
+
+// Danh sách bị cắt giữa chừng (hết giờ, lỗi) có thể chỉ còn bản grok cũ ⇒ không tin, ném để rơi về CURSOR_FALLBACK có cảnh báo.
+export async function listCursorModels(exec = runReviewer) {
+  const { cmd, args } = cursorCmd(["--list-models"]);
+  const r = await exec(cmd, args, { cwd: tmpdir(), env: cursorEnv(reviewerEnv(process.env, "grok")), timeoutMs: 60_000 });
+  if (r.timedOut || r.status !== 0) throw new Error(r.timedOut ? "hết giờ" : `exit ${r.status}${r.error?.code ? ` ${r.error.code}` : ""}`);
+  return r.stdout ?? "";
+}
+
 // Lệnh gọi từng model. Mọi đường dẫn đưa cho reviewer đều tương đối với workspace (cwd) — không lộ đường dẫn máy, không dẫn ra ngoài workspace.
-function buildCall(model, { ws, prompt, resolved, timeout }) {
+function buildCall(model, { ws, prompt, resolved, timeout, cursorModel }) {
   const m = resolved?.model ?? null; // null = không chọn được ⇒ để CLI dùng mặc định (không đoán id)
   if (model === "codex") {
     return {
@@ -276,19 +313,12 @@ function buildCall(model, { ws, prompt, resolved, timeout }) {
     };
   }
   if (model === "grok") {
-    // Grok 4.7 high 256k qua Cursor CLI (hạn mức gói Cursor Pro). Grok CLI của xAI (gói Grok Build miễn phí) hết lượt 2026-10-03 ⇒ bỏ.
-    // Windows: gọi thẳng cursor-agent.ps1 — đi qua .cmd thì prompt nhiều dòng vỡ ở hai lớp dòng lệnh. Prompt đầy đủ nằm trong file, chỉ truyền một câu ngắn.
-    // --mode plan = chỉ đọc. context=500k/1m bị CLI từ chối (thử 2026-10-03) — 256k là mức cao nhất tài khoản có.
-    const cursorArgs = ["-p", "--output-format", "text", "--mode", "plan", "--trust", "--model", CURSOR_MODEL, "--workspace", ws,
-      `Read the file ${IN_DIR}/prompt.txt and do exactly what it asks. Reply with the JSON only.`];
-    const label = "grok-4.7 high 256k (Cursor)";
-    if (process.platform !== "win32") return { cmd: resolveBin("cursor-agent") ?? "cursor-agent", args: cursorArgs, label };
-    const ps1 = join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "cursor-agent", "cursor-agent.ps1");
-    const root = process.env.SystemRoot ?? process.env.windir;
+    // Grok qua Cursor CLI (hạn mức gói Cursor Pro). Grok CLI của xAI (gói Grok Build miễn phí) hết lượt 2026-10-03 ⇒ bỏ.
+    // Prompt đầy đủ nằm trong file, chỉ truyền một câu ngắn. --mode plan = chỉ đọc.
     return {
-      cmd: root ? join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe") : "powershell.exe",
-      args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1, ...cursorArgs],
-      label,
+      ...cursorCmd(["-p", "--output-format", "text", "--mode", "plan", "--trust", "--model", cursorModel, "--workspace", ws,
+        `Read the file ${IN_DIR}/prompt.txt and do exactly what it asks. Reply with the JSON only.`]),
+      label: `${cursorModel} (Cursor)`,
     };
   }
   return { // flash | opus: agy; mức effort nằm trong id model
@@ -357,6 +387,14 @@ async function review(o, io, deps) {
     try { resolved = (deps.resolve ?? resolveModel)(HOST_OF[o.model], o.role ?? defaultRole(o.model, o.brief)); } catch (e) { io.err(`${o.model}: ${e.message}`); return 1; }
     for (const w of resolved.warnings ?? []) io.err(`! ${w}`);
   }
+  let cursorModel = null;
+  if (o.model === "grok") {
+    let listed = "";
+    let why = "không có dòng grok";
+    try { listed = await (deps.cursorModels ?? listCursorModels)(); } catch (e) { why = e.message; }
+    cursorModel = pickCursorModel(listed);
+    if (!cursorModel) { cursorModel = CURSOR_FALLBACK; io.err(`! Không đọc được danh sách model của Cursor (${why}), dùng ${CURSOR_FALLBACK}.`); }
+  }
   mkdirSync(dirname(out), { recursive: true });
 
   // tầng 1
@@ -415,14 +453,20 @@ async function review(o, io, deps) {
     if (o.model === "grok") writeFileSync(join(ws, IN_DIR, "prompt.txt"), prompt);
     writeFileSync(`${stem}.prompt.txt`, prompt); // bản lưu đúng cái đã gửi
 
-    const call = buildCall(o.model, { ws, prompt, resolved, timeout: o.timeout });
-    const env = { ...reviewerEnv(process.env, o.model), GIT_PAGER: "cat", PAGER: "cat" };
-    // Gọi từ Git Bash: có MSYSTEM ⇒ Cursor chạy hook Claude (~/.claude/settings.json) bằng bash nhưng bọc lệnh kiểu PowerShell
-    // ⇒ hook lỗi cú pháp, chặn mọi lần đọc file (dính 2026-10-03). Bỏ đi để Cursor dùng PowerShell.
-    if (o.model === "grok") { delete env.MSYSTEM; delete env.SHELL; }
+    let call = buildCall(o.model, { ws, prompt, resolved, timeout: o.timeout, cursorModel });
+    let env = { ...reviewerEnv(process.env, o.model), GIT_PAGER: "cat", PAGER: "cat" };
+    if (o.model === "grok") env = cursorEnv(env);
 
     const t0 = Date.now();
-    const r = await exec(call.cmd, call.args, { cwd: ws, env, input: call.input, timeoutMs: o.timeout * 1000 });
+    let r = await exec(call.cmd, call.args, { cwd: ws, env, input: call.input, timeoutMs: o.timeout * 1000 });
+    // Cursor đổi tên model phía server (dính 2026-10-13) ⇒ lỗi "Cannot use this model … Available models: …": chọn lại từ danh sách đó, chạy lại một lần.
+    const avail = o.model === "grok" && !extractReview(r.stdout ?? "") ? /Cannot use this model[\s\S]*?Available models:([\s\S]*)/i.exec(`${r.stdout ?? ""}\n${r.stderr ?? ""}`)?.[1] : null;
+    const retryModel = avail ? pickCursorModel(avail) : null;
+    if (retryModel && retryModel !== cursorModel) {
+      io.err(`! Cursor không nhận ${cursorModel}, chạy lại với ${retryModel}.`);
+      call = buildCall(o.model, { ws, prompt, resolved, timeout: o.timeout, cursorModel: retryModel });
+      r = await exec(call.cmd, call.args, { cwd: ws, env, input: call.input, timeoutMs: Math.max(1000, o.timeout * 1000 - (Date.now() - t0)) });
+    }
     const secs = Math.round((Date.now() - t0) / 1000);
     const rawText = `${r.stdout ?? ""}\n--- stderr ---\n${r.stderr ?? ""}`;
     const result = extractReview(r.stdout ?? "");
