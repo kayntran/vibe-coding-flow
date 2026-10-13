@@ -18,6 +18,7 @@ skill tự bật theo câu user nói, hook ép các cổng. Thiết kế gốc: 
 | `hooks/grok.mjs` | Gọi Grok CLI không nạp MCP/hook/skill của Claude Code và Cursor (nguyên nhân treo) |
 | `hooks/review-ext.mjs` | Gọi Grok 4.7 / Gemini 3.8 Flash review chỉ-đọc, ra JSON đúng schema (tắt cấu hình Claude/Cursor mà Grok tự nạp) |
 | `hooks/strix-scan.mjs` | Bọc Strix (pentest bằng AI): chỉ cho quét thư mục trên máy hoặc app ở localhost, tắt telemetry |
+| `hooks/mac-check.mjs` | Chạy bộ test của kit trên Mac qua ssh một lệnh, tự dọn |
 | `hooks/mcp-usage.mjs` | Ghi mỗi lần gọi MCP vào `~/.claude/logs/mcp-usage.jsonl`; `report` liệt kê MCP không dùng để tắt bớt |
 | `workers/` | Brief + JSON schema cho review (chất lượng, bảo mật) — dùng chung cho Codex, Grok, Gemini |
 | `WORKERS.md`, `WORKTREE.md` | Chỉ còn trỏ đường sang skill (dự án cũ còn nhắc tới) |
