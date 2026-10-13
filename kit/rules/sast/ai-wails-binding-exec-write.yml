@@ -4,6 +4,7 @@ severity: error
 message: "Hàm Wails đưa ra cho giao diện web lại ghi file hoặc chạy lệnh trực tiếp"
 note: |
   Mọi hàm viết hoa đầu trên struct được Wails bind đều gọi được từ JavaScript, nên mã web (kể cả mã bị chèn) ghi đè file hay chạy lệnh tuỳ ý trên máy người dùng.
+  Phủ Wails v2 (struct trong Bind, tên kết thúc App hoặc Bindings) và Wails v3 (service đăng ký bằng application.NewService, tên kết thúc Service). Struct lộ ra giao diện phải đặt tên theo đuôi đó thì luật mới thấy.
   Sửa: để hàm bind chỉ gọi lớp dịch vụ nhận tham số hẹp (mã việc, id) và tự quyết đường dẫn, lệnh; không nhận đường dẫn hay lệnh từ giao diện.
 rule:
   kind: method_declaration
@@ -23,7 +24,7 @@ rule:
           kind: call_expression
           has:
             field: function
-            regex: '^(exec.Command(Context)?|os.(WriteFile|Create|OpenFile|Remove|RemoveAll)|ioutil.WriteFile)$'
+            regex: '^(exec\.Command(Context)?|os\.(WriteFile|Create|CreateTemp|OpenFile|Remove|RemoveAll|Rename|Mkdir|MkdirAll|MkdirTemp|Chmod|Chown|Truncate|Symlink|Link|StartProcess)|ioutil\.(WriteFile|TempFile)|syscall\.(Exec|ForkExec))$'
 ignores:
   - '**/vendor/**'
   - '**/node_modules/**'

@@ -1,0 +1,48 @@
+{
+  "$comment": "Mẫu app máy tính: Wails v2 (stable; v3 còn beta) mẫu react-ts. Lõi Go theo kit/arch/go.arch.json (internal/<miền>/{domain,service,store,transport}); mẫu mới tạo CHƯA có miền Go nào (app.go chỉ có struct App rỗng; go-arch-lint tự BỎ QUA khi docs/arch.json chưa có miền, golangci-lint và ast-grep vẫn chạy); giao diện React chạy được cả trong trình duyệt (dữ liệu mẫu) để Playwright/ui-check kiểm. Mẫu Wails không có Tailwind/shadcn: CSS thường trong thư mục tính năng. Frontend của mẫu Wails dùng Vite 3 + TypeScript 4 (đời cũ: ~14 lỗ hổng, depcruise và typescript-eslint không chạy được) nên devDeps nâng lên cùng bản với mẫu web (vite, plugin-react, typescript, @types/node) và overlay thay tsconfig.json (một file, moduleResolution bundler; TS 6 từ chối cấu hình cũ) + vite.config.ts (cổng đọc từ PORT); tsconfig.node.json cũ bị gỡ. Máy kiểm flow-check: devDeps + cấu hình trong overlay/frontend (eslint.config.js, knip.jsonc, .size-limit.json). Đọc bởi hooks/lib/new-app.mjs.",
+  "type": "desktop",
+  "label": "app máy tính (Wails)",
+  "stack": "wails",
+  "port": 5173,
+  "needs": ["go", "wails", "webview2", "xcode"],
+  "generate": { "runner": "bin", "bin": "wails", "args": ["init", "-n", "{{name}}", "-t", "react-ts", "-q"] },
+  "markers": ["wails.json", "go.mod", "frontend/package.json"],
+  "pkgDir": "frontend",
+  "install": true,
+  "devDeps": [
+    { "name": "vite", "version": "vite" },
+    { "name": "@vitejs/plugin-react", "version": "pluginReact" },
+    { "name": "typescript", "version": "typescript" },
+    { "name": "@types/node", "version": "typesNode" },
+    { "name": "@playwright/test", "version": "playwright" },
+    { "name": "@axe-core/playwright", "version": "axe" },
+    { "name": "eslint", "version": "eslint" },
+    { "name": "@eslint/js", "version": "eslintJs" },
+    { "name": "typescript-eslint", "version": "tsEslint" },
+    { "name": "eslint-plugin-react-hooks", "version": "reactHooks" },
+    { "name": "globals", "version": "globals" },
+    { "name": "knip", "version": "knip" },
+    { "name": "jscpd", "version": "jscpd" },
+    { "name": "size-limit", "version": "sizeLimit" },
+    { "name": "@size-limit/file", "version": "sizeLimit" },
+    { "name": "dependency-cruiser", "version": "depcruise" }
+  ],
+  "browser": true,
+  "build": true,
+  "scripts": { "test:e2e": "playwright test" },
+  "patch": [
+    {
+      "file": "wails.json",
+      "set": { "frontend:install": "{{PM}} install", "frontend:build": "{{PM_RUN}} build", "frontend:dev:watcher": "{{PM_RUN}} dev" }
+    }
+  ],
+  "remove": [{ "path": "frontend/tsconfig.node.json", "contains": "composite" }],
+  "replace": ["app.go", "frontend/src/App.tsx", "frontend/src/style.css", "frontend/tsconfig.json", "frontend/vite.config.ts"],
+  "gitignore": [".env", ".env.*", "!.env.example", "build/bin/", "frontend/playwright-report/", "frontend/test-results/"],
+  "gitignoreRemove": ["build/", "build"],
+  "next": { "dev": "wails dev", "url": "http://localhost:34115", "open": "cửa sổ app tự mở; địa chỉ này mở được trong trình duyệt" },
+  "archProblem": "App máy tính mới tạo: màn đầu (S-01) còn trống, chưa có dữ liệu, tính năng hay miền Go nào (internal/ chưa có; thêm miền đầu tiên khi viết SPEC). Thay bằng bài toán thật của app khi viết SPEC.",
+  "archDescs": {
+    "frontend/src/features/home": "Màn đầu (S-01, giữ chỗ): chỉ hiện tên app; thay bằng màn thật khi có SPEC; KHÔNG gọi Go từ ui, KHÔNG import tính năng khác."
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "$comment": "Danh sách checker của hooks/flow-check.mjs (AC-11/43). stack: web | extension | go | wails | all. cmd = tên công cụ (mảng = ứng viên theo thứ tự; tìm trong node_modules/.bin rồi PATH) hoặc internal = checker viết sẵn trong flow-check.mjs. args: {kit} = thư mục kit. detect = khi nào áp dụng (xem hooks/lib/stack.mjs; không khớp ⇒ BỎ QUA). requires = gói npm phải có trong package.json. passOn = {exit:[mã đạt], match: regex phải thấy trong output}. install = lệnh cài chính thức (chuỗi hoặc {win32, posix}); thiếu công cụ ⇒ THIẾU, không cài ngầm. hint = lời dặn sửa khi không đạt. plan = tên hàm trong PLANNERS của flow-check.mjs quyết định lần này chạy gì (đối số tính từ docs/arch.json, git, docs/arch-baseline.json). quietSkip = không áp dụng thì không hiện dòng BỎ QUA. Test đối chiếu: hooks/flow-check.test.mjs (thiếu checker bắt buộc ⇒ đỏ).",
+  "$comment": "Danh sách checker của hooks/flow-check.mjs (AC-11/43). stack: web | extension | go | wails | all. cmd = tên công cụ (mảng = ứng viên theo thứ tự; tìm trong node_modules/.bin rồi PATH) hoặc internal = checker viết sẵn trong flow-check.mjs. args: {kit} = thư mục kit/, {hooks} = thư mục hooks/ (script kèm kit, vd ui-check.mjs). detect = khi nào áp dụng (xem hooks/lib/stack.mjs; không khớp ⇒ BỎ QUA). requires = gói npm phải có trong package.json. passOn = {exit:[mã đạt], match: regex phải thấy trong output}. install = lệnh cài chính thức (chuỗi hoặc {win32, posix}); thiếu công cụ ⇒ THIẾU, không cài ngầm. hint = lời dặn sửa khi không đạt. plan = tên hàm trong PLANNERS của flow-check.mjs quyết định lần này chạy gì (đối số tính từ docs/arch.json, git, docs/arch-baseline.json). quietSkip = không áp dụng thì không hiện dòng BỎ QUA. exclusive = checker tự bật app trên cổng cố định (axe qua webServer của Playwright, ui-rules bật dev server): chạy NỐI TIẾP từng cái sau nhóm song song, kẻo hai cái tranh cùng cổng và tắt server của nhau. Test đối chiếu: hooks/flow-check.test.mjs (thiếu checker bắt buộc ⇒ đỏ).",
   "version": 1,
   "checkers": [
     {
@@ -94,7 +94,8 @@
       "stack": "web",
       "title": "Tìm code trùng lặp (jscpd)",
       "cmd": "jscpd",
-      "args": ["--threshold", "5", "--gitignore", "."],
+      "plan": "jscpd",
+      "args": ["--threshold", "5", "."],
       "required": true,
       "timeoutMs": 180000,
       "install": "npm i -D jscpd",
@@ -109,7 +110,7 @@
       "args": [],
       "required": true,
       "timeoutMs": 300000,
-      "install": "npm i -D size-limit @size-limit/preset-app",
+      "install": "npm i -D size-limit @size-limit/file",
       "docs": "https://github.com/ai/size-limit",
       "hint": "Bundle vượt ngưỡng: bỏ thư viện nặng, tách nhỏ hoặc nạp trễ; nếu báo thiếu cấu hình thì thêm khoá size-limit vào package.json (đặt ngưỡng sau khi build)."
     },
@@ -119,6 +120,7 @@
       "title": "Trợ năng (axe qua Playwright)",
       "cmd": "playwright",
       "args": ["test", "--grep=a11y"],
+      "exclusive": true,
       "detect": { "deps": ["@playwright/test", "playwright"] },
       "skipWhy": "dự án chưa dùng Playwright",
       "requires": { "pkgs": ["@axe-core/playwright"], "install": "npm i -D @axe-core/playwright" },
@@ -136,7 +138,7 @@
       "args": ["scan", "source", "-r", "."],
       "required": true,
       "timeoutMs": 180000,
-      "install": "go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest",
+      "install": { "win32": "go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest", "posix": "go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest", "darwin": "brew install osv-scanner" },
       "docs": "https://google.github.io/osv-scanner/installation/",
       "hint": "Nâng thư viện có lỗ hổng lên bản đã vá; nếu báo không thấy gói nào thì dự án thiếu file khoá (package-lock.json, pnpm-lock.yaml hoặc yarn.lock)."
     },
@@ -147,6 +149,32 @@
       "internal": "secret-scan-build",
       "required": true,
       "hint": "Bản build đang chứa khoá bí mật: bỏ khoá khỏi code chạy ở trình duyệt, đổi (xoay) khoá đã lộ, build lại rồi kiểm lại."
+    },
+    {
+      "id": "web-headers",
+      "stack": "web",
+      "title": "Header bảo mật của web (CSP, nosniff, chống nhúng)",
+      "internal": "web-headers",
+      "detect": { "any": [{ "files": ["index.html"] }, { "deps": ["vite"] }] },
+      "quietSkip": true,
+      "required": true,
+      "hint": "Web phải có file cấu hình header (public/_headers, vercel.json, netlify.toml hoặc cấu hình nginx/Caddy) gồm Content-Security-Policy (không 'unsafe-eval', không script-src *), X-Content-Type-Options: nosniff, Referrer-Policy và chống nhúng (frame-ancestors hoặc X-Frame-Options). Thẻ meta CSP trong index.html không thay được."
+    },
+    {
+      "id": "ui-rules",
+      "stack": "web",
+      "title": "Luật giao diện (nút chính, nhãn, hộp thoại)",
+      "cmd": "node",
+      "plan": "ui-check",
+      "args": ["{hooks}/ui-check.mjs", "--dir", "."],
+      "exclusive": true,
+      "detect": { "files": [".claude/ui.json"] },
+      "quietSkip": true,
+      "required": true,
+      "timeoutMs": 300000,
+      "install": "Cài Node từ https://nodejs.org",
+      "docs": "https://nodejs.org/en/download",
+      "hint": "Sửa từng lỗi giao diện ở trên theo dòng \"Sửa:\" ngay dưới nó (mỗi màn một nút chính, nút chỉ có hình thì thêm chữ hoặc tên, nhãn nêu rõ việc thay cho OK/Có/Không, không bật hộp thoại lúc mở màn). Lỗi cũ đã chốt trong docs/ui-baseline.json không tính; đừng sửa tay mốc hay .claude/ui.json để lách, nới luật phải hỏi người dùng."
     },
     {
       "id": "go-vet",
@@ -203,12 +231,13 @@
       "stack": "extension",
       "title": "Kiểm extension (web-ext lint)",
       "cmd": "web-ext",
-      "args": ["lint"],
+      "plan": "web-ext",
+      "args": ["lint", "--output", "json"],
       "required": true,
       "timeoutMs": 120000,
       "install": "npm i -g web-ext",
       "docs": "https://extensionworkshop.com/documentation/develop/web-ext-command-reference/",
-      "hint": "Sửa các lỗi web-ext lint báo trong manifest và mã extension; bộ kiểm thiên về Firefox nên cảnh báo riêng của Chrome có thể bỏ qua, lỗi (error) thì phải sửa."
+      "hint": "Sửa các lỗi web-ext lint báo trong manifest và mã extension (dự án WXT được kiểm trên bản build trong dist/ hoặc .output/chrome-mv3, nên build trước; hai lỗi chỉ của Firefox BACKGROUND_SERVICE_WORKER_NOFALLBACK và ADDON_ID_REQUIRED được bỏ khi manifest không khai browser_specific_settings.gecko); bộ kiểm thiên về Firefox nên cảnh báo riêng của Chrome có thể bỏ qua, lỗi (error) thì phải sửa."
     },
     {
       "id": "mv3-manifest",
@@ -216,7 +245,7 @@
       "title": "Chuẩn MV3 của kit (manifest, quyền, CSP)",
       "internal": "mv3-manifest",
       "required": true,
-      "hint": "Dùng manifest_version 3, chỉ xin quyền thật cần (không <all_urls>), bỏ unsafe-eval, không nạp mã từ máy chủ ngoài: gói mọi mã vào extension."
+      "hint": "Dùng manifest_version 3, chỉ xin quyền thật cần (không <all_urls> hay host_permissions phủ mọi trang: dùng activeTab hoặc optional_host_permissions), bỏ unsafe-eval, không nạp mã từ máy chủ ngoài: gói mọi mã vào extension."
     },
     {
       "id": "sast-ast-grep",
@@ -230,6 +259,15 @@
       "install": "npm i -g @ast-grep/cli",
       "docs": "https://ast-grep.github.io/guide/quick-start.html#installation",
       "hint": "Sửa chỗ luật SAST báo (mỗi luật có lời dặn sửa ngay dưới dòng báo); đừng tắt luật."
+    },
+    {
+      "id": "spec-codes",
+      "stack": "all",
+      "title": "SPEC đang làm khớp app và test (mã S-nn, P-nn)",
+      "internal": "spec-codes",
+      "quietSkip": true,
+      "required": true,
+      "hint": "Sửa SPEC đang làm (docs/specs/<tên>/SPEC.md) hoặc app/test cho khớp nhau: mỗi mã S-nn cần data-s=\"S-nn\" trong app và được nhắc trong test e2e; mỗi mã P-nn cần test chặn quyền ghi mã đó trong tên test; SPEC thiếu mục hoặc thiếu trạng thái thì bổ sung theo mẫu skill flow-spec. Đừng xoá mã khỏi SPEC chỉ để hết báo."
     },
     {
       "id": "arch-sync",

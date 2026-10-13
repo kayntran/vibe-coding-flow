@@ -29,7 +29,22 @@ Mọi tài liệu của một tính năng nằm trong `docs/specs/<YYYY-MM-DD>-<
      Lần sau đọc thẻ, chỉ đọc lại repo khi thẻ thiếu hoặc repo đổi nhiều.
    - Không viết lại bánh xe: có sẵn trong dự án → thư viện chuẩn → thư viện/repo licence thoáng → tự viết (ghi lý do).
 2. Nhận research ⇒ kể user những gì đáng giá (repo dùng lại được, ý tưởng hay hơn) trước khi chốt spec.
-3. Viết `docs/specs/<YYYY-MM-DD>-<slug>/SPEC.md`:
+3. Viết `docs/specs/<YYYY-MM-DD>-<slug>/SPEC.md` — phần user duyệt đứng đầu, đời thường, kỹ thuật tách sau (máy kiểm
+   bằng `node ~/.claude/hooks/spec-check.mjs spec <SPEC.md>`, định dạng ADR-0006):
+   ```
+   ## Bạn duyệt
+   ### Ai dùng
+   ### Các màn hình            ← mỗi màn: #### <tên màn> + bảng | mã | khi | thấy gì | làm được gì |, mã S-nn duy nhất toàn dự án — tiếp số sau mã lớn nhất trong docs/specs,
+                               ← đủ trạng thái có dữ liệu · trống · đang tải · lỗi ("Không tải dữ liệu" ⇒ chỉ cần có dữ liệu)
+   ### Làm được gì
+   ### Để sau
+   ### Phí phát sinh
+   ### Ai thấy/sửa được dữ liệu gì   ← - P-01: <ai> <thấy|sửa|xoá> <gì>  · hoặc "Không áp dụng — <lý do>" (P-nn cũng duy nhất toàn dự án — tiếp số sau mã lớn nhất trong docs/specs)
+   ## Kỹ thuật
+   ```
+   App có tài khoản/dữ liệu mà chưa chốt chỗ để ⇒ hỏi MỘT câu đời thường "dữ liệu để đâu" [d8dk] (không mặc định):
+   gợi ý theo nhu cầu từ `~/.claude/skills/flow-new-app/recipes/` (Supabase · Cloudflare D1 · Postgres trên VPS · dịch
+   vụ user đã có). Mỗi `P-nn` thành test ở lớp chặn quyền thật + bằng chứng "đỏ khi tắt" (skill `flow-qa`).
    - Mục tiêu (1–3 câu), người dùng, user story.
    - Acceptance criteria dạng `KHI <tình huống> THÌ HỆ THỐNG PHẢI <hành vi>` — mỗi dòng phải dịch thẳng thành test.
    - Ngoài phạm vi. Yêu cầu phi chức năng (hiệu năng, bảo mật, offline, i18n…) chỉ khi có thật.
@@ -47,7 +62,9 @@ Mọi tài liệu của một tính năng nằm trong `docs/specs/<YYYY-MM-DD>-<
 7. **Cổng giao diện** (tính năng có màn mới / làm lại giao diện), sau khi SPEC được duyệt, trước pha 2:
    - Trong worktree, dựng ~5 bản demo theo các hướng bố cục/phong cách KHÁC NHAU, ngay trong app của dự án (webapp hoặc
      desktop app chạy local, dùng chính stack + thành phần của dự án, dữ liệu mẫu tiếng Việt). Không dùng widget/artifact
-     hay file HTML rời. Dự án chưa có app ⇒ dựng khung app trước (task đầu của plan) rồi mới demo.
+     hay file HTML rời. Dự án chưa có app ⇒ dựng khung app trước (skill `flow-new-app`) rồi mới demo.
+   - Mỗi màn demo có đủ trạng thái trong bảng S-nn của SPEC (bấm thử được: trống, đang tải, lỗi) và gắn `data-s="S-nn"`
+     vào phần tử gốc của từng trạng thái; giữ nguyên mã khi làm thật — máy (`spec-check codes`) đối chiếu SPEC ↔ app ↔ test.
    - Thêm thanh chuyển nhỏ nổi trên màn (Bản 1…5, phím ←/→) để bấm qua lại; chỉ bật khi chạy dev (vd `import.meta.env.DEV`,
      cờ build dev) — không bao giờ có trong bản phát hành.
    - Chạy app (`node ~/.claude/hooks/wt-env.mjs alloc <worktree>` lấy port), mở cho user xem, hỏi bằng AskUserQuestion:

@@ -1,0 +1,6 @@
+{
+  "start": "{{PM_DEV}}",
+  "url": "http://localhost:{PORT}",
+  "routes": ["/src/entrypoints/popup/index.html"],
+  "states": [{ "route": "/src/entrypoints/popup/index.html", "s": "S-01" }]
+}

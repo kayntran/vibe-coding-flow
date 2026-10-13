@@ -8,7 +8,8 @@
 //          subagent-stop (SubagentStop: receipt + audit phạm vi làn)
 //   CLI  : stamp review <file.json> · stamp qa <file.md> · stamp test -- <lệnh…> · status      (chạy trong worktree)
 // Spec: ~/.claude/plans/flow-v2-hooks-spec.md, flow-v3-hooks-spec.md (Làn A: quét secret), flow-v5-hooks-spec.md (Làn A: dấu test, lệnh phá huỷ, ask, audit);
-//       flow v7: docs/specs/2026-10-11-flow-v7-nocode (làn D: AC-09 audit không im lặng, AC-24 lời chặn đời thường, AC-38 thư viện mới).
+//       flow v7: docs/specs/2026-10-11-flow-v7-nocode (làn D: AC-09 audit không im lặng, AC-24 lời chặn đời thường, AC-38 thư viện mới);
+//       đợt 3: docs/specs/2026-10-12-flow-v7-dot3 PLAN mục 5 (dấu QA đòi mỗi mã P-nn của SPEC đang mở một dòng "đỏ khi tắt", AC-20; file luật một nguồn lib/rule-files.mjs).
 // Nối các lib: lib/host.mjs (nhận diện app + chuẩn hoá payload) · lib/secrets.mjs (mẫu secret) · lib/models.mjs roleSet (vai từ kit/roles.json)
 //   · lib/deps.mjs (thư viện mới khi commit) · lib/so-chot.mjs openProgress (sổ tiến độ của nhánh).
 // Docs field input: https://code.claude.com/docs/en/hooks
@@ -35,6 +36,12 @@ const NA_RE = /^\uFEFF?\s*N\/A/i
 // Sau l\u1EDDi g\u1EADt ch\u1EC9 \u0111\u01B0\u1EE3c h\u1EBFt d\u00F2ng ho\u1EB7c k\u00FD t\u1EF1 kh\u00F4ng ph\u1EA3i ch\u1EEF (vd "c\u00F3 (ng\u00E0y, xem g\u00EC)"); "c\u00F3 th\u1EC3\u2026", "ok kh\u00F4ng" kh\u00F4ng t\u00EDnh. So tr\u00EAn b\u1EA3n NFC.
 const UI_OK_RE = /^[ \t>*_-]*User duy\u1EC7t giao di\u1EC7n[ \t*_]*[:\uFF1A][ \t*_]*(c\u00F3|r\u1ED3i|ok|\u0111\u1ED3ng \u00FD)(?![ \t]*[\p{L}\p{N}])/imu
 const uiApproved = (text) => UI_OK_RE.test(String(text).normalize('NFC'))
+// SPEC đang mở của nhánh có mã quyền P-nn (mục "Ai thấy/sửa được dữ liệu gì") ⇒ báo cáo QA phải có MỖI mã một dòng bằng chứng
+// `P-01: đỏ khi tắt: có — <file test>` (test chặn quyền đỏ khi tắt chặn quyền). Như UI_OK_RE: đầu dòng, bỏ dấu markdown bao quanh, "có" không dính chữ
+// khác (loại "có thể…"), so trên bản NFC; thêm: sau "có" phải có gạch ngang rồi một chữ (tên file test) — dòng cụt không tính. Mã là P-<số> (từ parseSpec) nên ghép vào regex an toàn.
+const pEvidenceRe = (code) => new RegExp(`^[ \\t>*_-]*${code}[ \\t*_]*[:\\uFF1A][ \\t*_]*đỏ[ \\t]+khi[ \\t]+tắt[ \\t*_]*[:\\uFF1A][ \\t*_]*có(?![\\p{L}\\p{N}])[ \\t*_]*[—–-]+[ \\t]*[^\\s—–-]`, 'imu')
+const pEvidenceMissing = (text, codes) => { const t = String(text).normalize('NFC'); return codes.filter((c) => !pEvidenceRe(c).test(t)) }
+const P_LINE_FORMAT = 'P-nn: đỏ khi tắt: có — <file test>'
 
 function log(msg) {
   try {
@@ -148,23 +155,83 @@ function testExemption(info, base, head) {
   return files.length > 0 && files.every((f) => DOC_FILE.test(f) || f.startsWith('docs/')) ? 'diff chỉ có tài liệu' : null
 }
 
+// Nhánh mà `head` đại diện (để tìm SPEC đang mở của nó): 'HEAD' ⇒ nhánh đang đứng; tên nhánh ⇒ chính nó; commit/biểu thức khác ⇒ các nhánh đang trỏ đúng commit đó.
+function branchesOfHead(info, head) {
+  if (head === 'HEAD') return info.branch && info.branch !== 'HEAD' ? [info.branch] : []
+  if (git(info.dir, ['show-ref', '--verify', '--quiet', `refs/heads/${head}`]) !== null) return [head]
+  return (git(info.dir, ['for-each-ref', '--points-at', head, '--format=%(refname:short)', 'refs/heads']) ?? '').split(/\r?\n/).filter(Boolean)
+}
+
+// Sổ tiến độ ĐANG MỞ ghi đúng nhánh `branch` (openProgress của lib so-chot). Worktree không có sổ (docs ngoài git [o3e4]) ⇒ tìm ở thư mục chính, như planFromMain.
+async function openProgressOf(info, branch) {
+  const { openProgress } = await import('./lib/so-chot.mjs')
+  return openProgress(info.toplevel, branch) ??
+    (info.linked && path.basename(info.commonDir) === '.git' ? openProgress(path.dirname(info.commonDir), branch) : null)
+}
+
+const SPEC_MAX_BYTES = 2 * 1024 * 1024 // cùng trần với lib/spec-codes (MAX_FILE)
+
+// Các mã quyền P-nn (đã sắp) trong SPEC.md nằm cạnh sổ tiến độ đang mở của nhánh `head` (parseSpec của lib/spec-codes) → { codes, unreadable }.
+// Không có SPEC mở / không có SPEC cạnh sổ / không có P-nn ⇒ codes rỗng. Fail-closed: SPEC đang mở mà quá 2 MB, đọc/phân tích lỗi, hay lỗi khi tìm sổ tiến độ
+// ⇒ vào `unreadable` (tên SPEC) để dấu QA không được coi là đủ — không được coi như "không có mã quyền" (cổng mở).
+async function requiredPCodes(info, base, head) {
+  const out = { codes: [], unreadable: [] }
+  const branches = branchesOfHead(info, head).filter((b) => b !== base)
+  if (branches.length === 0) return out
+  let parseSpec
+  try {
+    ;({ parseSpec } = await import('./lib/spec-codes.mjs'))
+  } catch (e) {
+    log(`requiredPCodes ${head}: ${e?.message ?? e}`)
+    return { codes: [], unreadable: ['bộ đọc SPEC của kit'] }
+  }
+  const codes = new Set()
+  for (const b of branches) {
+    let label = `SPEC của nhánh ${b}`
+    try {
+      const hit = await openProgressOf(info, b)
+      if (!hit) continue
+      const spec = path.join(path.dirname(hit.file), 'SPEC.md')
+      label = hit.rel ? hit.rel.replace(/progress\.md$/, 'SPEC.md') : spec
+      let size
+      try { size = fs.statSync(spec).size } catch (e) { if (e?.code === 'ENOENT') continue; throw e } // không có SPEC cạnh sổ (sổ kiểu cũ) ⇒ không đòi
+      if (size > SPEC_MAX_BYTES) throw new Error(`SPEC ${size} byte, quá ${SPEC_MAX_BYTES}`)
+      for (const p of parseSpec(fs.readFileSync(spec, 'utf8')).pCodes) codes.add(p.code)
+    } catch (e) {
+      log(`requiredPCodes ${head} (${b}): ${e?.message ?? e}`)
+      out.unreadable.push(label)
+    }
+  }
+  out.codes = [...codes].sort()
+  return out
+}
+
+// Lời đời thường khi SPEC đang mở không đọc được (dùng cho stamp qa, cổng gộp, Stop, status).
+const unreadableNote = (list) => `không đọc được SPEC để kiểm mã quyền (${list.join(', ')}): kiểm file SPEC.md còn đó, mở được và nhỏ hơn 2 MB`
+
 // Trạng thái dấu của diff base...head. null = không có diff (không gate). Ném lỗi nếu không đọc nổi dấu.
-function gateState(info, base, head) {
+// pReq = { codes, unreadable } của requiredPCodes: dấu QA thiếu dòng bằng chứng của mã nào ⇒ coi như chưa có qa, pMissing nêu mã đó;
+// SPEC đang mở không đọc được ⇒ cũng coi như chưa có qa, pUnreadable nêu SPEC nào.
+function gateState(info, base, head, pReq = { codes: [], unreadable: [] }) {
   const pid = patchId(info.dir, base, head)
   if (!pid) return null
   const ui = uiTouched(info, base, head)
   const hasReview = readMark(path.join(info.gatesDir, `review-${pid}.json`)) !== null
   const qa = readMark(path.join(info.gatesDir, `qa-${pid}.md`))
   const naOnUi = qa !== null && ui && NA_RE.test(qa)
-  const hasQa = qa !== null && !naOnUi && (!ui || uiApproved(qa)) // diff có UI ⇒ dấu QA phải ghi user đã duyệt giao diện
+  const pMissing = qa === null ? [] : pEvidenceMissing(qa, pReq.codes)
+  const pUnreadable = pReq.unreadable
+  const hasQa = qa !== null && !naOnUi && (!ui || uiApproved(qa)) && pMissing.length === 0 && pUnreadable.length === 0 // diff có UI ⇒ dấu QA phải ghi user đã duyệt giao diện
   const testExempt = testExemption(info, base, head)
   const hasTest = readMark(path.join(info.gatesDir, `test-${pid}.json`)) !== null
   const missing = []
   if (!hasReview) missing.push('review')
   if (!hasQa) missing.push('qa')
   if (testExempt === null && !hasTest) missing.push('test')
-  return { pid, ui, hasReview, hasQa, naOnUi, testExempt, hasTest, missing }
+  return { pid, ui, hasReview, hasQa, naOnUi, pMissing, pUnreadable, testExempt, hasTest, missing }
 }
+
+const gateStateOf = async (info, base, head) => gateState(info, base, head, await requiredPCodes(info, base, head))
 
 // ---------- hook handlers: trả object để in, hoặc null = cho qua ----------
 
@@ -306,9 +373,9 @@ function parseGitMerge(g) {
 }
 
 // gateState cho hook: không đọc nổi dấu (lỗi khác ENOENT) thì ghi log và coi như không gate (cho qua).
-function tryGateState(info, base, head) {
+async function tryGateState(info, base, head) {
   try {
-    return gateState(info, base, head)
+    return await gateStateOf(info, base, head)
   } catch (e) {
     log(`gateState ${head}: ${e?.stack ?? e}`)
     return null
@@ -667,16 +734,16 @@ function gateDestructive(g) {
 
 // ---------- chống lách ở cổng gộp: file luật, dòng tắt luật, chép repo "chỉ học" ([j21n], AC-45, AC-37) ----------
 
-// File luật = isRuleFile của lib/arch.mjs (một nguồn) + kit/rules/** + kit/checkers.json (bảng checker của kit) + .claude/flow.json
-// (miễn test, uiPattern, trustedDepSources, prodRefs: sửa nó là đổi cổng gộp/thư viện/khoá thật). Nhãn đời thường cho từng loại.
-const KIT_RULES = /^kit\/rules\//
-const GATE_CONFIG = /^(kit\/checkers\.json|\.claude\/flow\.json)$/
+// File luật = isRuleFile của lib/rule-files.mjs (MỘT nguồn, dùng chung với luu.mjs quay): luật kiến trúc/lint của lib/arch.mjs + kit/rules/** + kit/checkers.json (bảng checker của kit)
+// + .claude/flow.json (miễn test, uiPattern, trustedDepSources, prodRefs: sửa nó là đổi cổng gộp/thư viện/khoá thật) + .claude/ui.json, docs/ui-baseline.json, .claude/luu.json.
+// Nhãn đời thường cho từng loại.
 const RULE_LABELS = [
   [/^\.claude\/flow\.json$/, 'cấu hình cổng của dự án'], [/^kit\/checkers\.json$/, 'danh sách checker của kit'],
+  [/^\.claude\/ui\.json$/, 'luật kiểm giao diện'], [/^docs\/ui-baseline\.json$/, 'danh sách lỗi giao diện cũ được bỏ qua'], [/^\.claude\/luu\.json$/, 'cấu hình điểm lưu (đường dẫn dữ liệu)'],
   [/^docs\/arch\.json$/, 'luật kiến trúc'], [/^docs\/arch-baseline\.json$/, 'danh sách vi phạm cũ được bỏ qua'],
   [/(^|\/)\.dependency-cruiser/, 'luật import giữa các module'], [/(^|\/)\.go-arch-lint/, 'luật kiến trúc của Go'],
   [/(^|\/)\.golangci\./, 'luật kiểm code Go'], [/(^|\/)(eslint\.config\.|\.eslintrc|eslint-suppressions)/, 'luật ESLint'],
-  [/(^|\/)biome\.jsonc?$/, 'luật Biome'], [/(^|\/)sgconfig\.ya?ml$/, 'luật ast-grep'], [KIT_RULES, 'luật của kit'],
+  [/(^|\/)biome\.jsonc?$/, 'luật Biome'], [/(^|\/)sgconfig\.ya?ml$/, 'luật ast-grep'], [/^kit\/rules\//, 'luật của kit'],
 ]
 const CHANGE_VERBS = { A: 'thêm', M: 'sửa', D: 'xoá', T: 'đổi kiểu' }
 const LIMIT_WORDS = { fileLines: 'cỡ file', fnLines: 'cỡ hàm', complexity: 'độ phức tạp' }
@@ -785,7 +852,7 @@ async function mergeGuards(info, base, targets, host, userCmd) {
   const loosen = [] // việc nới luật, mỗi mục một câu đời thường
   const multi = targets.length > 1
   const safeName = (t) => (SAFE_REF.test(t) ? t : '(tên có ký tự lạ)')
-  const { isRuleFile } = await import('./lib/arch.mjs')
+  const { isRuleFile } = await import('./lib/rule-files.mjs')
   for (const target of targets) {
     const at = multi ? ` (nhánh ${safeName(target)})` : ''
     const sha = revOf(info, target)
@@ -794,7 +861,7 @@ async function mergeGuards(info, base, targets, host, userCmd) {
     if (!diff) { stops.push({ kind: 'unknown', msg: `không tính được thay đổi ${base}...${showName(target)} (git diff lỗi, quá lớn, hoặc nhánh không chung lịch sử với ${base})` }); continue }
     const mergeBase = (git(info.dir, ['merge-base', base, sha]) ?? '').trim()
     for (const { st, file } of diff.changes) {
-      if (!isRuleFile(file) && !KIT_RULES.test(file) && !GATE_CONFIG.test(file)) continue
+      if (!isRuleFile(file)) continue
       const label = RULE_LABELS.find(([re]) => re.test(file))?.[1] ?? 'luật'
       const limits = st === 'M' && file === 'docs/arch.json' && mergeBase ? limitChanges(info.dir, mergeBase, sha) : []
       loosen.push(`${CHANGE_VERBS[st] ?? 'đổi'} file ${label} (${file})${limits.length ? `: ${limits.join('; ')}` : ''}${at}`)
@@ -845,8 +912,7 @@ async function mergeGuards(info, base, targets, host, userCmd) {
 // Cổng gộp cho một danh sách đích (nhánh/commit) sắp vào nhánh chính `base`: đủ dấu review/qa/test, rồi chống lách (mergeGuards).
 // Dùng chung cho `git merge` và mọi đường khác đưa commit vào nhánh chính (entrants).
 async function gateTargets(info, base, targets, host, userCmd) {
-  const lacking = targets
-    .map((target) => ({ target, st: tryGateState(info, base, target) }))
+  const lacking = (await Promise.all(targets.map(async (target) => ({ target, st: await tryGateState(info, base, target) }))))
     .filter(({ st }) => st && st.missing.length > 0)
   if (lacking.length === 0) {
     // Mọi dấu đủ: xét tiếp chống lách. Lỗi bất ngờ ⇒ chặn (cổng này là chỗ AI có thể lách luật, không cho qua âm thầm).
@@ -860,7 +926,9 @@ async function gateTargets(info, base, targets, host, userCmd) {
     }
   }
   const detail = lacking
-    .map(({ target, st }) => `${target}: thiếu ${st.missing.join(', ')}` + (st.naOnUi ? ' (diff có file UI nhưng qa ghi N/A)' : '') + ` (patch-id=${st.pid})`)
+    .map(({ target, st }) => `${target}: thiếu ${st.missing.join(', ')}` + (st.naOnUi ? ' (diff có file UI nhưng qa ghi N/A)' : '') +
+      (st.pMissing.length > 0 ? ` (báo cáo QA chưa có dòng "${P_LINE_FORMAT}" cho ${st.pMissing.join(', ')}: mỗi mã quyền của SPEC cần test chặn quyền đỏ khi tắt chặn quyền)` : '') +
+      (st.pUnreadable.length > 0 ? ` (${unreadableNote(st.pUnreadable)})` : '') + ` (patch-id=${st.pid})`)
     .join('; ')
   const kinds = new Set(lacking.flatMap(({ st }) => st.missing))
   const how = []
@@ -1460,10 +1528,7 @@ function hasOpenLane(text) {
 async function lanesStillOpen(info) {
   if (!info.branch || info.branch === 'HEAD') return false
   try {
-    const { openProgress } = await import('./lib/so-chot.mjs')
-    // worktree không có sổ (docs ngoài git [o3e4]) ⇒ tìm ở thư mục chính, như planFromMain
-    const hit = openProgress(info.toplevel, info.branch) ??
-      (info.linked && path.basename(info.commonDir) === '.git' ? openProgress(path.dirname(info.commonDir), info.branch) : null)
+    const hit = await openProgressOf(info, info.branch)
     if (!hit || fs.statSync(hit.file).size > 1024 * 1024) return false
     return hasOpenLane(fs.readFileSync(hit.file, 'utf8'))
   } catch (e) {
@@ -1480,7 +1545,7 @@ async function hookStop(input) {
   if (!info.branch || info.branch === base) return null
   const status = git(info.dir, ['status', '--porcelain'])
   if (status === null || status.trim() !== '') return null
-  const st = tryGateState(info, base, 'HEAD')
+  const st = await tryGateState(info, base, 'HEAD')
   if (!st || st.missing.length === 0) return null
   if (await lanesStillOpen(info)) return null // đang thi công dở (còn làn "- [ ]"): chưa tới lúc đòi dấu review/qa/test
   const nudged = path.join(info.gatesDir, `nudged-${st.pid}`)
@@ -1491,6 +1556,8 @@ async function hookStop(input) {
     decision: 'block',
     reason: 'Việc đã lưu xong nhưng chưa qua các bước kiểm tra cuối nên AI sẽ chạy nốt chúng trước khi báo bạn. ' +
       `${info.branch} đã commit xong nhưng thiếu: ${st.missing.join(', ')}. Chạy skill flow-qa / flow-review trước khi báo user.` +
+      (st.pMissing.length > 0 ? ` Báo cáo QA còn thiếu dòng "${P_LINE_FORMAT}" cho ${st.pMissing.join(', ')}.` : '') +
+      (st.pUnreadable.length > 0 ? ` Chưa đóng dấu QA được vì ${unreadableNote(st.pUnreadable)}.` : '') +
       (st.missing.includes('test') ? ' Dấu test: node ~/.claude/hooks/flow-gate.mjs stamp test -- <lệnh test đủ bộ>.' : ''),
   }
 }
@@ -1684,7 +1751,7 @@ async function cliStampTest(tokens) {
   console.log(pid)
 }
 
-function cliStamp(kind, file) {
+async function cliStamp(kind, file) {
   if ((kind !== 'review' && kind !== 'qa') || !file) return fail('Dùng: stamp review <file.json> | stamp qa <file.md> | stamp test -- <lệnh>')
   const { info, base, pid, err } = cliContext()
   if (err) return fail(err)
@@ -1703,22 +1770,36 @@ function cliStamp(kind, file) {
       return fail(`${file} thiếu dòng "User duyệt giao diện: có". Diff có file UI ⇒ trước khi đóng dấu QA, mở app/ảnh chụp cho user xem và hỏi ` +
         '"giao diện đã ổn chưa?" (AskUserQuestion); user gật thì ghi dòng đó vào báo cáo, chưa ưng thì sửa rồi hỏi lại.')
     }
+    // SPEC đang mở của nhánh có mã quyền P-nn ⇒ mỗi mã một dòng bằng chứng (PLAN đợt 3 mục 5)
+    const { codes: pReq, unreadable } = await requiredPCodes(info, base, 'HEAD')
+    if (unreadable.length > 0) {
+      return fail('Chưa đóng dấu QA được vì không đọc được SPEC để kiểm mã quyền nên AI sẽ dừng ở bước này và báo bạn, không đóng dấu khi chưa kiểm được. ' +
+        `SPEC không đọc được: ${unreadable.join(', ')}. Kiểm file SPEC.md còn đó, mở được và nhỏ hơn 2 MB, sửa xong thì đóng dấu lại.`)
+    }
+    const pMissing = pEvidenceMissing(text, pReq)
+    if (pMissing.length > 0) {
+      return fail('Chưa đóng dấu QA được vì báo cáo chưa chứng minh mỗi quy tắc về ai được xem hay sửa dữ liệu nào của SPEC đều có test bắt lỗi; ' +
+        'AI sẽ chạy lại các test đó với phần chặn quyền tắt rồi ghi bằng chứng cho từng mã. ' +
+        `SPEC đang làm có ${pReq.length} mã quyền (${pReq.join(', ')}), ${file} còn thiếu dòng cho: ${pMissing.join(', ')}. ` +
+        `Mỗi mã thiếu: tắt phần chặn quyền của mã đó trong worktree (không commit), chạy test của mã, thấy test ĐỎ, rồi ghi một dòng "${P_LINE_FORMAT}" ` +
+        `(vd "${pMissing[0]}: đỏ khi tắt: có — tests/…") vào báo cáo; bật lại chặn quyền rồi đóng dấu lại.`)
+    }
   }
   fs.mkdirSync(info.gatesDir, { recursive: true })
   fs.copyFileSync(path.resolve(file), path.join(info.gatesDir, kind === 'review' ? `review-${pid}.json` : `qa-${pid}.md`))
   console.log(pid)
 }
 
-function cliStatus() {
+async function cliStatus() {
   const { info, base, pid, err } = cliContext()
   if (err) return fail(err)
   let st = null
-  try { st = pid ? gateState(info, base, 'HEAD') : null } catch (e) { return fail(`Không đọc được dấu: ${e.message}`) }
+  try { st = pid ? await gateStateOf(info, base, 'HEAD') : null } catch (e) { return fail(`Không đọc được dấu: ${e.message}`) }
   console.log(`branch: ${info.branch ?? '?'} (base ${base}, ${info.linked ? 'worktree' : 'thư mục chính'})`)
   console.log(`pid: ${pid ?? '(diff rỗng)'}`)
   console.log(`uiTouched: ${st ? st.ui : false}`)
   console.log(`review: ${st?.hasReview ? 'có' : 'không'}`)
-  console.log(`qa: ${st?.hasQa ? 'có' : st?.naOnUi ? 'không (N/A nhưng diff có UI)' : 'không'}`)
+  console.log(`qa: ${st?.hasQa ? 'có' : st?.naOnUi ? 'không (N/A nhưng diff có UI)' : st?.pUnreadable?.length ? `không (${unreadableNote(st.pUnreadable)})` : st?.pMissing?.length ? `không (thiếu dòng "${P_LINE_FORMAT}" cho ${st.pMissing.join(', ')})` : 'không'}`)
   console.log(`test: ${st?.testExempt ? `không đòi (${st.testExempt})` : st?.hasTest ? 'có' : 'không'}`)
 }
 
@@ -1737,9 +1818,9 @@ if (HOOKS[mode]) {
 } else if (mode === 'stamp' && arg1 === 'test') {
   await cliStampTest(process.argv.slice(process.argv[4] === '--' ? 5 : 4))
 } else if (mode === 'stamp') {
-  cliStamp(arg1, arg2)
+  await cliStamp(arg1, arg2)
 } else if (mode === 'status') {
-  cliStatus()
+  await cliStatus()
 } else {
   fail('Dùng: flow-gate.mjs edit|bash|stop|subagent-stop (hook) · stamp review <file.json> · stamp qa <file.md> · stamp test -- <lệnh> · status')
 }

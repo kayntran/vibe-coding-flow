@@ -2995,3 +2995,223 @@ export function findPath(g, a, b) {
     assert.match(reason, /src\/route\.js:\d+/)
   })
 })
+
+// ---------- đợt 3 (làn E): dấu QA đòi bằng chứng P-nn; file luật một nguồn lib/rule-files.mjs ----------
+
+describe('đợt 3: dấu QA đòi MỖI mã quyền P-nn của SPEC đang mở của nhánh một dòng "đỏ khi tắt" (AC-20)', () => {
+  const SPEC_DIR = 'docs/specs/don-hang'
+  const specText = (rights) => `# SPEC — đơn hàng\n\n## Bạn duyệt\n\n### Ai dùng\n\nChủ cửa hàng.\n\n### Ai thấy/sửa được dữ liệu gì\n\n${rights}\n\n## Kỹ thuật\n\nGhi chú.\n`
+  const RIGHTS3 = '- P-01: Chủ đơn thấy đơn của mình\n- P-02: Nhân viên sửa đơn được giao\n- P-03: Khách xoá đơn của mình'
+  const progress = ({ state = 'đang làm', branch = 'feat, C:/wt' } = {}) => `# Tiến độ: đơn hàng\nTrạng thái: ${state}\nPha: 4 — thi công\nNhánh / worktree: ${branch}\n`
+  const P = (n, rest = 'có — tests/rls.test.ts') => `P-0${n}: đỏ khi tắt: ${rest}`
+  const report = (fx, name, ...lines) => write(fx.root, name, `QA đạt\n${lines.join('\n')}\n`)
+  const stampQa = (fx, name, ...lines) => cli(fx, fx.wt, 'stamp', 'qa', report(fx, name, ...lines))
+  const stopIn = (cwd) => ({ hook_event_name: 'Stop', cwd, stop_hook_active: false, last_assistant_message: 'xong' })
+
+  // SPEC + sổ tiến độ nằm ở THƯ MỤC CHÍNH (docs ngoài git, worktree không có), nhánh feat có một commit code.
+  function pFx({ rights = RIGHTS3, ...prog } = {}) {
+    const fx = fixture()
+    commit(fx.wt, 'feat.go', 'package x\n', 'feat')
+    write(fx.main, `${SPEC_DIR}/SPEC.md`, specText(rights))
+    write(fx.main, `${SPEC_DIR}/progress.md`, progress(prog))
+    return fx
+  }
+  // Đóng dấu review + test như thường; dấu QA ghi thẳng vào gatesDir (đường vòng của AI: không qua `stamp qa`).
+  function stampAllButQa(fx) {
+    assert.equal(cli(fx, fx.wt, 'stamp', 'review', write(fx.root, 'review.json', '{"findings":[]}')).status, 0)
+    assert.equal(cli(fx, fx.wt, 'stamp', 'test', '--', 'node', '-e', '0').status, 0)
+    return pidOf(fx)
+  }
+  const putQa = (fx, pid, ...lines) => {
+    fs.mkdirSync(fx.gates, { recursive: true })
+    fs.writeFileSync(path.join(fx.gates, `qa-${pid}.md`), `QA xong\n${lines.join('\n')}\n`)
+  }
+  const merge = (fx, target = 'feat') => hook(fx, 'bash', bashIn(fx.main, `git merge ${target}`))
+
+  test('SPEC có 3 mã P, báo cáo QA chỉ 1 dòng ⇒ stamp qa KHÔNG đóng dấu, nêu đúng 2 mã còn thiếu bằng lời đời thường; đủ 3 dòng ⇒ đóng dấu', () => {
+    const fx = pFx()
+    const r = stampQa(fx, 'q1.md', P(1))
+    assert.equal(r.status, 1)
+    assertPlainOpening(r.stderr, 'stamp qa')
+    assert.match(r.stderr, /thiếu dòng cho: P-02, P-03\./)
+    assert.match(r.stderr, /có 3 mã quyền \(P-01, P-02, P-03\)/)
+    assert.match(r.stderr, /P-nn: đỏ khi tắt: có — <file test>/)
+    assert.ok(!fs.existsSync(fx.gates) || !fs.readdirSync(fx.gates).some((n) => n.startsWith('qa-')), 'không có dấu qa nào được ghi')
+    const none = stampQa(fx, 'q0.md', 'chỉ ghi: đã chạy hết test')
+    assert.equal(none.status, 1)
+    assert.match(none.stderr, /thiếu dòng cho: P-01, P-02, P-03\./)
+    const ok = stampQa(fx, 'q3.md', P(1), P(2), P(3, 'có — tests/xoa.test.ts'))
+    assert.equal(ok.status, 0, ok.stderr)
+    assert.match(cli(fx, fx.wt, 'status').stdout, /qa: có/)
+  })
+
+  test('dòng bằng chứng phải đúng dạng: "không", "có thể", cụt (không file), thiếu dấu hai chấm, sai mã, không đầu dòng ⇒ không tính; markdown / NFD / dấu : — kiểu khác ⇒ tính', () => {
+    const fx = pFx({ rights: '- P-01: Chủ đơn thấy đơn của mình' })
+    for (const [i, line] of [
+      'P-01: đỏ khi tắt: không — tests/a.test.ts',
+      'P-01: đỏ khi tắt: có thể — tests/a.test.ts',
+      'P-01: đỏ khi tắt: có',
+      'P-01: đỏ khi tắt: có —',
+      'P-01: đỏ khi tắt: có tests/a.test.ts',
+      'P-01 đỏ khi tắt có — tests/a.test.ts',
+      'P-011: đỏ khi tắt: có — tests/a.test.ts',
+      'P-02: đỏ khi tắt: có — tests/a.test.ts',
+      'xem P-01: đỏ khi tắt: có — tests/a.test.ts',
+    ].entries()) assert.equal(stampQa(fx, `bad${i}.md`, line).status, 1, line)
+    for (const [i, line] of [
+      '- P-01: đỏ khi tắt: có — tests/a.test.ts',
+      '- **P-01**: đỏ khi tắt: **có** — tests/a.test.ts',
+      'P-01: Đỏ khi tắt: Có - tests/a.test.ts (3 test)',
+      'P-01: đỏ khi tắt: có — tests/a.test.ts'.normalize('NFD'),
+      '> P-01：đỏ khi tắt：có – tests/a.test.ts',
+    ].entries()) assert.equal(stampQa(fx, `good${i}.md`, line).status, 0, line)
+  })
+
+  test('cổng gộp kiểm lại dấu QA đã lưu: dấu thiếu dòng của P-02, P-03 ⇒ coi như thiếu qa (status + chặn gộp nêu mã, cả khi gộp bằng mã commit); đủ dòng ⇒ qua', () => {
+    const fx = pFx()
+    const pid = stampAllButQa(fx)
+    putQa(fx, pid, P(1))
+    assert.match(cli(fx, fx.wt, 'status').stdout, /qa: không \(thiếu dòng "P-nn: đỏ khi tắt: có — <file test>" cho P-02, P-03\)/)
+    const sha = git(fx.wt, 'rev-parse', 'HEAD').trim()
+    for (const target of ['feat', sha]) {
+      const reason = assertDeny(merge(fx, target))
+      assertPlainOpening(reason, target)
+      assert.match(reason, /: thiếu qa/)
+      assert.match(reason, /cho P-02, P-03:/)
+      assert.ok(!/cho P-01/.test(reason), reason)
+    }
+    putQa(fx, pid, P(1), P(2), P(3))
+    assert.match(cli(fx, fx.wt, 'status').stdout, /qa: có/)
+    assertPass(merge(fx))
+  })
+
+  test('Stop: dấu QA thiếu bằng chứng P-nn ⇒ nhắc kèm mã còn thiếu', () => {
+    const fx = pFx()
+    putQa(fx, stampAllButQa(fx), P(2))
+    const reason = assertBlock(hook(fx, 'stop', stopIn(fx.wt)))
+    assert.match(reason, /thiếu: qa/)
+    assert.match(reason, /cho P-01, P-03\./)
+  })
+
+  test('SPEC "Không áp dụng", sổ đã xong, sổ của nhánh khác, không có SPEC cạnh sổ ⇒ không đòi dòng P-nn (báo cáo QA như cũ)', () => {
+    const cases = {
+      'không áp dụng': pFx({ rights: 'Không áp dụng — app một người dùng, không có dữ liệu riêng.' }),
+      'sổ đã xong': pFx({ state: 'xong' }),
+      'nhánh khác': pFx({ branch: 'khac, C:/wt' }),
+    }
+    const noSpec = pFx()
+    fs.rmSync(path.join(noSpec.main, SPEC_DIR, 'SPEC.md'))
+    cases['không có SPEC'] = noSpec
+    cases['không có sổ'] = fixture()
+    commit(cases['không có sổ'].wt, 'feat.go', 'package x\n', 'feat')
+    for (const [name, fx] of Object.entries(cases)) assert.equal(stampQa(fx, 'q.md', 'QA đạt').status, 0, name)
+  })
+
+  test('SPEC + sổ nằm trong chính worktree (đã commit) ⇒ cũng đọc được; báo cáo "N/A" không lách được khi SPEC có mã P', () => {
+    const fx = fixture()
+    commit(fx.wt, `${SPEC_DIR}/SPEC.md`, specText(RIGHTS3), 'spec')
+    commit(fx.wt, `${SPEC_DIR}/progress.md`, progress(), 'sổ')
+    commit(fx.wt, 'feat.go', 'package x\n', 'feat')
+    assert.equal(stampQa(fx, 'q1.md', P(1), P(3)).status, 1)
+    const na = cli(fx, fx.wt, 'stamp', 'qa', write(fx.root, 'na.md', 'N/A\n'))
+    assert.equal(na.status, 1)
+    assert.match(na.stderr, /thiếu dòng cho: P-01, P-02, P-03/)
+    assert.equal(stampQa(fx, 'q3.md', P(1), P(2), P(3)).status, 0)
+  })
+
+  // Fail-closed: SPEC đang mở mà không đọc được thì không được coi là "không có mã quyền" (cổng mở).
+  const UNREADABLE = /không đọc được SPEC để kiểm mã quyền/
+  const specPath = (fx) => path.join(fx.main, SPEC_DIR, 'SPEC.md')
+  const breakSpec = (fx, how) => {
+    if (how === 'quá 2 MB') write(fx.main, `${SPEC_DIR}/SPEC.md`, `${specText(RIGHTS3)}\n${'x'.repeat(2 * 1024 * 1024 + 16)}\n`)
+    else { fs.rmSync(specPath(fx)); fs.mkdirSync(specPath(fx)) } // SPEC.md là thư mục ⇒ đọc lỗi
+  }
+  const mended = (fx) => { fs.rmSync(specPath(fx), { recursive: true, force: true }); write(fx.main, `${SPEC_DIR}/SPEC.md`, specText(RIGHTS3)) }
+
+  test('SPEC cỡ 1,5 MB (trước đây bị bỏ qua nên cổng mở) vẫn được đọc: báo cáo thiếu dòng P-nn ⇒ KHÔNG đóng dấu', () => {
+    const fx = pFx()
+    write(fx.main, `${SPEC_DIR}/SPEC.md`, specText(RIGHTS3).replace('Ghi chú.', 'x'.repeat(1.5 * 1024 * 1024)))
+    const r = stampQa(fx, 'q1.md', P(1))
+    assert.equal(r.status, 1, r.stderr)
+    assert.match(r.stderr, /thiếu dòng cho: P-02, P-03\./)
+    assert.equal(stampQa(fx, 'q3.md', P(1), P(2), P(3)).status, 0)
+  })
+
+  test('SPEC đang mở quá 2 MB hoặc không đọc được ⇒ stamp qa KHÔNG đóng dấu, lời đời thường "không đọc được SPEC để kiểm mã quyền" nêu SPEC nào; status nêu lý do', () => {
+    for (const how of ['quá 2 MB', 'lỗi đọc']) {
+      const fx = pFx()
+      breakSpec(fx, how)
+      const r = stampQa(fx, 'q.md', P(1), P(2), P(3))
+      assert.equal(r.status, 1, `${how}: ${r.stderr}`)
+      assertPlainOpening(r.stderr, how)
+      assert.match(r.stderr, UNREADABLE)
+      assert.match(r.stderr, /docs\/specs\/don-hang\/SPEC\.md/)
+      assert.ok(!fs.existsSync(fx.gates) || !fs.readdirSync(fx.gates).some((n) => n.startsWith('qa-')), `${how}: không có dấu qa nào được ghi`)
+      const na = cli(fx, fx.wt, 'stamp', 'qa', write(fx.root, 'na.md', 'QA đạt\n'))
+      assert.equal(na.status, 1, `${how}: báo cáo không có dòng P cũng không lách được`)
+      mended(fx)
+      assert.equal(stampQa(fx, 'q2.md', P(1), P(2), P(3)).status, 0, `${how}: SPEC đọc lại được ⇒ đóng dấu`)
+    }
+  })
+
+  test('cổng gộp + Stop + status: dấu QA có sẵn nhưng SPEC đang mở không đọc được ⇒ coi như chưa có qa (chặn gộp, nhắc), không để cổng mở; SPEC đọc lại được ⇒ qua', () => {
+    for (const how of ['quá 2 MB', 'lỗi đọc']) {
+      const fx = pFx()
+      const pid = stampAllButQa(fx)
+      putQa(fx, pid, P(1), P(2), P(3))
+      assertPass(merge(fx))
+      breakSpec(fx, how)
+      const reason = assertDeny(merge(fx))
+      assertPlainOpening(reason, how)
+      assert.match(reason, /: thiếu qa/)
+      assert.match(reason, UNREADABLE)
+      assert.match(cli(fx, fx.wt, 'status').stdout, /qa: không \(không đọc được SPEC để kiểm mã quyền/)
+      const stop = assertBlock(hook(fx, 'stop', stopIn(fx.wt)))
+      assert.match(stop, /thiếu: qa/)
+      assert.match(stop, UNREADABLE)
+      mended(fx)
+      assertPass(merge(fx))
+    }
+  })
+})
+
+describe('đợt 3: cổng gộp dùng danh sách file luật MỘT nguồn (lib/rule-files.mjs) — thêm .claude/ui.json, docs/ui-baseline.json, .claude/luu.json', () => {
+  const FILES = ['.claude/ui.json', 'docs/ui-baseline.json', '.claude/luu.json']
+
+  function ruleFx(files) {
+    const fx = fixture()
+    for (const f of files) write(fx.wt, f, '{}\n')
+    git(fx.wt, 'add', '-A')
+    git(fx.wt, 'commit', '-m', 'feat')
+    stampBoth(fx)
+    return fx
+  }
+
+  test('thêm ba file luật mới ⇒ Claude: ask liệt kê từng file bằng nhãn đời thường; Codex: deny, user tự chạy lệnh gộp', () => {
+    const fx = ruleFx(FILES)
+    const ask = assertAsk(hook(fx, 'bash', bashIn(fx.main, 'git merge feat')))
+    assertPlainOpening(ask)
+    for (const f of FILES) assert.ok(ask.includes(f), `${f} phải có trong lời hỏi: ${ask}`)
+    assert.match(ask, /luật kiểm giao diện/)
+    assert.match(ask, /lỗi giao diện cũ được bỏ qua/)
+    assert.match(ask, /điểm lưu/)
+    const reason = assertDeny(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: 'git merge feat' })))
+    assert.match(reason.split(/\.\s|\n/)[0], /chính bạn chạy lệnh/)
+    for (const f of FILES) assert.ok(reason.includes(f), reason)
+  })
+
+  test('sửa mốc giao diện có sẵn ⇒ ask "sửa"; file cùng tên ở chỗ khác (web/.claude/ui.json) không phải file luật ⇒ qua', () => {
+    const fx = fixture()
+    write(fx.main, 'docs/ui-baseline.json', '{"counts":{"a":1}}\n')
+    git(fx.main, 'add', '-A')
+    git(fx.main, 'commit', '-m', 'mốc')
+    git(fx.wt, 'merge', '--ff-only', 'main')
+    write(fx.wt, 'docs/ui-baseline.json', '{"counts":{"a":9}}\n')
+    git(fx.wt, 'add', '-A')
+    git(fx.wt, 'commit', '-m', 'nới mốc')
+    stampBoth(fx)
+    assert.match(assertAsk(hook(fx, 'bash', bashIn(fx.main, 'git merge feat'))), /sửa file danh sách lỗi giao diện cũ được bỏ qua \(docs\/ui-baseline\.json\)/)
+    const other = ruleFx(['web/.claude/ui.json', 'web/docs/ui-baseline.json'])
+    assertPass(hook(other, 'bash', bashIn(other.main, 'git merge feat')))
+  })
+})

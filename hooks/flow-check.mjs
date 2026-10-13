@@ -10,6 +10,12 @@
 //   - `quietSkip: true` = không áp dụng (không có docs/arch.json / openapi / migration) thì KHÔNG hiện dòng BỎ QUA nào (bảng của dự án thường giữ nguyên).
 //   - `base` = nhánh chính (--base, mặc định main rồi master): resolveBase() → { ref, sha, fork }; file đổi / bản cũ của openapi tính từ `fork` (điểm tách khỏi nhánh chính).
 //     Không xác định được base ⇒ checker cần so thì BỎ QUA kèm lời dặn --base; arch-size xét toàn bộ file (không bỏ sót).
+// Đợt 3 (hành trình người mới, docs/specs/2026-10-12-flow-v7-dot3 PLAN mục 5): `spec-codes` (SPEC đang mở ↔ app ↔ test, lib/spec-codes.mjs), `web-headers` (header bảo mật web,
+//   lib/app-safety.mjs), `ui-rules` (máy kiểm giao diện hooks/ui-check.mjs qua plan `ui-check`: mã thoát 3 ⇒ THIẾU kèm lệnh cài;
+//   stack web ⇒ chạy ở roots.web: gốc dự án, riêng Wails là frontend/ nên .claude/ui.json + Playwright nằm ở frontend/), `mv3-manifest` thêm quyền host rộng.
+//   args có {kit} = thư mục kit/, {hooks} = thư mục hooks/. Checker nội bộ trả { status:'skip', quiet:true } khi không áp dụng + quietSkip ⇒ không hiện dòng nào.
+// Đợt 3 lượt 2 (QA lượt 1): `exclusive: true` = checker tự bật app trên cổng cố định (axe, ui-rules) chạy NỐI TIẾP sau nhóm song song (tranh cổng ⇒ đỏ giả); planner `jscpd`
+//   (CLI 5.x, bỏ node_modules/dist qua file cấu hình tạm) và `web-ext` (dự án WXT: lint bản build .output/chrome-mv3; chưa build ⇒ planner trả `missing`).
 // Hợp đồng:
 //   - THIẾU công cụ ⇒ status 'missing' kèm lệnh cài chính thức; KHÔNG cài ngầm, KHÔNG tính là đạt; chỉ chặn (exit 1) khi checker required.
 //   - Mỗi checker chạy có timeout (Node, diệt cả cây tiến trình); trên Windows .cmd chạy qua runCommand của lib/clis.mjs (đối số lạ bị từ chối).
@@ -23,14 +29,18 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { extensionPermProblems, headerProblems } from './lib/app-safety.mjs'
 import { DEPCRUISE_PKGS, DEPCRUISE_WHERE, goArchLintRuns, depcruiseArgs, loadArch, loadBaseline, newGoArchViolations, nodeEngineMessage, nodeEngineProblem, sizeCheck, syncCheck, usesTypeScript } from './lib/arch.mjs'
 import { runCommand } from './lib/clis.mjs'
 import { BUILD_DIRS, scanDir, scanText } from './lib/secrets.mjs'
+import { openSpecs, parseSpec, specProblems, traceCodes } from './lib/spec-codes.mjs'
 import { COND_KEYS, STACKS, detect, findManifest, hasDep, matches, readPackageJson, roots } from './lib/stack.mjs'
 
-export const KIT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'kit')
+const HOOKS_DIR = path.dirname(fileURLToPath(import.meta.url))
+export const KIT_DIR = path.resolve(HOOKS_DIR, '..', 'kit')
 export const DEFAULT_CHECKERS = path.join(KIT_DIR, 'checkers.json')
 const KIT_SLASH = KIT_DIR.replace(/\\/g, '/') // dấu / để qua bộ lọc đối số của .cmd trên Windows
+const HOOKS_SLASH = HOOKS_DIR.replace(/\\/g, '/') // {hooks} trong args = thư mục hooks/ của kit (cạnh kit/, không nằm trong kit/)
 
 const DEFAULT_TIMEOUT_MS = 180_000
 const MAX_TIMEOUT_MS = 900_000
@@ -82,6 +92,7 @@ export function validateCheckers(obj) {
     if (c.internal !== undefined && !isStr(c.internal)) w('internal phải là chuỗi')
     if (c.plan !== undefined && (!isStr(c.plan) || c.cmd === undefined)) w('plan phải là chuỗi (tên trong PLANNERS) và chỉ đi với cmd')
     if (c.quietSkip !== undefined && typeof c.quietSkip !== 'boolean') w('quietSkip phải là true hoặc false')
+    if (c.exclusive !== undefined && typeof c.exclusive !== 'boolean') w('exclusive phải là true hoặc false')
     if (c.cmd !== undefined) {
       if (!(isStr(c.cmd) || (isStrArr(c.cmd) && c.cmd.length && c.cmd.every(isStr)))) w('cmd phải là chuỗi hoặc mảng chuỗi')
       if (c.args !== undefined && !isStrArr(c.args)) w('args phải là mảng chuỗi')
@@ -302,6 +313,13 @@ export function mv3Problems(manifest) {
   return out
 }
 
+// extensionPermProblems (lib/app-safety.mjs) nói lại mẫu host rộng mà mv3Problems đã báo ("quyền quá rộng: <mẫu> …", vd <all_urls>) ⇒ bỏ báo trùng, giữ mỗi mẫu một lần.
+// Chỉ bỏ lời báo của CHÍNH manifest mà mv3Problems đã đọc (manifestRel); mẫu rộng ở file khác (vd wxt.config.ts) vẫn được nêu để biết sửa ở đâu.
+function withoutRepeats(perms, reported, manifestRel) {
+  const seen = reported.map((l) => /^quyền quá rộng: (\S+) /.exec(l)?.[1]).filter(Boolean)
+  return perms.filter((p) => p.file !== manifestRel || !seen.some((pattern) => p.msg.includes(`(${pattern})`)))
+}
+
 const REMOTE_CODE = [
   [/<script\b[^>]*\bsrc\s*=\s*["']?https?:\/\//i, 'thẻ <script> tải mã từ xa'],
   [/\bimportScripts\s*\(\s*["'`]https?:\/\//, 'importScripts tải mã từ xa'],
@@ -347,12 +365,52 @@ export const INTERNALS = {
     }
   },
 
+  // Thêm extensionPermProblems (lib/app-safety.mjs): host_permissions phủ mọi trang. Luôn kiểm cả wxt.config.* ở gốc dự án bên cạnh manifest (build cũ không che cấu hình mới); chưa có manifest.json mà wxt.config.* đã khai quyền rộng ⇒ báo luôn, không đợi build.
   'mv3-manifest': async ({ dir, root, checker }) => {
     const m = findManifest(root) ?? findManifest(dir)
-    if (!m) return { status: 'missing', message: 'Không thấy manifest.json (có manifest_version) để kiểm', fix: 'Build extension rồi chạy lại, hoặc đặt manifest.json ở gốc dự án hay thư mục public/.' }
-    const problems = [...mv3Problems(m.manifest), ...remoteCodeProblems(m.dir)]
-    if (!problems.length) return { status: 'pass', message: 'manifest đạt chuẩn MV3 của kit' }
-    return { status: 'fail', message: `${problems.length} điểm chưa đạt chuẩn MV3`, detail: problems.slice(0, 20), fix: checker.hint }
+    const failWith = (base, perms) => {
+      const detail = [...base, ...perms.map((p) => `${p.file}: ${p.msg}`)]
+      return { status: 'fail', message: `${detail.length} điểm chưa đạt chuẩn MV3`, detail: detail.slice(0, 20), fix: perms.length ? joinFixes([...perms.map((p) => p.fix), checker.hint]) : checker.hint }
+    }
+    if (!m) {
+      const early = extensionPermProblems(root)
+      if (early.length) return failWith([], early)
+      return { status: 'missing', message: 'Không thấy manifest.json (có manifest_version) để kiểm', fix: 'Build extension rồi chạy lại, hoặc đặt manifest.json ở gốc dự án hay thư mục public/.' }
+    }
+    const base = [...mv3Problems(m.manifest), ...remoteCodeProblems(m.dir)]
+    // Quét từ gốc dự án (không chỉ thư mục chứa manifest): wxt.config.* nằm ở gốc, manifest build cũ (.output/chrome-mv3, public/) không được che quyền rộng mới khai trong đó.
+    const perms = withoutRepeats(extensionPermProblems(dir), base, path.relative(dir, m.file).split(path.sep).join('/'))
+    if (!base.length && !perms.length) return { status: 'pass', message: 'manifest đạt chuẩn MV3 của kit' }
+    return failWith(base, perms)
+  },
+
+  // Web: file header bảo mật (CSP, nosniff, Referrer-Policy, chống nhúng) — lib/app-safety.mjs headerProblems. Desktop (Wails) và extension không chạy qua máy chủ web ⇒ không đòi.
+  'web-headers': async ({ root, checker, ctx }) => {
+    if (ctx.stacks?.some((s) => s === 'wails' || s === 'extension')) return { status: 'skip', quiet: true, message: 'app desktop hoặc extension không chạy qua máy chủ web nên không cần file header' }
+    const problems = headerProblems(root)
+    if (!problems.length) return { status: 'pass', message: 'đủ header bảo mật (CSP, nosniff, Referrer-Policy, chống nhúng)' }
+    return { status: 'fail', message: `${problems.length} chỗ thiếu hoặc sai header bảo mật cho web`, detail: problems.map((p) => `${p.file}: ${p.msg}`), fix: joinFixes(problems.map((p) => p.fix)) || checker.hint }
+  },
+
+  // SPEC đang mở (docs/specs/*/SPEC.md chưa "Trạng thái: xong") ↔ app ↔ test (lib/spec-codes.mjs). Không có SPEC mở ⇒ không hiện dòng nào. SPEC kiểu cũ (chưa có phần "Bạn duyệt") chỉ được nhắc, không chặn.
+  'spec-codes': async ({ dir, checker }) => {
+    const open = openSpecs(dir)
+    if (!open.length) return { status: 'skip', quiet: true, message: 'không có SPEC đang làm' }
+    const show = (f) => path.relative(dir, f).replace(/\\/g, '/')
+    const problems = []
+    const old = []
+    const fresh = []
+    for (const file of open) {
+      const text = fs.readFileSync(file, 'utf8')
+      if (!parseSpec(text).hasApproval) { old.push(show(file)); continue }
+      fresh.push(file)
+      for (const p of specProblems(text)) problems.push({ line: `${show(file)}: ${p.msg}`, fix: p.fix })
+    }
+    if (!fresh.length) return { status: 'skip', message: `SPEC đang làm (${old.join(', ')}) là kiểu cũ, chưa có phần "Bạn duyệt", nên chưa kiểm mã S-nn / P-nn. Chỉ nhắc, không chặn; SPEC mới viết theo mẫu skill flow-spec.` }
+    const notes = old.map((f) => `${f}: SPEC kiểu cũ (chưa có phần "Bạn duyệt") nên chưa kiểm mã S-nn / P-nn. Chỉ nhắc, không chặn.`)
+    for (const p of traceCodes(dir, fresh).problems) problems.push({ line: p.msg, fix: p.fix })
+    if (!problems.length) return { status: 'pass', message: `mã trong ${fresh.length} SPEC đang làm khớp app và test`, detail: notes }
+    return { status: 'fail', message: `${problems.length} chỗ SPEC đang làm chưa khớp app hoặc test`, detail: [...problems.map((p) => p.line), ...notes], fix: joinFixes(problems.map((p) => p.fix)) || checker.hint }
   },
 
   // @shadcn/lint là plugin ESLint: luật chạy trong bước `eslint`; ở đây chỉ kiểm plugin đã được bật trong cấu hình.
@@ -404,6 +462,7 @@ function joinFixes(fixes) {
 // planner({ dir, root, checker, ctx }) → null (chạy như cấu hình: c.args ở root)
 //   | { skip, quiet? }       không chạy (quiet ⇒ không hiện dòng BỎ QUA)
 //   | { fail: {message, detail?, fix?} }   không đạt ngay (vd chưa sinh cấu hình)
+//   | { missing: {message, fix?} }         chưa kiểm được vì thiếu điều kiện (vd chưa build) ⇒ THIẾU, không chạy công cụ
 //   | { runs: [{ args, cwd?, label?, judge? }], toolDirs?, cleanup? }   chạy lần lượt; judge(r, out) → {status,message,detail?,fix?} thay cho luật mã thoát
 // ctx.getBase() → { ref, sha, fork }|null · ctx.changed() → string[]|null · ctx.git(args, {cwd}) → {code,stdout,stderr}.
 
@@ -477,7 +536,87 @@ function judgeDepcruise(checker, { ts = false } = {}) {
   }
 }
 
+// ui-check (hooks/ui-check.mjs) thoát: 0 đạt · 1 có lỗi giao diện chặn · 2 không chạy được (cấu hình sai, app không lên) · 3 thiếu Playwright/trình duyệt của dự án.
+// Mốc docs/ui-baseline.json do chính ui-check xử lý. Exit 3 ⇒ THIẾU (kèm các lệnh cài ui-check in ra), không tính đạt.
+const UI_INSTALL = 'npm i -D playwright rồi npx playwright install chromium (dùng pnpm/yarn nếu dự án dùng)'
+function judgeUiCheck(checker) {
+  return (r, out) => {
+    if (r.code === 0) return { status: 'pass', message: '' }
+    if (r.code === 3) {
+      const lines = out.split('\n')
+      const at = lines.findIndex((l) => /bằng:\s*$/.test(l))
+      const cmds = at < 0 ? [] : lines.slice(at + 1).filter((l) => /^\s+\S/.test(l)).map((l) => l.trim())
+      return { status: 'missing', message: 'Chưa có Playwright (công cụ mở app thử như người dùng) trong dự án nên chưa kiểm được giao diện', fix: `Cài: ${cmds.length ? cmds.join(' && ') : UI_INSTALL}` }
+    }
+    if (r.code === 2) return { status: 'fail', message: 'Máy kiểm giao diện chưa chạy được (cấu hình .claude/ui.json chưa đúng hoặc app không mở lên)', detail: tail(out), fix: 'Làm theo dòng báo ở trên (thường là sửa .claude/ui.json hoặc lệnh start/url cho đúng app), rồi chạy lại flow check.' }
+    const n = /Giao diện còn (\d+) lỗi chặn/.exec(out)?.[1]
+    if (r.code === 1) return { status: 'fail', message: n ? `${n} lỗi giao diện chặn` : 'giao diện còn lỗi chặn', detail: tail(out), fix: checker.hint }
+    return { status: 'fail', message: `ui-check báo lỗi lạ (mã thoát ${r.code})`, detail: tail(out), fix: checker.hint }
+  }
+}
+
+// jscpd 5.x không còn cờ --gitignore (exit 2 "unexpected argument") và chỉ tôn trọng .gitignore khi thư mục là repo git ⇒ node_modules/dist phải bỏ rõ ràng. Mẫu glob (dấu *) và danh sách
+// (dấu phẩy) trên dòng lệnh bị bộ lọc .cmd của Windows từ chối (jscpd cài bằng npm là shim .cmd) ⇒ ghi vào file cấu hình tạm rồi truyền --config (đường dẫn dùng dấu /).
+export const JSCPD_IGNORE = ['**/node_modules/**', '**/dist/**']
+const WXT_CONFIG_RE = /^wxt\.config\.(?:ts|js|mjs|mts)$/
+const WXT_BUILD_DIRS = ['.output/chrome-mv3', '.output/firefox-mv3'] // WXT không đặt manifest.json ở gốc dự án mà build ra đây
+
+// web-ext lint (bộ kiểm của Firefox) báo 2 lỗi mà bản Chrome-only không thể và không cần sửa: service_worker không kèm background.scripts (BACKGROUND_SERVICE_WORKER_NOFALLBACK)
+// và thiếu id add-on (ADDON_ID_REQUIRED). Manifest chưa khai browser_specific_settings.gecko (không nhắm Firefox) ⇒ bỏ 2 mã đó (nói rõ đã bỏ); lỗi khác vẫn KHÔNG ĐẠT.
+// Output không phải JSON đọc được ⇒ theo mã thoát như mọi checker khác (không đạt giả).
+const FIREFOX_ONLY_CODES = ['BACKGROUND_SERVICE_WORKER_NOFALLBACK', 'ADDON_ID_REQUIRED']
+function judgeWebExt(checker, manifestDir) {
+  return (r, out) => {
+    const byExit = () => (r.code === 0 ? { status: 'pass', message: '' } : { status: 'fail', message: `web-ext báo lỗi (mã thoát ${r.code})`, detail: tail(out), fix: checker.hint })
+    const text = String(r.stdout ?? '')
+    let report = null
+    try { report = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) } catch { /* không phải JSON */ }
+    if (!Array.isArray(report?.errors) || !report.errors.length) return byExit()
+    const manifest = findManifest(manifestDir)?.manifest
+    const forFirefox = Boolean(manifest?.browser_specific_settings?.gecko ?? manifest?.applications?.gecko)
+    const real = forFirefox ? report.errors : report.errors.filter((e) => !FIREFOX_ONLY_CODES.includes(e?.code))
+    const skipped = report.errors.length - real.length
+    if (!real.length) return { status: 'pass', message: '', detail: [`bỏ ${skipped} lỗi chỉ của Firefox (${FIREFOX_ONLY_CODES.join(', ')}) vì manifest không khai browser_specific_settings.gecko (bản Chrome)`] }
+    const line = (e) => `${e?.code ?? 'lỗi'}: ${String(e?.message ?? '').replace(/\s+/g, ' ')}${e?.file ? ` (${e.file}${e.line ? `:${e.line}` : ''})` : ''}`
+    return { status: 'fail', message: `web-ext lint báo ${real.length} lỗi`, detail: tail(real.map(line).join('\n')), fix: checker.hint }
+  }
+}
+
 export const PLANNERS = {
+  'ui-check': ({ checker }) => ({ runs: [{ args: checker.args ?? [], judge: judgeUiCheck(checker) }] }),
+
+  // --config thay cho .jscpd.json của dự án ⇒ gộp cấu hình có sẵn của dự án (nếu đọc được) với danh sách bỏ của kit, không làm mất ignore riêng của dự án.
+  jscpd: ({ root, checker }) => {
+    let own = {}
+    try {
+      const j = JSON.parse(fs.readFileSync(path.join(root, '.jscpd.json'), 'utf8').replace(/^﻿/, ''))
+      if (j && typeof j === 'object' && !Array.isArray(j)) own = j
+    } catch { /* không có hoặc không đọc được ⇒ chỉ dùng danh sách của kit */ }
+    const ignore = [...new Set([...(Array.isArray(own.ignore) ? own.ignore.filter((x) => typeof x === 'string') : []), ...JSCPD_IGNORE])]
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'flow-check-jscpd-'))
+    const cfg = path.join(tmp, 'jscpd.json')
+    // xoá từng file rồi thư mục (xem ghi chú ở planner oasdiff)
+    const cleanup = () => { try { fs.unlinkSync(cfg) } catch { /* chưa ghi được thì không có gì để xoá */ } fs.rmdirSync(tmp) }
+    try { fs.writeFileSync(cfg, JSON.stringify({ ...own, ignore })) } catch (e) { cleanup(); throw e }
+    return { runs: [{ args: ['--config', cfg.replace(/\\/g, '/'), ...(checker.args ?? [])] }], cleanup }
+  },
+
+  // web-ext lint cần thư mục có manifest.json (output JSON để lọc 2 lỗi chỉ của Firefox, xem judgeWebExt). Dự án WXT (có wxt.config.*) không có manifest ở gốc:
+  // manifest nằm ở thư mục build ngoài .output (vd outDir "dist" của mẫu kit) ⇒ lint ngay đó; còn dùng .output/chrome-mv3 ⇒ --source-dir đúng thư mục đó, chạy từ gốc dự án;
+  // chưa build ⇒ THIẾU, không để web-ext báo đỏ giả.
+  'web-ext': ({ dir, root, checker }) => {
+    const args = checker.args ?? []
+    const lint = (manifestDir, patch = {}) => ({ runs: [{ args, judge: judgeWebExt(checker, manifestDir), ...patch }] })
+    let names = []
+    try { names = fs.readdirSync(dir) } catch { /* không đọc được thư mục thì để chạy theo cấu hình */ }
+    if (!names.some((f) => WXT_CONFIG_RE.test(f))) return lint(root)
+    const underOutput = path.relative(dir, root).split(path.sep).includes('.output')
+    if (isFile(path.join(root, 'manifest.json')) && !underOutput) return lint(root)
+    const build = WXT_BUILD_DIRS.find((rel) => isFile(path.join(dir, ...rel.split('/'), 'manifest.json')))
+    if (!build) return { missing: { message: 'Chưa có bản build của extension (WXT build ra thư mục dist/ hoặc .output/chrome-mv3) nên chưa kiểm được', fix: 'Chạy lệnh build của dự án (vd npm run build) rồi chạy lại.' } }
+    return { ...lint(path.join(dir, build), { args: [...args, '--source-dir', build], cwd: dir }), toolDirs: [dir] }
+  },
+
   // depcruise --config .dependency-cruiser.cjs [--ignore-known <mốc>] --output-type err-long -- <root…>, chạy ở gốc dự án (đối số do arch.mjs dựng từ docs/arch.json; root đứng sau `--`).
   depcruise: ({ dir, checker, ctx }) => {
     const { arch, errors } = loadArch(dir)
@@ -554,7 +693,8 @@ export const PLANNERS = {
 
 // --- chạy checker ----------------------------------------------------------------------------------------------------------------------
 
-const installText = (inst, platform) => (typeof inst === 'string' ? inst : platform === 'win32' ? inst.win32 ?? inst.posix : inst.posix ?? inst.win32)
+// install: chuỗi, hoặc {win32, posix, darwin?}; darwin (Mac) nếu có thì thắng posix.
+const installText = (inst, platform) => (typeof inst === 'string' ? inst : platform === 'win32' ? inst.win32 ?? inst.posix : (platform === 'darwin' ? inst.darwin : undefined) ?? inst.posix ?? inst.win32)
 
 async function mapPool(items, limit, fn) {
   const out = new Array(items.length)
@@ -580,7 +720,7 @@ async function resolveTool(c, cwd, ctx) {
 
 // Chạy MỘT lệnh của checker → { status, message, fix?, detail? }. Lệnh không chạy được / quá giờ / mã thoát lạ ⇒ không bao giờ pass im lặng.
 async function execRun(c, tool, run, root, ctx) {
-  const args = run.args.map((a) => a.replaceAll('{kit}', KIT_SLASH))
+  const args = run.args.map((a) => a.replaceAll('{kit}', KIT_SLASH).replaceAll('{hooks}', HOOKS_SLASH))
   const timeoutMs = c.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const r = await ctx.exec(tool.file, args, { cwd: run.cwd ?? root, timeoutMs, env: ctx.env, platform: ctx.platform })
   if (r.error) {
@@ -632,6 +772,7 @@ async function runOne(c, root, ctx) {
       cleanup = plan?.cleanup ?? null
       if (plan?.skip) return plan.quiet ? null : res({ status: 'skip', message: plan.skip })
       if (plan?.fail) return res({ status: 'fail', message: plan.fail.message, detail: plan.fail.detail ? tail(plan.fail.detail.join('\n')) : [], fix: plan.fail.fix ?? c.hint })
+      if (plan?.missing) return res({ status: 'missing', message: plan.missing.message, fix: plan.missing.fix ?? c.hint })
     }
 
     const missing = []
@@ -663,6 +804,7 @@ async function runOne(c, root, ctx) {
       const fn = ctx.internals[c.internal]
       if (!fn) return res({ status: 'fail', message: `checker nội bộ "${c.internal}" không tồn tại`, fix: 'Cập nhật kit (hooks/flow-check.mjs).' })
       const r = await fn({ dir: ctx.dir, root, checker: c, ctx })
+      if (r.quiet && c.quietSkip) return null // checker nội bộ tự thấy không áp dụng (vd không có SPEC đang làm) ⇒ không hiện dòng BỎ QUA
       return res({ ...r, detail: r.detail ? tail(r.detail.join('\n')) : [] })
     }
 
@@ -692,6 +834,7 @@ export async function runChecks({ dir, checkers, env, platform, which, exec, int
   const memo = {}
   const ctx = {
     dir: abs,
+    stacks,
     env: env ?? { ...process.env, NO_COLOR: '1' },
     platform: platform ?? process.platform,
     which: which ?? ((name, o) => findTool(name, o)),
@@ -704,7 +847,14 @@ export async function runChecks({ dir, checkers, env, platform, which, exec, int
   }
   const items = checkers.filter((c) => c.stack === 'all' || stacks.includes(c.stack))
   ctx.archOwner = items.find((c) => ARCH_CHECKS.has(c.internal ?? c.plan))?.id
-  const results = (await mapPool(items, concurrency, (c) => runOne(c, c.stack === 'all' ? abs : rt[c.stack], ctx))).filter(Boolean)
+  const runItem = (c) => runOne(c, c.stack === 'all' ? abs : rt[c.stack], ctx)
+  // Checker `exclusive` (tự bật app trên cổng cố định: axe qua webServer của Playwright, ui-check bật dev server) chạy NỐI TIẾP từng cái SAU nhóm song song: hai cái cùng cổng
+  // mà chạy chồng thì tắt server của nhau ⇒ đỏ giả. Kết quả vẫn xếp theo thứ tự trong checkers.json.
+  const done = new Array(items.length)
+  const parallel = items.map((c, i) => i).filter((i) => !items[i].exclusive)
+  await mapPool(parallel, concurrency, async (i) => { done[i] = await runItem(items[i]) })
+  for (let i = 0; i < items.length; i++) if (items[i].exclusive) done[i] = await runItem(items[i])
+  const results = done.filter(Boolean)
   const count = (s) => results.filter((r) => r.status === s).length
   const summary = { pass: count('pass'), fail: count('fail'), missing: count('missing'), skip: count('skip'), missingRequired: results.filter((r) => r.status === 'missing' && r.required).length }
   return { dir: abs, stacks, results, summary, ok: summary.fail === 0 && summary.missingRequired === 0 }
@@ -727,7 +877,7 @@ export function formatReport(report) {
     const head = `${LABEL[r.status].padEnd(7)} ${r.id.padEnd(16)} ${r.title}`
     if (r.status === 'skip') { lines.push(`${head} — ${r.message}`); continue }
     lines.push(r.status === 'missing' && r.required ? `${head} (bắt buộc)` : head)
-    if (r.status === 'pass') continue
+    if (r.status === 'pass') { for (const d of r.detail) lines.push(`          | ${d}`); continue } // đạt nhưng có ghi chú (vd SPEC kiểu cũ chỉ nhắc)
     if (r.message) lines.push(`          ! ${r.message}`)
     for (const d of r.detail) lines.push(`          | ${d}`)
     if (r.fix) lines.push(`          -> ${r.fix}`)

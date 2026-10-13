@@ -197,6 +197,20 @@ test('trạng thái: pass / fail / missing(bắt buộc) / missing(tuỳ chọn)
   assert.equal(exitCode(rep), 1)
 })
 
+test('lệnh cài theo máy: install {win32, posix, darwin} ⇒ Mac dùng darwin, Windows/Linux giữ như cũ; osv-scanner thật dùng brew trên Mac', async () => {
+  const dir = project({ 'package.json': '{}' })
+  const fixOf = async (checker, platform) => (await runChecks({ dir, checkers: [checker], platform, which: () => null })).results[0].fix
+  const c = mk({ id: 'x', install: { win32: 'win-cmd', posix: 'posix-cmd', darwin: 'mac-cmd' } })
+  assert.match(await fixOf(c, 'darwin'), /mac-cmd/)
+  assert.match(await fixOf(c, 'win32'), /win-cmd/)
+  assert.match(await fixOf(c, 'linux'), /posix-cmd/)
+  assert.match(await fixOf(mk({ id: 'y', install: { win32: 'win-cmd', posix: 'posix-cmd' } }), 'darwin'), /posix-cmd/, 'không có darwin ⇒ rơi về posix')
+  const osv = REAL.checkers.find((x) => x.id === 'osv-scanner')
+  assert.match(await fixOf(osv, 'darwin'), /brew install osv-scanner/)
+  assert.match(await fixOf(osv, 'win32'), /go install github\.com\/google\/osv-scanner/)
+  assert.match(await fixOf(osv, 'linux'), /go install github\.com\/google\/osv-scanner/)
+})
+
 test('exit: chỉ thiếu công cụ KHÔNG bắt buộc ⇒ 0 (vẫn báo THIẾU, không tính đạt); thiếu công cụ bắt buộc ⇒ 1; không có gì để kiểm ⇒ 0', async () => {
   const dir = project({ 'package.json': '{}' })
   const exec = async () => OK
@@ -1478,4 +1492,439 @@ test('main --base: nhánh không có ⇒ exit 2 nói rõ; thiếu giá trị ⇒
   ;({ o, deps } = io())
   assert.equal(await main(['--help'], deps), 0)
   assert.match(o.out, /--base/)
+})
+
+// --- đợt 3 (làn E): spec-codes, web-headers, ui-rules, mv3-manifest mở rộng ---------------------------------------------------------------------
+
+const NEW_IDS = ['spec-codes', 'web-headers', 'ui-rules']
+
+test('checkers.json thật (đợt 3): spec-codes, web-headers, ui-rules bắt buộc + chỉ hiện khi áp dụng; ui-rules chạy ui-check.mjs có thật, timeout ≥ 300 giây, exit 3 xử lý bằng plan', () => {
+  const get = (id) => REAL.checkers.find((c) => c.id === id)
+  for (const id of NEW_IDS) {
+    assert.equal(get(id).required, true, id)
+    assert.equal(get(id).quietSkip, true, `${id}: không áp dụng thì không hiện dòng nào (bảng của dự án thường giữ nguyên)`)
+  }
+  assert.deepEqual([get('spec-codes').stack, get('spec-codes').internal], ['all', 'spec-codes'])
+  assert.deepEqual([get('web-headers').stack, get('web-headers').internal], ['web', 'web-headers'])
+  const ui = get('ui-rules')
+  assert.equal(ui.cmd, 'node')
+  assert.equal(ui.plan, 'ui-check')
+  assert.deepEqual(ui.detect, { files: ['.claude/ui.json'] })
+  assert.ok(ui.timeoutMs >= 300000, `ui-rules timeoutMs ${ui.timeoutMs}`)
+  assert.ok(ui.args[0].startsWith('{hooks}/'))
+  assert.ok(fs.existsSync(ui.args[0].replace('{hooks}', HERE)), 'ui-check.mjs phải có thật ở thư mục hooks/')
+  assert.equal(typeof PLANNERS[ui.plan], 'function')
+  for (const n of ['spec-codes', 'web-headers']) assert.equal(typeof INTERNALS[n], 'function', n)
+})
+
+test('đợt 3: dự án thường (không SPEC mở, không ui.json, không index.html) ⇒ ba checker mới không hiện dòng nào', async () => {
+  const rep = await check(project({ 'package.json': '{}', 'docs/specs/a/SPEC.md': '# SPEC\n', 'docs/specs/a/progress.md': 'Trạng thái: xong\n' }), NEW_IDS)
+  assert.deepEqual(rep.results, [])
+  assert.equal(rep.ok, true)
+})
+
+// SPEC kiểu "Bạn duyệt": một màn bốn trạng thái S-01..S-04 + hai quyền P-01, P-02.
+const TABLE_HEAD = '| mã | khi | thấy gì | làm được gì |\n|---|---|---|---|\n'
+const SCREEN = `#### Danh sách đơn\n\n${TABLE_HEAD}| S-01 | Có dữ liệu | a | b |\n| S-02 | Trống | a | b |\n| S-03 | Đang tải | a | b |\n| S-04 | Lỗi | a | b |\n`
+function specText(over = {}) {
+  const s = {
+    'Ai dùng': 'Chủ cửa hàng.',
+    'Các màn hình': SCREEN,
+    'Làm được gì': '- Xem đơn.',
+    'Để sau': 'Không có.',
+    'Phí phát sinh': 'Không.',
+    'Ai thấy/sửa được dữ liệu gì': '- P-01: Chủ đơn thấy đơn của mình\n- P-02: Nhân viên sửa đơn được giao',
+    ...over,
+  }
+  return `# SPEC\n\n## Bạn duyệt\n\n${Object.entries(s).filter(([, v]) => v !== null).map(([k, v]) => `### ${k}\n\n${v}\n`).join('\n')}\n## Kỹ thuật\n\nGhi chú.\n`
+}
+const APP_ALL = '<div data-s="S-01"/><div data-s="S-02"/><div data-s="S-03"/><div data-s="S-04"/>'
+const TEST_ALL = "test('S-01 S-02 S-03 S-04 P-01 P-02', () => {})"
+const withSpec = (spec, extra = {}) => project({ 'package.json': '{}', 'docs/specs/don-hang/SPEC.md': spec, 'docs/specs/don-hang/progress.md': '# Tiến độ\nTrạng thái: đang làm\n', ...extra })
+
+test('spec-codes: SPEC đang làm, mọi mã S-nn có trong app + test, P-nn có trong test ⇒ đạt', async () => {
+  const d = withSpec(specText(), { 'src/App.tsx': APP_ALL, 'tests/app.spec.ts': TEST_ALL })
+  const rep = await check(d, ['spec-codes'])
+  assert.equal(rep.results.length, 1)
+  assert.equal(rep.results[0].status, 'pass', JSON.stringify(rep.results[0]))
+  assert.equal(exitCode(rep), 0)
+})
+
+test('spec-codes: thiếu S-02 trong app và P-02 trong test ⇒ KHÔNG ĐẠT nêu đúng mã + chỗ gắn data-s; SPEC xong (progress "Trạng thái: xong") thì không xét', async () => {
+  const d = withSpec(specText(), { 'src/App.tsx': APP_ALL.replace('<div data-s="S-02"/>', ''), 'tests/app.spec.ts': TEST_ALL.replace(' P-02', '') })
+  const rep = await check(d, ['spec-codes'])
+  const r = rep.results[0]
+  assert.equal(r.status, 'fail')
+  assert.equal(exitCode(rep), 1)
+  const text = r.detail.join('\n')
+  assert.match(text, /S-02[^\n]*app/)
+  assert.match(text, /P-02[^\n]*test/)
+  assert.ok(!/S-01|S-03|P-01/.test(text), `chỉ nêu mã thiếu: ${text}`)
+  assert.match(r.fix, /data-s="S-02"/)
+  fs.writeFileSync(path.join(d, 'docs', 'specs', 'don-hang', 'progress.md'), '# Tiến độ\nTrạng thái: xong\n')
+  assert.deepEqual((await check(d, ['spec-codes'])).results, [])
+})
+
+test('spec-codes: SPEC thiếu mục "Để sau" và màn thiếu trạng thái "lỗi" ⇒ KHÔNG ĐẠT nêu tên mục / màn (specProblems)', async () => {
+  const noError = SCREEN.replace('| S-04 | Lỗi | a | b |\n', '')
+  const d = withSpec(specText({ 'Để sau': null, 'Các màn hình': noError }), { 'src/App.tsx': APP_ALL, 'tests/app.spec.ts': TEST_ALL })
+  const r = (await check(d, ['spec-codes'])).results[0]
+  assert.equal(r.status, 'fail')
+  const text = r.detail.join('\n')
+  assert.match(text, /Để sau/)
+  assert.match(text, /Danh sách đơn[^\n]*lỗi/)
+  assert.match(text, /docs\/specs\/don-hang\/SPEC\.md/, 'nêu SPEC nào')
+})
+
+test('spec-codes: SPEC kiểu cũ (chưa có "Bạn duyệt") chỉ được nhắc, KHÔNG chặn; lẫn SPEC mới đạt ⇒ ĐẠT kèm ghi chú hiện trong bảng', async () => {
+  const old = withSpec('# SPEC\n\n## Mục tiêu\nLàm gì đó.\n')
+  const rep = await check(old, ['spec-codes'])
+  assert.equal(rep.results[0].status, 'skip')
+  assert.match(rep.results[0].message, /kiểu cũ/)
+  assert.match(rep.results[0].message, /không chặn/)
+  assert.equal(rep.ok, true)
+  assert.equal(exitCode(rep), 0)
+  const mixed = withSpec(specText(), { 'src/App.tsx': APP_ALL, 'tests/app.spec.ts': TEST_ALL, 'docs/specs/cu/SPEC.md': '# SPEC cũ\n## Mục tiêu\nx\n' })
+  const r2 = await check(mixed, ['spec-codes'])
+  assert.equal(r2.results[0].status, 'pass')
+  assert.ok(r2.results[0].detail.some((l) => l.includes('docs/specs/cu/SPEC.md') && /kiểu cũ/.test(l)))
+  assert.match(formatReport(r2), /ĐẠT\s+spec-codes[^\n]*\n\s+\| docs\/specs\/cu\/SPEC\.md[^\n]*kiểu cũ/)
+  assert.equal(exitCode(r2), 0)
+})
+
+test('spec-codes: SPEC đang làm đánh lại mã đã dùng ở SPEC cũ (đã xong) ⇒ KHÔNG ĐẠT dù app + test cũ có đủ mã, nêu SPEC cũ + mã kế tiếp; đổi sang mã chưa dùng ⇒ ĐẠT', async () => {
+  const d = withSpec(specText(), { 'src/App.tsx': APP_ALL, 'tests/app.spec.ts': TEST_ALL, 'docs/specs/cu/SPEC.md': specText(), 'docs/specs/cu/progress.md': 'Trạng thái: xong\n' })
+  const r = (await check(d, ['spec-codes'])).results[0]
+  assert.equal(r.status, 'fail')
+  const text = r.detail.join('\n')
+  assert.match(text, /S-01 \(docs\/specs\/don-hang\/SPEC\.md:\d+\) đã dùng ở docs\/specs\/cu\/SPEC\.md/)
+  assert.match(text, /P-02 .*đã dùng ở docs\/specs\/cu\/SPEC\.md/)
+  assert.match(r.fix, /Đổi sang mã chưa dùng, vd S-05/)
+  const renum = (s) => s.replace(/S-0(\d)/g, 'S-1$1').replace(/P-0(\d)/g, 'P-1$1')
+  const fixed = withSpec(renum(specText()), { 'src/App.tsx': renum(APP_ALL), 'tests/app.spec.ts': renum(TEST_ALL), 'docs/specs/cu/SPEC.md': specText(), 'docs/specs/cu/progress.md': 'Trạng thái: xong\n' })
+  assert.equal((await check(fixed, ['spec-codes'])).results[0].status, 'pass')
+})
+
+test('web-headers: web có index.html mà chưa có file header ⇒ KHÔNG ĐẠT; thêm đủ 4 header ⇒ ĐẠT; thiếu nosniff ⇒ nêu đúng header đó', async () => {
+  const d = project({ 'package.json': '{}', 'index.html': '<div id="root"></div>' })
+  const r = (await check(d, ['web-headers'])).results[0]
+  assert.equal(r.status, 'fail')
+  assert.match(r.detail.join('\n'), /public\/_headers/)
+  assert.ok(r.fix)
+  const FULL = "/*\n  Content-Security-Policy: default-src 'self'; script-src 'self'; frame-ancestors 'none'\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: strict-origin-when-cross-origin\n"
+  put(d, 'public/_headers', FULL)
+  assert.equal((await check(d, ['web-headers'])).results[0].status, 'pass')
+  put(d, 'public/_headers', FULL.replace('  X-Content-Type-Options: nosniff\n', ''))
+  const lack = (await check(d, ['web-headers'])).results[0]
+  assert.equal(lack.status, 'fail')
+  assert.equal(lack.detail.length, 1)
+  assert.match(lack.detail[0], /nosniff/)
+})
+
+test('web-headers: dự án không phải web kiểu Vite (không index.html, không vite) và app Wails / extension ⇒ không hiện dòng nào (không đòi file header)', async () => {
+  assert.deepEqual((await check(project({ 'package.json': '{"name":"thu-vien"}' }), ['web-headers'])).results, [])
+  const wails = project({ 'go.mod': 'module x\n', 'wails.json': '{}', 'frontend/package.json': '{}', 'frontend/index.html': '<div/>' })
+  assert.deepEqual((await check(wails, ['web-headers'])).results, [])
+  const ext = project({ 'package.json': '{}', 'index.html': '<div/>', 'public/manifest.json': { manifest_version: 3, name: 'x' } })
+  assert.deepEqual((await check(ext, ['web-headers'])).results, [])
+  const vite = project({ 'package.json': '{"devDependencies":{"vite":"7"}}' })
+  assert.equal((await check(vite, ['web-headers'])).results[0].status, 'fail', 'có vite mà chưa có header ⇒ vẫn đòi')
+})
+
+const UI_CFG = { '.claude/ui.json': { start: 'npm run dev', url: 'http://localhost:5173', routes: ['/'] }, 'package.json': '{}' }
+const uiExec = (res, seen = []) => async (file, args, o) => { seen.push({ file, args, cwd: o.cwd, timeoutMs: o.timeoutMs }); return { ...OK, ...res } }
+
+test('ui-rules: không có .claude/ui.json ⇒ không hiện; có ⇒ chạy `node <hooks>/ui-check.mjs --dir .` ở gốc dự án với timeout ≥ 300 giây, exit 0 ⇒ ĐẠT', async () => {
+  assert.deepEqual((await check(project({ 'package.json': '{}' }), ['ui-rules'])).results, [])
+  const d = project(UI_CFG)
+  const seen = []
+  const r = (await check(d, ['ui-rules'], { exec: uiExec({ stdout: 'ĐẠT  Giao diện: đã kiểm 1 màn ở 2 khổ (1280, 390), không có lỗi chặn.' }, seen) })).results[0]
+  assert.equal(r.status, 'pass')
+  assert.equal(seen.length, 1)
+  assert.equal(path.basename(seen[0].args[0]), 'ui-check.mjs')
+  assert.ok(fs.existsSync(seen[0].args[0]), `đường dẫn ui-check phải có thật: ${seen[0].args[0]}`)
+  assert.deepEqual(seen[0].args.slice(1), ['--dir', '.'])
+  assert.equal(seen[0].cwd, d)
+  assert.ok(seen[0].timeoutMs >= 300000)
+})
+
+test('ui-rules: exit 1 ⇒ KHÔNG ĐẠT kèm các lỗi + lời dặn; exit 2 ⇒ KHÔNG ĐẠT "chưa chạy được"; exit 3 ⇒ THIẾU kèm lệnh cài ui-check in ra, chặn (bắt buộc)', async () => {
+  const d = project(UI_CFG)
+  const one = (res) => check(d, ['ui-rules'], { exec: uiExec(res) })
+  const bad = await one({ code: 1, stdout: 'KHÔNG  Giao diện còn 2 lỗi chặn (đã kiểm 1 màn ở 2 khổ (1280, 390)):\n  1. Màn /, khổ rộng 1280: 2 nút chính\n     Sửa: chỉ để một nút chính mỗi màn' })
+  assert.equal(bad.results[0].status, 'fail')
+  assert.match(bad.results[0].message, /^2 lỗi giao diện/)
+  assert.match(bad.results[0].detail.join('\n'), /2 nút chính/)
+  assert.match(bad.results[0].fix, /ui-baseline\.json/)
+  assert.equal(exitCode(bad), 1)
+  const cfg = await one({ code: 2, stderr: 'ui-check: Chưa có .claude/ui.json. Tạo file này' })
+  assert.equal(cfg.results[0].status, 'fail')
+  assert.match(cfg.results[0].message, /chưa chạy được/)
+  assert.match(cfg.results[0].detail.join('\n'), /Chưa có \.claude\/ui\.json/)
+  const noPw = await one({ code: 3, stderr: 'ui-check: Thiếu Playwright (công cụ mở app thử như người dùng) trong dự án này. Cài bằng:\n  pnpm add -D playwright\n  pnpm exec playwright install chromium' })
+  assert.equal(noPw.results[0].status, 'missing')
+  assert.equal(noPw.results[0].required, true)
+  assert.match(noPw.results[0].fix, /pnpm add -D playwright && pnpm exec playwright install chromium/)
+  assert.equal(exitCode(noPw), 1, 'thiếu công cụ bắt buộc ⇒ chặn, không tính đạt')
+  const bare = await one({ code: 3, stderr: 'ui-check: lạ' })
+  assert.match(bare.results[0].fix, /npx playwright install chromium/)
+  const odd = await one({ code: 9, stdout: 'x' })
+  assert.equal(odd.results[0].status, 'fail')
+})
+
+test('ui-rules × Wails: ui.json ở frontend/ (roots.web) ⇒ ui-check chạy `--dir .` NGAY TRONG frontend/ (Playwright của frontend); ui.json chỉ nằm ở gốc Wails ⇒ không hiện; web thường vẫn ở gốc', async () => {
+  const wails = { 'go.mod': 'module x\n', 'wails.json': '{}', 'frontend/package.json': '{}' }
+  const d = project({ ...wails, 'frontend/.claude/ui.json': UI_CFG['.claude/ui.json'] })
+  const seen = []
+  const rep = await check(d, ['ui-rules'], { exec: uiExec({ stdout: 'ĐẠT  Giao diện: đã kiểm 1 màn ở 2 khổ (1280, 390), không có lỗi chặn.' }, seen) })
+  assert.equal(rep.results.length, 1)
+  assert.equal(rep.results[0].status, 'pass')
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0].cwd, path.join(d, 'frontend'), 'chạy trong frontend/, không phải gốc dự án Go')
+  assert.deepEqual(seen[0].args.slice(1), ['--dir', '.'])
+  const real = (await runChecks({ dir: d, checkers: only('ui-rules') })).results[0]
+  assert.equal(real.status, 'missing', 'frontend/ chưa cài Playwright ⇒ THIẾU (ui-check đọc đúng frontend/.claude/ui.json)')
+  const rootOnly = project({ ...wails, '.claude/ui.json': UI_CFG['.claude/ui.json'] })
+  assert.deepEqual((await check(rootOnly, ['ui-rules'], { exec: uiExec({}) })).results, [])
+  const web = project(UI_CFG)
+  const seenWeb = []
+  await check(web, ['ui-rules'], { exec: uiExec({}, seenWeb) })
+  assert.equal(seenWeb[0].cwd, web)
+})
+
+test('ui-rules THẬT: chạy ui-check.mjs thật trên dự án có ui.json mà chưa cài Playwright ⇒ THIẾU kèm lệnh cài (không đạt giả)', async () => {
+  const d = project(UI_CFG)
+  const r = (await runChecks({ dir: d, checkers: only('ui-rules') })).results[0]
+  assert.equal(r.status, 'missing', JSON.stringify(r))
+  assert.match(r.fix, /playwright/)
+})
+
+const MV3 = (over = {}) => ({ manifest_version: 3, name: 'x', version: '1', permissions: ['storage'], ...over })
+const mv3Run = (files) => first(project(files), 'mv3-manifest')
+
+test('mv3-manifest + extensionPermProblems: host_permissions phủ mọi trang ⇒ KHÔNG ĐẠT; mẫu mv3Problems đã báo (<all_urls>, *://*/*) chỉ hiện MỘT lần; optional_host_permissions thì được', async () => {
+  const dup = await mv3Run({ 'manifest.json': MV3({ host_permissions: ['<all_urls>', '*://*/*'] }) })
+  assert.equal(dup.status, 'fail')
+  for (const pattern of ['<all_urls>', '*://*/*']) assert.equal(dup.detail.filter((l) => l.includes(pattern)).length, 1, `${pattern} báo trùng: ${dup.detail.join(' | ')}`)
+  const wide = await mv3Run({ 'manifest.json': MV3({ host_permissions: ['*://*.com/*', 'https://api.example.com/*'] }) })
+  assert.equal(wide.status, 'fail')
+  assert.equal(wide.detail.length, 1)
+  assert.match(wide.detail[0], /manifest\.json: host_permissions.*\*:\/\/\*\.com\/\*/)
+  assert.match(wide.fix, /optional_host_permissions/)
+  const optional = await mv3Run({ 'manifest.json': MV3({ optional_host_permissions: ['<all_urls>'], host_permissions: ['https://api.example.com/*'] }) })
+  assert.equal(optional.status, 'pass')
+})
+
+test('mv3-manifest: WXT chưa build mà wxt.config khai host_permissions rộng ⇒ KHÔNG ĐẠT (không chờ build); không khai rộng ⇒ vẫn THIẾU như cũ', async () => {
+  const wxt = { 'package.json': '{"devDependencies":{"wxt":"1"}}' }
+  const wide = await mv3Run({ ...wxt, 'wxt.config.ts': "export default { manifest: { host_permissions: ['<all_urls>'] } }" })
+  assert.equal(wide.status, 'fail')
+  assert.match(wide.detail.join('\n'), /wxt\.config\.ts: host_permissions/)
+  const fine = await mv3Run({ ...wxt, 'wxt.config.ts': "export default { manifest: { host_permissions: ['https://api.example.com/*'] } }" })
+  assert.equal(fine.status, 'missing')
+})
+
+test('mv3-manifest: manifest build cũ / public/ SẠCH không che wxt.config khai host_permissions rộng mới ⇒ KHÔNG ĐẠT nêu wxt.config.ts; wxt.config hẹp ⇒ ĐẠT', async () => {
+  const wxt = { 'package.json': '{"devDependencies":{"wxt":"1"}}' }
+  const WIDE = "export default { manifest: { host_permissions: ['https://*/*'] } }"
+  const NARROW = "export default { manifest: { host_permissions: ['https://api.example.com/*'] } }"
+  for (const where of ['.output/chrome-mv3/manifest.json', 'public/manifest.json', 'manifest.json']) {
+    const old = { ...wxt, [where]: MV3({ host_permissions: ['https://api.example.com/*'] }) }
+    const wide = await mv3Run({ ...old, 'wxt.config.ts': WIDE })
+    assert.equal(wide.status, 'fail', `${where}: ${JSON.stringify(wide)}`)
+    assert.match(wide.detail.join('\n'), /wxt\.config\.ts: host_permissions[^\n]*https:\/\/\*\/\*/, where)
+    assert.equal((await mv3Run({ ...old, 'wxt.config.ts': NARROW })).status, 'pass', where)
+  }
+  // manifest đã build cũng rộng + cấu hình rộng ⇒ cả hai nơi đều được nêu
+  const both = await mv3Run({ ...wxt, '.output/chrome-mv3/manifest.json': MV3({ host_permissions: ['https://*/*'] }), 'wxt.config.ts': WIDE })
+  assert.equal(both.status, 'fail')
+  assert.match(both.detail.join('\n'), /wxt\.config\.ts: host_permissions/)
+})
+
+// --- đợt 3 lượt 2 (QA lượt 1): checker bật app chạy nối tiếp · jscpd 5.x · web-ext với WXT ------------------------------------------------------
+
+test('validateCheckers: exclusive phải là true hoặc false', () => {
+  assert.deepEqual(validateCheckers({ checkers: [mk({ id: 'a', exclusive: true }), mk({ id: 'b', exclusive: false })] }), [])
+  assert.match(validateCheckers({ checkers: [mk({ id: 'a', exclusive: 'có' })] }).join('\n'), /a: exclusive phải là true hoặc false/)
+})
+
+test('exclusive: checker bật app (tranh cùng cổng) chạy NỐI TIẾP từng cái SAU nhóm song song; nhóm còn lại vẫn song song; thứ tự bảng giữ nguyên', async () => {
+  const events = []
+  let active = 0
+  let activeEx = 0
+  let peak = 0
+  let peakEx = 0
+  const exec = async (file, args) => {
+    const ex = args[0].startsWith('ex')
+    active++; peak = Math.max(peak, active)
+    if (ex) { activeEx++; peakEx = Math.max(peakEx, activeEx) }
+    events.push(`start ${args[0]}`)
+    await new Promise((r) => setTimeout(r, 30))
+    events.push(`end ${args[0]}`)
+    active--
+    if (ex) activeEx--
+    return OK
+  }
+  const checkers = [
+    mk({ id: 'ex1', args: ['ex1'], exclusive: true }), mk({ id: 'p1', args: ['p1'] }), mk({ id: 'ex2', args: ['ex2'], exclusive: true }),
+    mk({ id: 'p2', args: ['p2'] }), mk({ id: 'p3', args: ['p3'] }),
+  ]
+  const rep = await runChecks({ dir: project({ 'package.json': '{}' }), checkers, which: whichAll, exec, concurrency: 4 })
+  assert.deepEqual(rep.results.map((r) => r.id), ['ex1', 'p1', 'ex2', 'p2', 'p3'])
+  assert.deepEqual(rep.results.map((r) => r.status), ['pass', 'pass', 'pass', 'pass', 'pass'])
+  assert.equal(peakEx, 1, 'hai checker exclusive không được chạy cùng lúc')
+  assert.ok(peak >= 3, `nhóm không exclusive vẫn song song (đỉnh ${peak})`)
+  const lastPlainEnd = events.findLastIndex((e) => /^end p\d$/.test(e))
+  const firstExStart = events.findIndex((e) => e.startsWith('start ex'))
+  assert.ok(lastPlainEnd < firstExStart, `exclusive chỉ bắt đầu khi nhóm song song xong: ${events.join(', ')}`)
+  assert.ok(events.indexOf('end ex1') < events.indexOf('start ex2'), events.join(', '))
+})
+
+test('checkers.json thật: axe (playwright test tự bật webServer) và ui-rules (ui-check bật dev server) đều exclusive; chạy thật không bao giờ chồng nhau', async () => {
+  const get = (id) => REAL.checkers.find((c) => c.id === id)
+  assert.equal(get('axe').exclusive, true)
+  assert.equal(get('ui-rules').exclusive, true)
+  assert.deepEqual(REAL.checkers.filter((c) => c.exclusive).map((c) => c.id), ['axe', 'ui-rules'])
+  const dir = project({ 'package.json': { devDependencies: { '@playwright/test': '1', '@axe-core/playwright': '4', typescript: '5' } }, 'tsconfig.json': '{}', '.claude/ui.json': '{}' })
+  let appUp = 0
+  let overlap = 0
+  const seen = []
+  const exec = async (file, args) => {
+    const app = args[0] === 'test' || /ui-check\.mjs$/.test(args[0])
+    if (app) { seen.push(args[0] === 'test' ? 'axe' : 'ui-rules'); appUp++; overlap = Math.max(overlap, appUp) }
+    await new Promise((r) => setTimeout(r, 30))
+    if (app) appUp--
+    return OK
+  }
+  const rep = await check(dir, ['tsc', 'knip', 'axe', 'ui-rules'], { exec })
+  assert.deepEqual(rep.results.map((r) => [r.id, r.status]), [['tsc', 'pass'], ['knip', 'pass'], ['axe', 'pass'], ['ui-rules', 'pass']])
+  assert.deepEqual(seen, ['axe', 'ui-rules'])
+  assert.equal(overlap, 1)
+})
+
+test('jscpd (CLI 5.x): không còn cờ --gitignore (bản 5.x báo "unexpected argument" exit 2); bỏ node_modules/dist qua file cấu hình tạm rồi xoá file', async () => {
+  const jc = REAL.checkers.find((c) => c.id === 'jscpd')
+  assert.ok(!jc.args.includes('--gitignore'), `args: ${jc.args.join(' ')}`)
+  assert.deepEqual(jc.args.slice(0, 2), ['--threshold', '5'])
+  assert.equal(jc.plan, 'jscpd')
+  const seen = []
+  const exec = async (file, args, o) => {
+    const at = args.indexOf('--config')
+    const cfgPath = args[at + 1]
+    seen.push({ args, cwd: o.cwd, cfgPath, cfg: at < 0 ? null : JSON.parse(fs.readFileSync(cfgPath, 'utf8')) })
+    return OK
+  }
+  const dir = project({ 'package.json': '{}' })
+  const r = await first(dir, 'jscpd', { exec })
+  assert.equal(r.status, 'pass', JSON.stringify(r))
+  assert.equal(seen.length, 1)
+  const { args, cfg, cfgPath } = seen[0]
+  assert.ok(!args.includes('--gitignore'))
+  assert.ok(args.includes('--threshold') && args.includes('.'), args.join(' '))
+  assert.ok(cfg.ignore.includes('**/node_modules/**') && cfg.ignore.includes('**/dist/**'), JSON.stringify(cfg))
+  assert.ok(!cfgPath.includes('\\'), 'đường dẫn file cấu hình dùng dấu / (qua được bộ lọc .cmd của Windows)')
+  assert.equal(fs.existsSync(cfgPath), false, 'file cấu hình tạm phải được xoá sau khi chạy')
+})
+
+test('jscpd: dự án có .jscpd.json riêng ⇒ cấu hình tạm GỘP (giữ ignore và khoá khác của dự án + thêm node_modules/dist); .jscpd.json hỏng ⇒ chỉ dùng danh sách của kit', async () => {
+  const cfgOf = async (files) => {
+    let cfg = null
+    const exec = async (file, args) => { cfg = JSON.parse(fs.readFileSync(args[args.indexOf('--config') + 1], 'utf8')); return OK }
+    const r = await first(project({ 'package.json': '{}', ...files }), 'jscpd', { exec })
+    assert.equal(r.status, 'pass')
+    return cfg
+  }
+  const merged = await cfgOf({ '.jscpd.json': JSON.stringify({ ignore: ['**/gen/**', '**/dist/**'], minLines: 12 }) })
+  assert.deepEqual(merged.ignore, ['**/gen/**', '**/dist/**', '**/node_modules/**'])
+  assert.equal(merged.minLines, 12)
+  assert.deepEqual((await cfgOf({ '.jscpd.json': '{ hỏng' })).ignore, ['**/node_modules/**', '**/dist/**'])
+})
+
+test('checkers.json thật: đối số TĨNH của mọi checker chỉ gồm ký tự qua được bộ lọc .cmd của Windows (chữ, số, . : = / -) — glob * hoặc dấu phẩy sẽ bị từ chối ở máy Windows', () => {
+  for (const c of REAL.checkers) {
+    for (const a of c.args ?? []) assert.match(a.replaceAll('{kit}', '').replaceAll('{hooks}', ''), /^[\w.:=/-]*$/, `${c.id}: đối số ${a}`)
+  }
+})
+
+const WEBEXT_JSON = ['lint', '--output', 'json']
+const webExtOut = (errors = [], warnings = []) => JSON.stringify({ count: errors.length + warnings.length, summary: { errors: errors.length, notices: 0, warnings: warnings.length }, errors, notices: [], warnings })
+const wxErr = (code, message = `lỗi ${code}`) => ({ _type: 'error', code, message, file: 'manifest.json' })
+const FIREFOX_ONLY = [wxErr('BACKGROUND_SERVICE_WORKER_NOFALLBACK'), wxErr('ADDON_ID_REQUIRED')]
+const webExtExec = (stdout, code = 0, seen = []) => async (file, args, o) => { seen.push({ args, cwd: o.cwd }); return { ...OK, code, stdout } }
+
+test('web-ext-lint × WXT: có wxt.config.* và bản build .output/chrome-mv3 ⇒ lint thư mục đó (--source-dir) chạy từ gốc dự án; chưa build ⇒ THIẾU kèm dặn build, không chạy web-ext', async () => {
+  const wxt = { 'package.json': '{"devDependencies":{"wxt":"1"}}', 'wxt.config.ts': 'export default {}' }
+  const seen = []
+  const exec = webExtExec(webExtOut(), 0, seen)
+  const built = project({ ...wxt, '.output/chrome-mv3/manifest.json': MV3() })
+  const ok = await first(built, 'web-ext-lint', { exec })
+  assert.equal(ok.status, 'pass', JSON.stringify(ok))
+  assert.deepEqual(seen[0].args, [...WEBEXT_JSON, '--source-dir', '.output/chrome-mv3'])
+  assert.equal(fs.realpathSync(seen[0].cwd), fs.realpathSync(built), 'chạy từ gốc dự án, không phải từ trong thư mục build')
+  seen.length = 0
+  const unbuilt = await first(project(wxt), 'web-ext-lint', { exec })
+  assert.equal(unbuilt.status, 'missing')
+  assert.match(unbuilt.message, /build/i)
+  assert.match(unbuilt.fix, /build/i)
+  assert.equal(seen.length, 0, 'chưa có bản build thì không chạy web-ext')
+})
+
+test('web-ext-lint × WXT với outDir "dist" (mẫu extension của kit): manifest ở dist/ ⇒ lint thẳng trong dist/, không cần --source-dir; dist/ thắng .output/ cũ còn sót', async () => {
+  const wxt = { 'package.json': '{"devDependencies":{"wxt":"1"}}', 'wxt.config.ts': "export default { outDir: 'dist' }", 'dist/manifest.json': MV3() }
+  const seen = []
+  const dir = project(wxt)
+  const r = await first(dir, 'web-ext-lint', { exec: webExtExec(webExtOut(), 0, seen) })
+  assert.equal(r.status, 'pass', JSON.stringify(r))
+  assert.deepEqual(seen[0].args, WEBEXT_JSON)
+  assert.equal(fs.realpathSync(seen[0].cwd), fs.realpathSync(path.join(dir, 'dist')))
+  seen.length = 0
+  const both = project({ ...wxt, '.output/chrome-mv3/manifest.json': MV3() })
+  await first(both, 'web-ext-lint', { exec: webExtExec(webExtOut(), 0, seen) })
+  assert.deepEqual(seen[0].args, WEBEXT_JSON)
+})
+
+test('web-ext-lint: extension thường (manifest.json ở gốc, không wxt.config) ⇒ `web-ext lint --output json` chạy trong thư mục chứa manifest', async () => {
+  const seen = []
+  const dir = project({ 'manifest.json': MV3() })
+  const r = await first(dir, 'web-ext-lint', { exec: webExtExec(webExtOut(), 0, seen) })
+  assert.equal(r.status, 'pass')
+  assert.deepEqual(seen[0].args, WEBEXT_JSON)
+  assert.equal(fs.realpathSync(seen[0].cwd), fs.realpathSync(dir))
+})
+
+test('web-ext-lint: bản Chrome-only (manifest không có browser_specific_settings.gecko) ⇒ bỏ 2 lỗi CHỈ của Firefox (BACKGROUND_SERVICE_WORKER_NOFALLBACK, ADDON_ID_REQUIRED), vẫn ĐẠT và nói rõ đã bỏ', async () => {
+  const dir = project({ 'manifest.json': MV3({ background: { service_worker: 'bg.js' } }) })
+  const r = await first(dir, 'web-ext-lint', { exec: webExtExec(webExtOut(FIREFOX_ONLY), 1) })
+  assert.equal(r.status, 'pass', JSON.stringify(r))
+  assert.match(r.detail.join('\n'), /bỏ 2 lỗi chỉ của Firefox/)
+})
+
+test('web-ext-lint: lỗi khác vẫn KHÔNG ĐẠT và chỉ liệt kê lỗi thật (không kể 2 mã Firefox-only); manifest khai gecko ⇒ không lọc gì', async () => {
+  const chrome = project({ 'manifest.json': MV3() })
+  const real = wxErr('MANIFEST_FIELD_REQUIRED', 'Thiếu trường name')
+  const bad = await first(chrome, 'web-ext-lint', { exec: webExtExec(webExtOut([...FIREFOX_ONLY, real]), 1) })
+  assert.equal(bad.status, 'fail')
+  assert.match(bad.message, /1 lỗi/)
+  const text = bad.detail.join('\n')
+  assert.match(text, /MANIFEST_FIELD_REQUIRED/)
+  assert.doesNotMatch(text, /ADDON_ID_REQUIRED|BACKGROUND_SERVICE_WORKER_NOFALLBACK/)
+  assert.ok(bad.fix)
+  const gecko = project({ 'manifest.json': MV3({ browser_specific_settings: { gecko: { id: 'x@y.z' } } }) })
+  const ff = await first(gecko, 'web-ext-lint', { exec: webExtExec(webExtOut(FIREFOX_ONLY), 1) })
+  assert.equal(ff.status, 'fail')
+  assert.match(ff.detail.join('\n'), /ADDON_ID_REQUIRED/)
+})
+
+test('web-ext-lint: output không phải JSON đọc được ⇒ theo mã thoát như cũ (0 đạt, khác 0 KHÔNG ĐẠT kèm output), không đạt giả', async () => {
+  const dir = project({ 'manifest.json': MV3() })
+  const bad = await first(dir, 'web-ext-lint', { exec: async () => ({ ...OK, code: 1, stdout: 'Error: không đọc được manifest' }) })
+  assert.equal(bad.status, 'fail')
+  assert.match(bad.detail.join('\n'), /không đọc được manifest/)
+  assert.equal((await first(dir, 'web-ext-lint', { exec: async () => ({ ...OK, code: 0, stdout: 'ok' }) })).status, 'pass')
+})
+
+test('size-limit: lệnh cài gợi ý @size-limit/file (preset-app kéo puppeteer có lỗ hổng chưa vá)', () => {
+  const sl = REAL.checkers.find((c) => c.id === 'size-limit')
+  assert.match(sl.install, /size-limit @size-limit\/file$/)
+  assert.doesNotMatch(sl.install, /preset-app/)
 })

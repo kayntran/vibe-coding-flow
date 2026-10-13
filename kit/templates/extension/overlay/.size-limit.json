@@ -1,0 +1,4 @@
+[
+  { "name": "giao diện popup (JS, nén gzip)", "path": "dist/chunks/*.js", "gzip": true, "limit": "150 kB" },
+  { "name": "nền và script (JS, nén gzip)", "path": "dist/*.js", "gzip": true, "limit": "20 kB" }
+]

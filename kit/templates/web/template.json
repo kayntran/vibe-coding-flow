@@ -1,0 +1,34 @@
+{
+  "$comment": "Mẫu webapp: Vite React-TS + Tailwind + shadcn (MỘT lệnh shadcn init tạo cả dự án; KHÔNG chạy init trên app create-vite trần — lỗi). Đọc bởi hooks/lib/new-app.mjs. replace = file do lệnh tạo sinh mà lớp phủ được phép thay; mọi file khác của overlay không đè file có sẵn. devDeps = công cụ của máy kiểm flow-check (kit/checkers.json) + Playwright/axe, bản ghim ở versions.json; cấu hình của chúng nằm trong overlay (eslint.config.js bật @shadcn/lint, knip.jsonc, .size-limit.json, osv-scanner.toml). build = dựng một lần sau khi tạo để secret-build / size-limit có bản build.",
+  "type": "web",
+  "label": "webapp",
+  "stack": "web",
+  "port": 5173,
+  "needs": [],
+  "generate": { "runner": "pm-exec", "package": "shadcn", "args": ["init", "-d", "-t", "vite", "-n", "{{name}}"] },
+  "markers": ["package.json", "components.json"],
+  "pkgDir": ".",
+  "install": false,
+  "devDeps": [
+    { "name": "@playwright/test", "version": "playwright" },
+    { "name": "@axe-core/playwright", "version": "axe" },
+    { "name": "@shadcn/lint", "version": "shadcnLint" },
+    { "name": "knip", "version": "knip" },
+    { "name": "jscpd", "version": "jscpd" },
+    { "name": "size-limit", "version": "sizeLimit" },
+    { "name": "@size-limit/file", "version": "sizeLimit" },
+    { "name": "dependency-cruiser", "version": "depcruise" }
+  ],
+  "browser": true,
+  "build": true,
+  "scripts": { "test:e2e": "playwright test" },
+  "replace": ["src/App.tsx", "index.html", "vite.config.ts", "eslint.config.js"],
+  "gitignore": [".env", ".env.*", "!.env.example", "playwright-report/", "test-results/"],
+  "next": { "dev": "{{PM_DEV}}", "url": "http://localhost:5173" },
+  "archProblem": "Webapp mới tạo: màn đầu (S-01) còn trống, chưa có dữ liệu hay tính năng nào. Thay bằng bài toán thật của app khi viết SPEC.",
+  "archDescs": {
+    "src/features/home": "Màn đầu (S-01, giữ chỗ): chỉ hiện tên app; thay bằng màn thật khi có SPEC; KHÔNG gọi dịch vụ ngoài từ ui, KHÔNG import tính năng khác.",
+    "src/components": "Thành phần giao diện của shadcn (nút, ô nhập…); KHÔNG chứa logic nghiệp vụ.",
+    "src/lib": "Hàm tiện ích của shadcn (cn); KHÔNG chứa logic nghiệp vụ."
+  }
+}

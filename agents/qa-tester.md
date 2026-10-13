@@ -35,6 +35,15 @@ Với mỗi acceptance criteria, thử:
    nhiên, nhãn dài >3 chữ, thông báo lặp lại điều UI đã thể hiện ⇒ ghi mức MINOR kèm ảnh, đề xuất bỏ.
 6. Mạng chậm (`page.route` thêm độ trễ) cho thao tác có gọi API.
 
+**Brief ghi `mode=nguoi-moi`** ⇒ chỉ làm bài người mới: KHÔNG đọc code, SPEC, PLAN, test của dự án; chỉ có mục tiêu bằng
+lời trong brief. Đi từ màn đầu, mỗi bước ghi: thấy gì, định bấm gì, vì sao; đếm lần bấm nhầm, chỗ phải đoán, chỗ kẹt
+(>3 lần thử không tiến). Báo cáo mục "Người mới": xong/không xong, các chỗ kẹt/đoán kèm ảnh, đề xuất sửa bằng bố cục
+hoặc nhãn trước khi thêm chữ.
+
+**Brief có `P-nn`** ⇒ với mỗi mã: chạy test captain chỉ (hai người dùng/hai phiên/hai trình duyệt) ⇒ ghi kết quả; phần
+"tắt chặn quyền" do captain/coder làm trong worktree, qa-tester chỉ chạy lại test và ghi đỏ/xanh theo đúng dòng
+`P-01: đỏ khi tắt: có — <file test>` khi đã thấy đỏ thật.
+
 ## Đầu ra
 `qa-report.md` (đường captain đưa):
 - Bảng `criteria | pass/fail | bằng chứng (ảnh, dòng console)`.

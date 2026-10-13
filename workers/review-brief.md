@@ -10,7 +10,9 @@ Soát theo thứ tự ưu tiên:
 2. Đồng thời: đua dữ liệu, đọc-rồi-ghi không nguyên tử, khoá thiếu/khoá chéo, goroutine/promise rò, huỷ không lan.
 3. Dữ liệu: migration không đảo được, transaction thiếu, mất dữ liệu cũ, index/constraint thiếu.
 4. Bảo mật: injection (SQL/shell/path), secret lọt log/response, authz thiếu, SSRF, CORS/cookie, so sánh
-   token không hằng thời gian, input người dùng không kiểm.
+   token không hằng thời gian, input người dùng không kiểm. Diff đụng server/DB: dữ liệu vào phải kiểm ở server/DB
+   (schema ở server, ràng buộc check/not null, RLS `with check`) — kiểm chỉ ở giao diện là thiếu; truy vấn phải tham
+   số hoá; chặn quyền nằm ở server/DB, không chỉ ẩn nút; mỗi dòng P-nn của SPEC có test ở đúng lớp đó.
 5. Vá tạm bị cấm: try/catch nuốt lỗi, sleep chờ cho kịp, @ts-ignore/ép kiểu, hardcode qua case lỗi.
 6. Hiệu năng: truy vấn N+1, vòng lặp gọi I/O, thiếu phân trang/giới hạn, tải cả bảng vào bộ nhớ, render lại
    thừa ở vòng nóng, rò bộ nhớ/listener. Chỉ báo khi chỉ ra được dữ liệu cỡ nào thì chậm/hỏng.

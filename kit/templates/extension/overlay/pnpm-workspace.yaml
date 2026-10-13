@@ -1,0 +1,8 @@
+packages: []
+
+allowBuilds:
+  esbuild: true
+
+# shell-quote 1.10.0 (đi theo web-ext → fx-runner) có lỗ hổng nghiêm trọng, đã vá ở 1.11.0: ép dùng bản vá.
+overrides:
+  shell-quote: ^1.11.0

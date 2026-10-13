@@ -1,0 +1,69 @@
+{
+  "$comment": "Mẫu extension Chrome (Manifest V3): WXT mẫu react. Chưa xin quyền nào (không khai permissions), bỏ content script mẫu chạy trên *.google.com, code đặt trong src/ (srcDir) để theo kit/arch/extension.arch.json. Bản build ra dist/ (wxt.config.ts: outDir) để máy kiểm quét khoá, đo dung lượng và tìm manifest; vì bản build Chrome và Firefox cùng ra dist/ nên patch bỏ các script *:firefox của WXT (mẫu này là extension Chrome, tránh bản Firefox đè bản Chrome). WXT mẫu không có ESLint ⇒ devDeps thêm eslint + typescript-eslint… (eslint.config.js trong overlay). tsconfig.json thay bằng bản có paths '@/*' ngay trong file (WXT chỉ khai paths trong .wxt/tsconfig.json với đường dẫn '../src', dependency-cruiser không đọc được ⇒ báo import '@/…' không tìm thấy). archDeps = module nào được import module nào trong docs/arch.json (popup ráp màn từ features/home). pnpm-workspace.yaml ép shell-quote bản vá, osv-scanner.toml miễn lỗ hổng chưa có bản vá (có hạn). Đọc bởi hooks/lib/new-app.mjs.",
+  "type": "extension",
+  "label": "extension trình duyệt",
+  "stack": "extension",
+  "port": 5173,
+  "needs": [],
+  "generate": { "runner": "pm-exec", "package": "wxt", "args": ["init", "{{name}}", "-t", "react", "--pm", "{{pm}}"] },
+  "markers": ["package.json", "wxt.config.ts"],
+  "pkgDir": ".",
+  "install": true,
+  "devDeps": [
+    { "name": "@playwright/test", "version": "playwright" },
+    { "name": "@axe-core/playwright", "version": "axe" },
+    { "name": "eslint", "version": "eslint" },
+    { "name": "@eslint/js", "version": "eslintJs" },
+    { "name": "typescript-eslint", "version": "tsEslint" },
+    { "name": "eslint-plugin-react-hooks", "version": "reactHooks" },
+    { "name": "globals", "version": "globals" },
+    { "name": "knip", "version": "knip" },
+    { "name": "jscpd", "version": "jscpd" },
+    { "name": "size-limit", "version": "sizeLimit" },
+    { "name": "@size-limit/file", "version": "sizeLimit" },
+    { "name": "dependency-cruiser", "version": "depcruise" }
+  ],
+  "browser": true,
+  "build": true,
+  "patch": [
+    {
+      "file": "package.json",
+      "set": {
+        "name": "{{APP_NAME}}",
+        "scripts": {
+          "dev": "wxt",
+          "build": "wxt build",
+          "zip": "wxt zip",
+          "compile": "tsc --noEmit",
+          "lint": "eslint .",
+          "postinstall": "wxt prepare",
+          "test:e2e": "wxt build && playwright test"
+        }
+      }
+    },
+    { "file": "package.json", "pm": "npm", "set": { "overrides": { "shell-quote": "^1.11.0" } } }
+  ],
+  "move": [
+    { "from": "entrypoints", "to": "src/entrypoints" },
+    { "from": "assets", "to": "src/assets" }
+  ],
+  "remove": [{ "path": "src/entrypoints/content.ts", "contains": "google.com" }],
+  "replace": [
+    "wxt.config.ts",
+    "tsconfig.json",
+    "src/entrypoints/popup/index.html",
+    "src/entrypoints/popup/main.tsx",
+    "src/entrypoints/popup/App.tsx",
+    "src/entrypoints/popup/style.css"
+  ],
+  "gitignore": [".env", ".env.*", "!.env.example", "playwright-report/", "test-results/"],
+  "next": { "dev": "{{PM_DEV}}", "url": "http://localhost:5173/src/entrypoints/popup/index.html", "open": "xem cửa sổ popup trong một tab thường; để thử thật: build rồi nạp thư mục dist ở chrome://extensions" },
+  "archProblem": "Extension Chrome mới tạo: bấm icon mở popup, màn đầu (S-01) còn trống, chưa xin quyền nào, chưa có dữ liệu hay tính năng nào. Thay bằng bài toán thật của extension khi viết SPEC.",
+  "archDeps": {
+    "src/entrypoints": ["features/home"]
+  },
+  "archDescs": {
+    "src/entrypoints": "Điểm vào của extension (popup, background, content): chỉ ráp màn từ features và gọi shared; KHÔNG chứa logic nghiệp vụ, các môi trường chỉ nói chuyện qua message.",
+    "src/features/home": "Màn popup đầu (S-01, giữ chỗ): chỉ hiện tên extension; thay bằng màn thật khi có SPEC; KHÔNG import tính năng khác."
+  }
+}

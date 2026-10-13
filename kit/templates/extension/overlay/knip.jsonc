@@ -1,0 +1,9 @@
+{
+  // knip tìm file và thư viện không dùng.
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  // Điểm vào của WXT nằm trong src/entrypoints (srcDir = src); plugin WXT của knip chỉ tìm entrypoints/ ở thư mục gốc.
+  "entry": ["src/entrypoints/**/*.{ts,tsx,html}"],
+  "ignoreDependencies": [
+    "jscpd" // chạy bằng lệnh của máy kiểm (flow-check), không import trong code
+  ]
+}

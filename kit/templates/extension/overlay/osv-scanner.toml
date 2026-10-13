@@ -1,0 +1,8 @@
+# osv-scanner (quét lỗ hổng thư viện). Chỉ miễn MỘT lỗ hổng chưa có bản vá, có hạn: hết hạn thì máy kiểm báo lại.
+# node-forge <= 1.4.0 (kiểm chữ ký RSA PKCS#1 v1.5 lỏng) đi theo web-ext → adbkit, công cụ chạy thử extension lúc dev.
+# Chưa có bản node-forge nào cao hơn 1.4.0 nên không override được; nó không nằm trong extension gửi người dùng (thư mục dist).
+# Khi node-forge ra bản vá: bỏ khối này và nâng (pnpm up node-forge).
+[[IgnoredVulns]]
+id = "GHSA-86w9-cpqp-85rv"
+ignoreUntil = 2027-01-31
+reason = "node-forge chưa có bản vá; chỉ nằm trong công cụ dev (web-ext), không vào bản build"
