@@ -58,6 +58,17 @@ tích hợp.
 - Việc đánh giá độc lập (research, review plan, nhiều debugger cho nhiều lỗi, 2 lượt Codex) gửi trong MỘT message.
 - Giao xong không ngó chừng (không sleep/poll/đọc log) — hệ thống tự báo khi xong.
 
+**Gom lần báo xong — tiết kiệm token.** Mỗi lần worker/lệnh nền báo xong, phiên chính thức dậy và gửi lại CẢ ngữ cảnh
+(đo 2026-10-13 trên kit: 53% lần thức là do báo xong, tốn ~64% chi phí phiên chính; ngữ cảnh lúc thức trung vị ~400k):
+- **≥3 việc độc lập chỉ cần kết quả cuối** (QA + review + test nhiều nền, nhiều lượt đánh giá, research nhiều góc,
+  quét nhiều file) ⇒ chạy bằng tool `Workflow` (user đã cho phép sẵn: allow `Workflow`): cả đợt chỉ báo MỘT lần. Việc
+  sửa code dùng bản sao riêng cho từng agent; giữ ≤4 agent viết code cùng lúc như trên. Không dùng Workflow khi giữa
+  chừng cần captain quyết hoặc hỏi user (Workflow không nhận ý kiến giữa chừng) — tách thành nhiều Workflow theo chặng.
+- Lệnh nền liên quan nhau (test Windows + Mac, build + test) ⇒ gộp vào MỘT lệnh nền in một tổng kết, không hai lệnh.
+- Một worker xong gửi HAI tín hiệu (báo cáo + thông báo "completed"): xử lý ở tín hiệu đầu; tín hiệu sau không có gì
+  mới ⇒ không gọi tool, không nhắn user.
+- Brief luôn đòi receipt ngắn (chi tiết ghi ra file, chỉ báo đường file + vài dòng kết luận).
+
 **Khi làn trả về** — trước khi nhận:
 `node ~/.claude/hooks/lane-check.mjs audit <PLAN.md> <lane> --branch <nhánh làn> --base <mốc làn tách ra>`
 (mốc = nhánh tích hợp nếu làn tách từ đó ở wave sau, `main` nếu wave đầu). Audit tính cả file chưa commit trong

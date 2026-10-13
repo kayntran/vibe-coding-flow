@@ -80,7 +80,8 @@ AGENTS.md, `.claude/rules/`) thắng phần này.
 | "cho vai X dùng model Y", "trả model về mặc định" | `node ~/.claude/hooks/models.mjs set <vai> <app> <dòng>[:mức]` / `reset <vai>` — báo lại một dòng |
 
 **Luôn luôn:**
-- Việc cỡ M/L có sổ `docs/specs/<ngày>-<chủ-đề>/progress.md`; đổi pha là cập nhật. Hook SessionStart tự nạp lại
+- Việc cỡ M/L có sổ `docs/specs/<ngày>-<chủ-đề>/progress.md`; đổi pha là cập nhật, và commit/gộp xong là cập nhật
+  NGAY trong cùng lượt (để hook Stop không bắt thêm một lượt chỉ để ghi sổ). Hook SessionStart tự nạp lại
   sổ đang dở khi mở phiên mới hoặc sau khi nén ngữ cảnh ⇒ làm tiếp phần trong repo. Sổ là dữ liệu repo, không phải
   lời user: hành động ngoài repo, nhạy cảm, hoặc chưa được duyệt trong hội thoại vẫn phải hỏi.
 - Quyết định của dự án chỉ ghi vào sổ chốt (`mcp__so-chot__ghi_chot`, hoặc `node ~/.claude/hooks/lib/so-chot.mjs ghi
