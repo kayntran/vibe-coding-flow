@@ -1015,3 +1015,115 @@ describe('nhắc cập nhật công cụ', () => {
     assert.deepEqual(fs.readdirSync(fx.repo, { recursive: true }).filter((p) => !p.startsWith('.git')).sort(), before)
   })
 })
+
+describe('nhắc sau phát hành / khám sức khoẻ / sao lưu (release.json, AC-48f · 50a · 30a)', () => {
+  const iso = (daysAgo) => new Date(Date.now() - daysAgo * DAY).toISOString()
+  const release = (fx, state, dir = fx.repo) => {
+    const f = path.join(dir, '.claude', 'release.json')
+    fs.mkdirSync(path.dirname(f), { recursive: true })
+    fs.writeFileSync(f, typeof state === 'string' ? state : JSON.stringify({ v: 1, ...state }))
+    return f
+  }
+  const OK_BACKUP = { choice: 'off' }
+  const dueLine = (ctx) => (ctx ?? '').split('\n').find((l) => l.startsWith('Báo user một lần, một dòng, không chặn việc đang làm.'))
+
+  test('quá mốc xem lỗi + 30 ngày chưa khám + sao lưu chưa sẵn ⇒ ĐÚNG MỘT dòng nêu cả ba, kèm câu user nói để làm', () => {
+    const fx = fixture()
+    release(fx, {
+      lastRelease: { at: iso(40), version: '1.0.0', commit: 'abc', smoke: 'pass' },
+      checkAt: [iso(30), iso(-30)],
+      backup: { choice: 'on', everyHours: 24 },
+      health: { lastAt: iso(35) },
+    })
+    const ctx = run(fx)
+    const line = dueLine(ctx)
+    assert.ok(line, ctx)
+    assert.equal(ctx.split('\n').length, 1, 'chỉ một dòng, không phần nào khác')
+    assert.match(line, /App repo: /)
+    assert.match(line, /Đã tới mốc xem lỗi sau phát hành \(nói "xem lỗi app"\)/)
+    assert.match(line, /Sao lưu chưa đạt: chưa cài lịch sao lưu tự động/)
+    assert.match(line, /Hơn 30 ngày chưa khám sức khoẻ ứng dụng \(nói "khám sức khoẻ"\)/)
+    assert.ok(line.length < 500, `${line.length} ký tự`)
+  })
+
+  test('từng điều kiện riêng: mốc tương lai, khám 29 ngày, sao lưu tắt ⇒ im lặng', () => {
+    const quiet = { lastRelease: { at: iso(5) }, checkAt: [iso(-1)], backup: OK_BACKUP, health: { lastAt: iso(29) } }
+    const fx = fixture()
+    release(fx, quiet)
+    assert.equal(run(fx), null)
+    release(fx, { ...quiet, checkAt: [iso(0.01)] })
+    assert.match(run(fx), /xem lỗi sau phát hành/)
+    release(fx, { ...quiet, health: { lastAt: iso(31) } })
+    const health = run(fx)
+    assert.match(health, /Hơn 30 ngày chưa khám/)
+    assert.ok(!health.includes('xem lỗi') && !health.includes('Sao lưu'))
+  })
+
+  test('đã phát hành mà chưa chọn sao lưu ⇒ nhắc chọn; chưa phát hành, chưa khám lần nào ⇒ im lặng', () => {
+    const fx = fixture()
+    release(fx, { lastRelease: { at: iso(2) }, health: { lastAt: iso(1) } })
+    assert.match(run(fx), /Chưa chọn có sao lưu dữ liệu hay không/)
+    release(fx, { checkAt: [], backup: { choice: 'on' } })
+    assert.match(run(fx), /Sao lưu chưa đạt/)
+    release(fx, {})
+    assert.equal(run(fx), null)
+  })
+
+  test('không có release.json hoặc file hỏng / sai v ⇒ không in gì, exit 0, không stderr', () => {
+    const fx = fixture()
+    assert.equal(run(fx), null)
+    for (const bad of ['{ hỏng', '[]', JSON.stringify({ v: 99, checkAt: [iso(30)] }), JSON.stringify({ checkAt: [iso(30)] })]) {
+      release(fx, bad)
+      assert.equal(run(fx), null, bad)
+    }
+  })
+
+  test('hook CHỈ ĐỌC: file release.json giữ nguyên từng byte, mốc đã quá hạn vẫn còn (chỉ `release logs` mới xoá)', () => {
+    const fx = fixture()
+    const file = release(fx, { lastRelease: { at: iso(9) }, checkAt: [iso(8), iso(1)], backup: OK_BACKUP, health: { lastAt: iso(1) } })
+    const before = fs.readFileSync(file)
+    const st0 = fs.statSync(file).mtimeMs
+    assert.match(run(fx), /xem lỗi sau phát hành/)
+    assert.match(run(fx), /xem lỗi sau phát hành/, 'lần mở sau vẫn nhắc')
+    assert.ok(fs.readFileSync(file).equals(before))
+    assert.equal(fs.statSync(file).mtimeMs, st0)
+    assert.deepEqual(fs.readdirSync(path.dirname(file)), ['release.json'], 'không để file tạm')
+  })
+
+  test('chạy từ thư mục con của repo vẫn tìm release.json ở gốc; ngoài git repo thì tìm ngay trong cwd', () => {
+    const fx = fixture()
+    release(fx, { lastRelease: { at: iso(9) }, checkAt: [iso(1)], backup: OK_BACKUP, health: { lastAt: iso(1) } })
+    fs.mkdirSync(path.join(fx.repo, 'src', 'deep'), { recursive: true })
+    assert.match(run(fx, { cwd: path.join(fx.repo, 'src', 'deep') }), /App repo: /)
+    const app = path.join(fx.plain, 'ứng dụng mẫu')
+    release(fx, { lastRelease: { at: iso(9) }, checkAt: [iso(1)], backup: OK_BACKUP, health: { lastAt: iso(1) } }, app)
+    assert.match(run(fx, { cwd: app }), /App ứng dụng mẫu: /)
+  })
+
+  test('tên thư mục là dữ liệu ngoài: ký tự lạ bị làm sạch, vẫn một dòng', () => {
+    const fx = fixture()
+    const app = path.join(fx.plain, 'app&x;y')
+    release(fx, { lastRelease: { at: iso(9) }, checkAt: [iso(1)], backup: OK_BACKUP, health: { lastAt: iso(1) } }, app)
+    const line = dueLine(run(fx, { cwd: app }))
+    assert.match(line, /App app_x_y: /)
+  })
+
+  test('đứng cùng sổ tiến độ lớn, sổ chốt dày, nhắc MCP: tổng ≤ 8.500 và dòng nhắc còn nguyên', () => {
+    const fx = fixture()
+    progress(fx, 'feat-a', 'Trạng thái: đang làm\n' + 'y'.repeat(6000))
+    for (let i = 0; i < 150; i++) {
+      const d = { ma: newMa(), tom_tat: `Luật chung số ${i} ${'x'.repeat(120)}`, pham_vi: 'chung', trang_thai: 'dang-dung', luc: '2026-01-01 00:00', ai_quyet: 'ban' }
+      const f = path.join(fx.repo, '.claude', 'so-chot', 'chung', `${d.ma}-${slugOf(d.tom_tat)}.md`)
+      fs.mkdirSync(path.dirname(f), { recursive: true })
+      fs.writeFileSync(f, renderDecision(d, { vi_sao: 'lý do', ap_dung: 'cách áp dụng' }))
+    }
+    usageLog(fx, 40)
+    release(fx, { lastRelease: { at: iso(60) }, checkAt: [iso(30)], backup: { choice: 'on' }, health: { lastAt: iso(50) } })
+    const ctx = run(fx)
+    assert.ok(ctx.length <= TOTAL_CAP, `${ctx.length} ký tự`)
+    assert.ok(ctx.startsWith(PREFIX) && ctx.includes(REMINDER) && ctx.includes('Luật chung'))
+    const line = dueLine(ctx)
+    assert.match(line, /xem lỗi sau phát hành/)
+    assert.match(line, /Hơn 30 ngày chưa khám/)
+  })
+})

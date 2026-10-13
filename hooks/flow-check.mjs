@@ -21,6 +21,9 @@
 //   - Mỗi checker chạy có timeout (Node, diệt cả cây tiến trình); trên Windows .cmd chạy qua runCommand của lib/clis.mjs (đối số lạ bị từ chối).
 //   - Output của công cụ chỉ chép vài dòng đầu, bỏ mã màu; có dấu hiệu khoá bí mật ⇒ không in lại.
 //   - Quét khoá trong bản build dùng lib/secrets.mjs (scanDir build:true).
+// Đợt 4 (phát hành + chăm sóc, docs/specs/2026-10-13-flow-v7-dot4, AC-30): `stack` có thể là MẢNG (checker chạy một lần khi dự án có một trong các stack đó; `secret-build` phủ cả web lẫn extension);
+//   extension quét bản build MỚI nhất (extensionBuilds: dist/, build/, .output/<trình duyệt>/) thay vì chỉ dist/; `log-secrets` (lib/log-scan.mjs) quét log bài thử (test-results/,
+//   playwright-report/, *.log) tìm bí mật — `exclusive` để chạy SAU axe/ui-rules (hai checker này sinh ra log), không có log nào thì không hiện dòng.
 //
 // runCommand của lib/clis.mjs không có tuỳ chọn cwd ⇒ execIn() đổi cwd của tiến trình đúng lúc spawn (spawn chạy đồng bộ trong executor
 // của Promise) rồi trả lại ngay; vì vậy chạy song song vẫn đúng thư mục. resolveBin của clis.mjs chỉ biết 6 CLI cố định ⇒ findTool() riêng ở đây.
@@ -32,7 +35,8 @@ import { fileURLToPath } from 'node:url'
 import { extensionPermProblems, headerProblems } from './lib/app-safety.mjs'
 import { DEPCRUISE_PKGS, DEPCRUISE_WHERE, goArchLintRuns, depcruiseArgs, loadArch, loadBaseline, newGoArchViolations, nodeEngineMessage, nodeEngineProblem, sizeCheck, syncCheck, usesTypeScript } from './lib/arch.mjs'
 import { runCommand } from './lib/clis.mjs'
-import { BUILD_DIRS, scanDir, scanText } from './lib/secrets.mjs'
+import { scanLogs } from './lib/log-scan.mjs'
+import { BUILD_DIRS, extensionBuilds, scanDir, scanText } from './lib/secrets.mjs'
 import { openSpecs, parseSpec, specProblems, traceCodes } from './lib/spec-codes.mjs'
 import { COND_KEYS, STACKS, detect, findManifest, hasDep, matches, readPackageJson, roots } from './lib/stack.mjs'
 
@@ -58,6 +62,8 @@ const ID_RE = /^[a-z][a-z0-9-]*$/
 const isStr = (v) => typeof v === 'string' && v.trim() !== ''
 const isStrArr = (v) => Array.isArray(v) && v.every((x) => typeof x === 'string')
 const badRegex = (s) => { try { new RegExp(s); return false } catch { return true } }
+// stack của checker: chuỗi, hoặc mảng chuỗi (checker áp dụng khi dự án có MỘT trong các stack đó, chạy một lần).
+const stacksOf = (c) => [].concat(c.stack)
 
 function condProblems(cond, p) {
   if (!cond || typeof cond !== 'object' || Array.isArray(cond)) return [`${p}: phải là object`]
@@ -84,7 +90,7 @@ export function validateCheckers(obj) {
     if (!isStr(c.id) || !ID_RE.test(c.id)) w('id phải là chữ thường, số, gạch ngang')
     else if (seen.has(c.id)) w('id trùng')
     else seen.add(c.id)
-    if (![...STACKS, 'all'].includes(c.stack)) w(`stack phải là một trong ${[...STACKS, 'all'].join(', ')}`)
+    if (!stacksOf(c).length || !stacksOf(c).every((s) => [...STACKS, 'all'].includes(s))) w(`stack phải là một trong ${[...STACKS, 'all'].join(', ')} (hoặc mảng các stack đó)`)
     if (!isStr(c.title)) w('thiếu title')
     if (!isStr(c.hint)) w('thiếu hint (lời dặn sửa)')
     if (typeof c.required !== 'boolean') w('required phải là true hoặc false')
@@ -327,40 +333,75 @@ const REMOTE_CODE = [
   [/\bfrom\s+["']https?:\/\//, 'import từ URL từ xa'],
 ]
 const CODE_FILE = /\.(?:html?|js|mjs|cjs|jsx|ts|tsx)$/i
+// Thư mục mode development của WXT: dist/.-dev (outDirTemplate '.{{modeSuffix}}' của mẫu kit) và .output/<trình duyệt>-dev (mặc định WXT).
+// `wxt` dev ghi vào đây script nạp từ http://localhost ⇒ tha riêng localhost; `wxt build --mode development` cũng ra đây và đóng gói được ⇒ URL khác vẫn bị bắt.
+const isWxtDevDir = (name, rel) => name === '.-dev' || (/-dev$/.test(name) && (rel === '.output' || rel.endsWith('/.output')))
+// Chỉ host đúng là localhost/127.0.0.1 (cổng tuỳ chọn); `localhost:3000@evil.com` là tên đăng nhập + host khác ⇒ không tha.
+// Ranh giới không gồm tab/hết dòng: trình duyệt bỏ tab, xuống dòng trong URL nên "localhost<TAB>.evil.com" là host khác.
+const LOCAL_URL = /https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?(?=[/"'` >?#])/gi
 
 function remoteCodeProblems(root, { maxFiles = 3000, maxBytes = 2 * 1024 * 1024 } = {}) {
   const out = []
   let count = 0
-  const walk = (dir, rel) => {
+  const walk = (dir, rel, dev) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       if (SKIP_WALK.has(e.name)) continue
       const r = rel ? `${rel}/${e.name}` : e.name
-      if (e.isDirectory()) walk(path.join(dir, e.name), r)
+      if (e.isDirectory()) walk(path.join(dir, e.name), r, dev || isWxtDevDir(e.name, rel))
       else if (e.isFile() && CODE_FILE.test(e.name) && ++count <= maxFiles) {
         const f = path.join(dir, e.name)
         if (fs.statSync(f).size > maxBytes) continue
         fs.readFileSync(f, 'utf8').split(/\r?\n/).forEach((line, i) => {
-          for (const [re, what] of REMOTE_CODE) if (re.test(line)) out.push(`${r}:${i + 1} ${what}`)
+          const text = dev ? line.replace(LOCAL_URL, '') : line
+          for (const [re, what] of REMOTE_CODE) if (re.test(text)) out.push(`${r}:${i + 1} ${what}`)
         })
       }
     }
   }
-  walk(root, '')
+  walk(root, '', false)
   return out
 }
 
 const ESLINT_CONFIG = /^(?:eslint\.config\.(?:js|mjs|cjs|ts|mts|cts)|\.eslintrc(?:\..+)?)$/
 
 export const INTERNALS = {
-  // Bản build (dist/ build/ .next/ out/) không được lộ khoá bí mật. Chưa build ⇒ chưa kiểm được ⇒ 'missing', không phải đạt.
-  'secret-scan-build': async ({ dir, checker }) => {
-    if (!hasBuildDir(dir)) return { status: 'missing', message: 'Chưa có thư mục build (dist/, build/, .next/, out/) để quét khoá', fix: 'Chạy lệnh build của dự án (vd npm run build) rồi chạy lại.' }
+  // Bản build (dist/ build/ .next/ out/ .output/) không được lộ khoá bí mật. Chưa build ⇒ chưa kiểm được ⇒ 'missing', không phải đạt.
+  // Extension (WXT, Plasmo, tự dựng): bản build ở dist/, build/ hoặc .output/<trình duyệt>/ — có thể có vài nơi cùng lúc (bản cũ còn sót) ⇒ quét bản MỚI nhất, nói rõ bản cũ nào bị bỏ qua.
+  // Extension thuần chưa có bước build: chính thư mục chứa manifest.json là thứ đem đóng gói ⇒ quét thư mục đó. Chưa có gì để quét ⇒ rơi xuống nhánh chung bên dưới (THIẾU + dặn build).
+  'secret-scan-build': async ({ dir, checker, ctx }) => {
+    const lines = (found, prefix = '') => found.slice(0, 20).map((f) => `${prefix}${f.file}${f.line ? `:${f.line}` : ''} ${f.name}${f.value ? ` (${f.value})` : ''}`)
+    if (ctx?.stacks?.includes('extension')) {
+      const builds = extensionBuilds(dir)
+      const shipDir = builds.length ? null : findManifest(dir)?.dir
+      if (builds.length || shipDir) {
+        const rel = builds.length ? builds[0].rel : path.relative(dir, shipDir).split(path.sep).join('/') || '.'
+        const where = builds.length ? `bản build mới nhất (${rel})` : `thư mục extension (${rel}, chưa có bản build riêng)`
+        const found = scanDir(builds.length ? path.join(dir, ...rel.split('/')) : shipDir)
+        const notes = builds.length > 1 ? [`bỏ qua bản build cũ hơn (không quét): ${builds.slice(1).map((b) => b.rel).join(', ')}`] : []
+        if (!found.length) return { status: 'pass', message: `${where} không lộ khoá bí mật`, detail: notes }
+        return { status: 'fail', message: `${found.length} chỗ nghi lộ khoá hoặc không quét được trong ${where}`, detail: [...lines(found, rel === '.' ? '' : `${rel}/`), ...notes], fix: checker.hint }
+      }
+    }
+    if (!hasBuildDir(dir)) return { status: 'missing', message: 'Chưa có thư mục build (dist/, build/, .next/, out/, .output/) để quét khoá', fix: 'Chạy lệnh build của dự án (vd npm run build) rồi chạy lại.' }
     const found = scanDir(dir, { build: true })
     if (!found.length) return { status: 'pass', message: 'bản build không lộ khoá bí mật' }
     return {
       status: 'fail',
       message: `${found.length} chỗ nghi lộ khoá hoặc không quét được trong bản build`,
-      detail: found.slice(0, 20).map((f) => `${f.file}${f.line ? `:${f.line}` : ''} ${f.name}${f.value ? ` (${f.value})` : ''}`),
+      detail: lines(found),
+      fix: checker.hint,
+    }
+  },
+
+  // AC-30: log bài thử (test-results/, playwright-report/, *.log — lib/log-scan.mjs) không được chứa thứ giống bí mật. Không có log nào ⇒ không áp dụng (quiet), không phải "đạt giả".
+  'log-scan': async ({ dir, checker }) => {
+    const r = scanLogs(dir)
+    if (!r.files) return { status: 'skip', quiet: true, message: 'chưa có log bài thử (test-results/, playwright-report/, *.log) để quét' }
+    if (!r.findings.length) return { status: 'pass', message: `${r.files} file log bài thử (${r.sources.join(', ')}) không lộ bí mật` }
+    return {
+      status: 'fail',
+      message: `${r.findings.length} chỗ log bài thử nghi lộ bí mật hoặc không quét được`,
+      detail: r.findings.slice(0, 20).map((f) => `${f.file}${f.line ? `:${f.line}` : ''} ${f.name}${f.value ? ` (${f.value})` : ''}`),
       fix: checker.hint,
     }
   },
@@ -483,6 +524,63 @@ function hasMigrations(dir, depth = 6, budget = { dirs: 3000 }) {
       try { if (fs.readdirSync(sub).some((f) => /\.sql$/i.test(f))) return true } catch { /* không đọc được thì coi như không có */ }
     }
     if (depth > 1 && hasMigrations(sub, depth - 1, budget)) return true
+  }
+  return false
+}
+
+// squawk là linter Postgres: migration của D1 (SQLite, công thức cloudflare-d1) báo lỗi cú pháp `AUTOINCREMENT` và `prefer-bigint-over-int` mà không thể chiều ⇒ bỏ qua.
+// Migration là của D1 khi nó nằm trong thư mục migration của một `d1_databases` khai ở wrangler.toml|json|jsonc cùng thư mục hoặc thư mục cha (mặc định `migrations`, hoặc `migrations_dir`;
+// tính cả [env.*]). Không đọc được wrangler / không thấy d1_databases ⇒ không chắc ⇒ KHÔNG bỏ qua (Supabase `supabase/migrations/` và Postgres tự dựng giữ nguyên hành vi).
+const WRANGLER_FILES = ['wrangler.toml', 'wrangler.json', 'wrangler.jsonc']
+const D1_DEFAULT_MIGRATIONS = 'migrations'
+const stripJsonc = (text) => text
+  .replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (m) => (m[0] === '"' ? m : ''))
+  .replace(/"(?:\\.|[^"\\])*"|,(?=\s*[}\]])/g, (m) => (m[0] === '"' ? m : ''))
+
+function d1DirsFromJson(text) {
+  let cfg
+  try { cfg = JSON.parse(stripJsonc(text.replace(/^\uFEFF/, ''))) } catch { return [] }
+  const dirs = []
+  const scan = (o) => {
+    for (const db of Array.isArray(o?.d1_databases) ? o.d1_databases : []) dirs.push(typeof db?.migrations_dir === 'string' ? db.migrations_dir : D1_DEFAULT_MIGRATIONS)
+    for (const env of Object.values(o?.env && typeof o.env === 'object' ? o.env : {})) scan(env)
+  }
+  scan(cfg)
+  return dirs
+}
+
+// wrangler.toml không có bộ đọc TOML trong kit: nhận `[[d1_databases]]` / `[[env.<tên>.d1_databases]]` (mỗi bảng một D1) và dạng `d1_databases = [ {…} ]`; bảng/mảng nào không khai migrations_dir ⇒ mặc định.
+function d1DirsFromToml(text) {
+  const clean = text.split(/\r?\n/).map((l) => l.replace(/^(\s*)#.*$/, '$1').replace(/\s#[^"']*$/, '')).join('\n')
+  const dirOf = /^\s*migrations_dir\s*=\s*(?:"([^"\n]*)"|'([^'\n]*)')/m
+  const dirs = []
+  for (const block of clean.split(/^(?=\s*\[)/m)) {
+    if (/^\s*\[\[\s*(?:env\.[^\].\s]+\.)?d1_databases\s*\]\]/.test(block)) dirs.push(dirOf.exec(block)?.slice(1).find((x) => x !== undefined) ?? D1_DEFAULT_MIGRATIONS)
+    else if (/^\s*d1_databases\s*=\s*\[/m.test(block)) {
+      const found = [...block.matchAll(/migrations_dir\s*=\s*(?:"([^"\n]*)"|'([^'\n]*)')/g)].map((m) => m[1] ?? m[2])
+      dirs.push(...(found.length ? found : [D1_DEFAULT_MIGRATIONS]))
+    }
+  }
+  return dirs
+}
+
+// Các thư mục migration D1 (tương đối so với thư mục chứa wrangler) khai trong file wrangler này; file không có / hỏng / không có D1 ⇒ [].
+function d1MigrationDirs(file) {
+  let text
+  try { text = fs.readFileSync(file, 'utf8') } catch { return [] }
+  return file.endsWith('.toml') ? d1DirsFromToml(text) : d1DirsFromJson(text)
+}
+
+// Migration `f` (đường dẫn tương đối so với dir) có nằm trong thư mục migration của một D1 khai ở wrangler của thư mục cha nó (hoặc cha của cha…) không.
+function isD1Migration(dir, f, cache) {
+  const migDir = f.split('/').slice(0, -1)
+  for (let i = migDir.length - 1; i >= 0; i--) {
+    const cfgDir = migDir.slice(0, i)
+    for (const name of WRANGLER_FILES) {
+      const file = path.join(dir, ...cfgDir, name)
+      if (!cache.has(file)) cache.set(file, d1MigrationDirs(file))
+      if (cache.get(file).some((d) => path.posix.join(...cfgDir, d.replace(/\\/g, '/')).replace(/\/+$/, '') === migDir.join('/'))) return true
+    }
   }
   return false
 }
@@ -679,7 +777,7 @@ export const PLANNERS = {
     return runs.length ? { runs, cleanup } : { skip: notes.join('; ') }
   },
 
-  // squawk <các file migration .sql đổi so với nhánh chính>.
+  // squawk <các file migration .sql đổi so với nhánh chính, trừ migration của D1>.
   squawk: ({ dir, ctx }) => {
     if (!hasMigrations(dir)) return { skip: 'dự án không có migration SQL', quiet: true }
     const base = ctx.getBase()
@@ -687,7 +785,10 @@ export const PLANNERS = {
     const changed = ctx.changed()
     if (!changed) return { skip: 'Không hỏi được git file nào đã đổi nên chưa kiểm migration.' }
     const files = changed.filter((f) => MIGRATION_RE.test(f) && isFile(path.join(dir, f))).sort()
-    return files.length ? { runs: [{ args: [...SQUAWK_EXCLUDE, '--', ...files] }] } : { skip: `không có migration SQL nào đổi so với ${base.ref}` }
+    const cache = new Map()
+    const postgres = files.filter((f) => !isD1Migration(dir, f, cache))
+    if (files.length && !postgres.length) return { skip: 'migration D1/SQLite (wrangler có d1_databases), không phải Postgres nên squawk không áp dụng' }
+    return postgres.length ? { runs: [{ args: [...SQUAWK_EXCLUDE, '--', ...postgres] }] } : { skip: `không có migration SQL nào đổi so với ${base.ref}` }
   },
 }
 
@@ -845,9 +946,12 @@ export async function runChecks({ dir, checkers, env, platform, which, exec, int
     getBase: () => (memo.base !== undefined ? memo.base : (memo.base = resolveBase(abs, { git: gitFn, ref: base ?? undefined }))),
     changed: () => (memo.changed !== undefined ? memo.changed : (memo.changed = changedFiles(abs, ctx.getBase(), gitFn))),
   }
-  const items = checkers.filter((c) => c.stack === 'all' || stacks.includes(c.stack))
+  const applies = (c) => stacksOf(c).some((s) => s === 'all' || stacks.includes(s))
+  const items = checkers.filter(applies)
   ctx.archOwner = items.find((c) => ARCH_CHECKS.has(c.internal ?? c.plan))?.id
-  const runItem = (c) => runOne(c, c.stack === 'all' ? abs : rt[c.stack], ctx)
+  // Chạy ở root của stack đầu tiên (theo thứ tự khai trong checker) mà dự án có; 'all' ⇒ gốc dự án.
+  const rootOf = (c) => (stacksOf(c).includes('all') ? abs : rt[stacksOf(c).find((s) => stacks.includes(s))])
+  const runItem = (c) => runOne(c, rootOf(c), ctx)
   // Checker `exclusive` (tự bật app trên cổng cố định: axe qua webServer của Playwright, ui-check bật dev server) chạy NỐI TIẾP từng cái SAU nhóm song song: hai cái cùng cổng
   // mà chạy chồng thì tắt server của nhau ⇒ đỏ giả. Kết quả vẫn xếp theo thứ tự trong checkers.json.
   const done = new Array(items.length)

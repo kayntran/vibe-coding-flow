@@ -430,6 +430,40 @@ test('mv3-manifest (chạy thật): manifest tốt + không có mã từ xa ⇒ 
   assert.equal((await runChecks({ dir: noManifest, checkers: c })).results[0].status, 'missing')
 })
 
+test('mv3-manifest: bản dev của WXT (dist/.-dev, .output/<trình duyệt>-dev) nạp script từ localhost ⇒ không tính là mã từ xa; URL khác trong thư mục dev và bản build thật vẫn bị bắt', async () => {
+  const c = [{ id: 'mv3-manifest', stack: 'extension', title: 'MV3', internal: 'mv3-manifest', hint: 'Sửa manifest.', required: true }]
+  const manifest = { manifest_version: 3, name: 'x', version: '1', permissions: ['storage'] }
+  const devHtml = '<script type="module" src="http://localhost:3000/@vite/client"></script>'
+  const wxt = { 'package.json': '{"devDependencies":{"wxt":"1"}}', 'wxt.config.ts': "export default { outDir: 'dist', outDirTemplate: '.{{modeSuffix}}' }" }
+  const kitDev = project({ ...wxt, 'dist/manifest.json': manifest, 'dist/popup.html': '<script src="popup.js"></script>', 'dist/.-dev/manifest.json': manifest, 'dist/.-dev/popup.html': devHtml })
+  assert.equal((await runChecks({ dir: kitDev, checkers: c })).results[0].status, 'pass', 'dist/.-dev là bản dev, không đem đóng gói')
+  const rootDev = project({ 'manifest.json': manifest, 'popup.html': '<script src="popup.js"></script>', '.output/chrome-mv3-dev/popup.html': devHtml })
+  assert.equal((await runChecks({ dir: rootDev, checkers: c })).results[0].status, 'pass', '.output/chrome-mv3-dev là bản dev')
+  const realBad = project({ ...wxt, 'dist/manifest.json': manifest, 'dist/popup.html': devHtml, 'dist/.-dev/popup.html': devHtml })
+  const r = (await runChecks({ dir: realBad, checkers: c })).results[0]
+  assert.equal(r.status, 'fail', 'bản build thật nạp script http vẫn đỏ')
+  assert.ok(r.detail.some((l) => l.startsWith('popup.html:')) && !r.detail.some((l) => l.includes('.-dev')))
+  const outBad = project({ 'manifest.json': manifest, '.output/chrome-mv3/popup.html': devHtml, 'devtools-dev/x.js': "importScripts('https://cdn.example.com/x.js')" })
+  const r2 = (await runChecks({ dir: outBad, checkers: c })).results[0]
+  assert.equal(r2.status, 'fail')
+  assert.ok(r2.detail.some((l) => l.startsWith('.output/chrome-mv3/')) && r2.detail.some((l) => l.startsWith('devtools-dev/')), 'chỉ tha thư mục -dev nằm ngay trong .output/')
+  // `wxt build --mode development` cũng ra dist/.-dev và đóng gói được ⇒ chỉ tha localhost, không tha cả thư mục
+  const devRemote = project({ ...wxt, 'dist/manifest.json': manifest, 'dist/.-dev/background.js': "importScripts('https://cdn.example.com/x.js')", 'dist/.-dev/popup.html': '<script src="http://localhost.evil.example/x.js"></script>' })
+  const r3 = (await runChecks({ dir: devRemote, checkers: c })).results[0]
+  assert.equal(r3.status, 'fail')
+  assert.ok(r3.detail.some((l) => l.startsWith('.-dev/background.js:')) && r3.detail.some((l) => l.startsWith('.-dev/popup.html:')), 'CDN và localhost.<tên miền khác> trong thư mục dev vẫn bị bắt')
+  // localhost:3000@evil.example: phần trước @ chỉ là tên đăng nhập, trình duyệt tải từ evil.example
+  const devUserinfo = project({ ...wxt, 'dist/manifest.json': manifest, 'dist/.-dev/background.js': "importScripts('http://localhost:3000@evil.example/x.js')", 'dist/.-dev/popup.html': '<script src="http://127.0.0.1@evil.example/x.js"></script>' })
+  const r4 = (await runChecks({ dir: devUserinfo, checkers: c })).results[0]
+  assert.equal(r4.status, 'fail')
+  assert.ok(r4.detail.some((l) => l.startsWith('.-dev/background.js:')) && r4.detail.some((l) => l.startsWith('.-dev/popup.html:')), 'URL có tên đăng nhập localhost@ trỏ host khác vẫn bị bắt')
+  // Trình duyệt bỏ tab/xuống dòng trong URL: "localhost<TAB>.evil.example" và URL ngắt dòng ngay sau localhost thực chất là localhost.evil.example
+  const devSplit = project({ ...wxt, 'dist/manifest.json': manifest, 'dist/.-dev/a.js': 'import x from "http://localhost\t.evil.example/x.js"', 'dist/.-dev/popup.html': '<script src="http://localhost\n.evil.example/x.js"></script>' })
+  const r5 = (await runChecks({ dir: devSplit, checkers: c })).results[0]
+  assert.equal(r5.status, 'fail')
+  assert.ok(r5.detail.some((l) => l.startsWith('.-dev/a.js:')) && r5.detail.some((l) => l.startsWith('.-dev/popup.html:')), 'tab hoặc xuống dòng sau localhost không được coi là hết tên máy')
+})
+
 test('shadcn-lint (nội bộ): gói @shadcn/lint có trong package.json nhưng cấu hình ESLint không nhắc tới ⇒ fail; có nhắc ⇒ pass', async () => {
   const c = [{ id: 'shadcn-lint', stack: 'web', title: 'shadcn', internal: 'shadcn-lint', hint: 'Bật plugin.', required: true, detect: { files: ['components.json'] }, requires: { pkgs: ['@shadcn/lint'], install: 'npm i -D @shadcn/lint' } }]
   const pkg = { devDependencies: { '@shadcn/lint': '0.2.1', eslint: '9' } }
@@ -444,7 +478,7 @@ test('shadcn-lint (nội bộ): gói @shadcn/lint có trong package.json nhưng 
 })
 
 test('INTERNALS có đủ checker nội bộ mà checkers.json nhắc tới', () => {
-  for (const n of ['secret-scan-build', 'mv3-manifest', 'shadcn-lint']) assert.equal(typeof INTERNALS[n], 'function', n)
+  for (const n of ['secret-scan-build', 'mv3-manifest', 'shadcn-lint', 'log-scan']) assert.equal(typeof INTERNALS[n], 'function', n)
 })
 
 // --- bảng chữ + CLI ------------------------------------------------------------------------------------------------------------------
@@ -512,15 +546,15 @@ test('CLI thật (spawn): thư mục có dấu cách, checker giả chạy `node
 // --- tầng 2: kiểm đối chiếu trên kit/checkers.json THẬT ------------------------------------------------------------------------------------
 
 const REAL = loadCheckers()
-const byStack = (s) => REAL.checkers.filter((c) => c.stack === s)
+const byStack = (s) => REAL.checkers.filter((c) => [].concat(c.stack).includes(s))
 
 // Bảng PLAN "Kiến trúc dòng flow-check" (AC-11/43). Thiếu một mục ⇒ đỏ.
 const MANDATORY = {
   web: ['tsc', 'eslint', 'biome', 'shadcn-lint', 'knip', 'jscpd', 'size-limit', 'axe', 'osv-scanner', 'secret-build'],
   go: ['go-vet', 'golangci-lint', 'govulncheck'],
   wails: ['wails-doctor'],
-  extension: ['web-ext-lint', 'mv3-manifest'],
-  all: ['sast-ast-grep'],
+  extension: ['web-ext-lint', 'mv3-manifest', 'secret-build'],
+  all: ['sast-ast-grep', 'log-secrets'],
 }
 
 test('checkers.json thật: hợp lệ theo validateCheckers, không lỗi', () => {
@@ -642,11 +676,12 @@ test('thật × Wails (frontend/): thêm wails doctor + toàn bộ checker web c
   assert.equal(exitCode(rep), 0, JSON.stringify(rep.results.filter((r) => r.status !== 'pass' && r.status !== 'skip')))
 })
 
-test('thật × extension (manifest MV3 ở gốc): web-ext-lint + mv3-manifest + SAST', async () => {
+test('thật × extension (manifest MV3 ở gốc): web-ext-lint + mv3-manifest + secret-build (quét thư mục chứa manifest, extension thuần chưa có bước build) + SAST', async () => {
   const dir = project({ 'manifest.json': { manifest_version: 3, name: 'x', version: '1', permissions: ['storage'] } })
   const rep = await runChecks({ dir, checkers: REAL.checkers, which: whichAll, exec: execGood })
   assert.deepEqual(rep.stacks, ['extension'])
-  assert.deepEqual(rep.results.map((r) => r.id).sort(), ['mv3-manifest', 'sast-ast-grep', 'web-ext-lint'])
+  assert.deepEqual(rep.results.map((r) => r.id).sort(), ['mv3-manifest', 'sast-ast-grep', 'secret-build', 'web-ext-lint'])
+  assert.equal(rep.results.find((r) => r.id === 'secret-build').status, 'pass')
   assert.equal(exitCode(rep), 0)
 })
 
@@ -1428,6 +1463,79 @@ test('squawk: file migration nằm trong thư mục tên giống option (--evil/
   assert.deepEqual(args.slice(args.indexOf('--')), ['--', '--evil/migrations/001_x.sql'])
 })
 
+// --- squawk chỉ cho Postgres: migration D1 (SQLite, công thức cloudflare-d1) bị bỏ qua kèm lý do -----------------------------------------
+
+const D1_SQL = 'create table todos (id integer primary key autoincrement, title text not null);\n'
+const WRANGLER_D1_TOML = 'name = "app"\nmain = "worker/index.ts"\n\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "app-db"\ndatabase_id = "abc"\n'
+const squawkRuns = async (d, extra) => {
+  const calls = []
+  const r = await first(d, 'squawk', { exec: async (f, a) => { calls.push(a); return OK }, ...extra })
+  return { r, files: calls.length ? calls[0].slice(calls[0].indexOf('--') + 1).sort() : [] }
+}
+
+test('squawk: dự án D1 (wrangler.toml có [[d1_databases]]) + migrations/*.sql mới ⇒ BỎ QUA có lý do, squawk không được chạy (cú pháp SQLite không phải Postgres)', async () => {
+  const d = repo({ 'wrangler.toml': WRANGLER_D1_TOML, 'a.txt': '1' })
+  git(d, 'checkout', '-q', '-b', 'feat')
+  put(d, 'migrations/0001_init.sql', D1_SQL)
+  const { r, files } = await squawkRuns(d)
+  assert.equal(r.status, 'skip', JSON.stringify(r))
+  assert.match(r.message, /D1/)
+  assert.match(r.message, /Postgres/)
+  assert.deepEqual(files, [], 'không chạy squawk')
+})
+
+test('squawk: wrangler.jsonc (có comment, dấu phẩy cuối, URL có //) và wrangler.json cũng nhận ra D1', async () => {
+  const jsonc = '{\n  // Worker\n  "name": "app", "route": "https://x.example/*",\n  "d1_databases": [ { "binding": "DB", "database_name": "d", "database_id": "i", }, ], /* hết */\n}\n'
+  for (const [file, text] of [['wrangler.jsonc', jsonc], ['wrangler.json', JSON.stringify({ name: 'app', d1_databases: [{ binding: 'DB', database_name: 'd', database_id: 'i' }] })]]) {
+    const d = repo({ [file]: text, 'a.txt': '1' })
+    git(d, 'checkout', '-q', '-b', 'feat')
+    put(d, 'migrations/0001_init.sql', D1_SQL)
+    const { r, files } = await squawkRuns(d)
+    assert.equal(r.status, 'skip', `${file}: ${JSON.stringify(r)}`)
+    assert.deepEqual(files, [], file)
+  }
+})
+
+test('squawk: migrations_dir khai trong wrangler ⇒ thư mục đó là của D1 (bỏ qua), còn migrations/ mặc định không phải của D1 nữa (vẫn quét)', async () => {
+  const toml = 'name = "app"\n\n[[d1_databases]]\nbinding = "DB"\ndatabase_name = "d"\ndatabase_id = "i"\nmigrations_dir = "db/migrations"\n'
+  const d = repo({ 'wrangler.toml': toml, 'a.txt': '1' })
+  git(d, 'checkout', '-q', '-b', 'feat')
+  put(d, 'db/migrations/0001_init.sql', D1_SQL)
+  assert.equal((await squawkRuns(d)).r.status, 'skip')
+  put(d, 'migrations/001_pg.sql', 'alter table t add column x text;\n')
+  const both = await squawkRuns(d)
+  assert.equal(both.r.status, 'pass', JSON.stringify(both.r))
+  assert.deepEqual(both.files, ['migrations/001_pg.sql'])
+})
+
+test('squawk: wrangler đặt ở thư mục con (apps/api) ⇒ chỉ migrations của chính thư mục đó là D1; D1 khai trong [env.*] cũng tính', async () => {
+  const d = repo({ 'apps/api/wrangler.toml': 'name = "api"\n\n[[env.production.d1_databases]]\nbinding = "DB"\ndatabase_name = "d"\ndatabase_id = "i"\n', 'a.txt': '1' })
+  git(d, 'checkout', '-q', '-b', 'feat')
+  put(d, 'apps/api/migrations/0001_init.sql', D1_SQL)
+  assert.equal((await squawkRuns(d)).r.status, 'skip')
+  put(d, 'apps/web/migrations/001_pg.sql', 'alter table t add column x text;\n')
+  const both = await squawkRuns(d)
+  assert.deepEqual(both.files, ['apps/web/migrations/001_pg.sql'])
+})
+
+test('squawk: Supabase (supabase/migrations/*.sql) VẪN bị quét kể cả khi dự án cũng có wrangler D1 ở thư mục khác; wrangler không có d1_databases hay file hỏng ⇒ không bỏ qua', async () => {
+  const d = repo({ 'wrangler.toml': WRANGLER_D1_TOML, 'a.txt': '1' })
+  git(d, 'checkout', '-q', '-b', 'feat')
+  put(d, `${MIG}/002_add.sql`, 'alter table t add column x int;\n')
+  put(d, 'migrations/0001_init.sql', D1_SQL)
+  const mixed = await squawkRuns(d)
+  assert.equal(mixed.r.status, 'pass', JSON.stringify(mixed.r))
+  assert.deepEqual(mixed.files, [`${MIG}/002_add.sql`], 'chỉ file Supabase đi vào squawk')
+  const plain = repo({ 'wrangler.toml': 'name = "app"\nmain = "worker/index.ts"\n', 'a.txt': '1' })
+  git(plain, 'checkout', '-q', '-b', 'feat')
+  put(plain, 'migrations/001_pg.sql', 'alter table t add column x text;\n')
+  assert.deepEqual((await squawkRuns(plain)).files, ['migrations/001_pg.sql'], 'Worker không có D1 ⇒ migrations/ là Postgres')
+  const broken = repo({ 'wrangler.jsonc': '{ "d1_databases": [ { oops', 'a.txt': '1' })
+  git(broken, 'checkout', '-q', '-b', 'feat')
+  put(broken, 'migrations/001_pg.sql', 'alter table t add column x text;\n')
+  assert.deepEqual((await squawkRuns(broken)).files, ['migrations/001_pg.sql'], 'không đọc được wrangler ⇒ không dám bỏ qua')
+})
+
 const REAL_SQUAWK = findTool('squawk', { cwd: HERE, env: process.env })
 
 test('squawk THẬT: migration an toàn (thêm cột) ⇒ đạt; DROP COLUMN ⇒ không đạt (ban-drop-column); thư mục tên --evil không làm squawk hiểu nhầm là cờ', { skip: REAL_SQUAWK ? false : 'máy không có squawk (npm i -g squawk-cli) — bỏ qua test thật' }, async () => {
@@ -1786,7 +1894,7 @@ test('checkers.json thật: axe (playwright test tự bật webServer) và ui-ru
   const get = (id) => REAL.checkers.find((c) => c.id === id)
   assert.equal(get('axe').exclusive, true)
   assert.equal(get('ui-rules').exclusive, true)
-  assert.deepEqual(REAL.checkers.filter((c) => c.exclusive).map((c) => c.id), ['axe', 'ui-rules'])
+  assert.deepEqual(REAL.checkers.filter((c) => c.exclusive).map((c) => c.id), ['axe', 'ui-rules', 'log-secrets'], 'log-secrets đứng SAU axe và ui-rules (quét log hai checker đó vừa sinh ra)')
   const dir = project({ 'package.json': { devDependencies: { '@playwright/test': '1', '@axe-core/playwright': '4', typescript: '5' } }, 'tsconfig.json': '{}', '.claude/ui.json': '{}' })
   let appUp = 0
   let overlap = 0
@@ -1929,4 +2037,133 @@ test('size-limit: lệnh cài gợi ý @size-limit/file (preset-app kéo puppete
   const sl = REAL.checkers.find((c) => c.id === 'size-limit')
   assert.match(sl.install, /size-limit @size-limit\/file$/)
   assert.doesNotMatch(sl.install, /preset-app/)
+})
+
+// --- đợt 4 (AC-30): secret-build phủ extension · log-secrets ----------------------------------------------------------------------------------
+
+const WXT_PKG = '{"devDependencies":{"wxt":"1"}}'
+const DAY = 86_400_000
+const ageFile = (dir, rel, ms) => { const t = new Date(Date.now() - ms); fs.utimesSync(path.join(dir, ...rel.split('/')), t, t) }
+const b64u = (o) => Buffer.from(JSON.stringify(o)).toString('base64url')
+const jwtOf = (payload) => [b64u({ alg: 'HS256', typ: 'JWT' }), b64u(payload), 'x'.repeat(43)].join('.')
+
+test('validateCheckers: stack là chuỗi hoặc MẢNG stack hợp lệ; mảng rỗng hoặc có stack lạ ⇒ lỗi', () => {
+  assert.deepEqual(validateCheckers({ checkers: [mk({ id: 'a', stack: ['web', 'extension'] }), mk({ id: 'b', stack: 'all' })] }), [])
+  for (const stack of [[], ['web', 'rust'], undefined, 5]) assert.match(validateCheckers({ checkers: [mk({ stack })] }).join('\n'), /stack/, JSON.stringify(stack))
+})
+
+test('stack là mảng: checker chạy MỘT lần khi dự án có một trong các stack (WXT có cả web lẫn extension; extension thuần chỉ có extension), không chạy cho dự án Go', async () => {
+  const c = [mk({ id: 'multi', stack: ['web', 'extension'], args: ['m'] })]
+  const count = async (files) => {
+    let n = 0
+    const rep = await runChecks({ dir: project(files), checkers: c, which: whichAll, exec: async () => { n++; return OK } })
+    return [n, rep.results.length]
+  }
+  assert.deepEqual(await count({ 'package.json': WXT_PKG }), [1, 1], 'WXT: hai stack trùng nhưng chỉ một dòng')
+  assert.deepEqual(await count({ 'manifest.json': MV3() }), [1, 1], 'extension thuần (không package.json)')
+  assert.deepEqual(await count({ 'package.json': '{}' }), [1, 1], 'web thuần')
+  assert.deepEqual(await count({ 'go.mod': 'module x\n' }), [0, 0])
+})
+
+test('checkers.json thật: secret-build phủ cả web lẫn extension; log-secrets là checker nội bộ chạy sau cùng nhóm exclusive, im lặng khi không có log', () => {
+  const get = (id) => REAL.checkers.find((c) => c.id === id)
+  assert.deepEqual(get('secret-build').stack, ['web', 'extension'])
+  const log = get('log-secrets')
+  assert.deepEqual([log.stack, log.internal, log.exclusive, log.quietSkip, log.required], ['all', 'log-scan', true, true, true])
+  const ids = REAL.checkers.map((c) => c.id)
+  assert.ok(ids.indexOf('log-secrets') > ids.indexOf('axe') && ids.indexOf('log-secrets') > ids.indexOf('ui-rules'))
+})
+
+test('secret-build × extension: dist/ CŨ sạch + .output/chrome-mv3 MỚI có khoá ⇒ KHÔNG ĐẠT, nêu .output/chrome-mv3 và nói dist bị bỏ qua, không in lại khoá', async () => {
+  const dir = project({ 'package.json': WXT_PKG, 'dist/background.js': 'console.log(1)', '.output/chrome-mv3/background.js': `const k="${FAKE_SECRET}"` })
+  ageFile(dir, 'dist/background.js', 3 * DAY)
+  const r = await first(dir, 'secret-build')
+  assert.equal(r.status, 'fail', JSON.stringify(r))
+  assert.match(r.message, /\.output\/chrome-mv3/)
+  assert.ok(r.detail.some((l) => l.startsWith('.output/chrome-mv3/background.js:1 ')), r.detail.join(' | '))
+  assert.ok(r.detail.some((l) => /bỏ qua bản build cũ hơn.*dist/.test(l)), r.detail.join(' | '))
+  assert.ok(!JSON.stringify(r).includes(FAKE_SECRET))
+})
+
+test('secret-build × extension: dist/ MỚI có khoá + .output/ cũ sạch ⇒ KHÔNG ĐẠT nêu dist; bản mới nhất sạch thì ĐẠT dù bản cũ còn sót khoá (nói rõ bản cũ không quét)', async () => {
+  const dirty = project({ 'package.json': WXT_PKG, 'dist/popup.js': `const k="${FAKE_SECRET}"`, '.output/chrome-mv3/popup.js': 'console.log(1)' })
+  ageFile(dirty, '.output/chrome-mv3/popup.js', 2 * DAY)
+  const bad = await first(dirty, 'secret-build')
+  assert.equal(bad.status, 'fail')
+  assert.ok(bad.detail.some((l) => l.startsWith('dist/popup.js:1 ')), bad.detail.join(' | '))
+  const stale = project({ 'package.json': WXT_PKG, 'dist/popup.js': `const k="${FAKE_SECRET}"`, '.output/chrome-mv3/popup.js': 'console.log(1)' })
+  ageFile(stale, 'dist/popup.js', 2 * DAY)
+  const ok = await first(stale, 'secret-build')
+  assert.equal(ok.status, 'pass', JSON.stringify(ok))
+  assert.match(ok.message, /\.output\/chrome-mv3/)
+  assert.match(ok.detail.join('\n'), /bỏ qua bản build cũ hơn.*dist/)
+})
+
+test('secret-build × extension: chỉ có .output/ (WXT mặc định) sạch ⇒ ĐẠT; chưa build gì ⇒ THIẾU dặn build', async () => {
+  const built = await first(project({ 'package.json': WXT_PKG, '.output/chrome-mv3/manifest.json': JSON.stringify(MV3()) }), 'secret-build')
+  assert.equal(built.status, 'pass', JSON.stringify(built))
+  const unbuilt = await first(project({ 'package.json': WXT_PKG, 'wxt.config.ts': 'export default {}', 'src/entrypoints/popup/main.tsx': 'x' }), 'secret-build')
+  assert.equal(unbuilt.status, 'missing')
+  assert.match(unbuilt.fix, /build/i)
+})
+
+test('secret-build × extension thuần (chỉ manifest.json, không package.json, không bước build): quét thư mục chứa manifest — khoá trong popup.js ⇒ KHÔNG ĐẠT; sạch ⇒ ĐẠT', async () => {
+  const dirty = await first(project({ 'manifest.json': MV3(), 'popup.js': `const k="${FAKE_SECRET}"` }), 'secret-build')
+  assert.equal(dirty.status, 'fail', JSON.stringify(dirty))
+  assert.ok(dirty.detail.some((l) => l.startsWith('popup.js:1 ')), dirty.detail.join(' | '))
+  assert.ok(!JSON.stringify(dirty).includes(FAKE_SECRET))
+  const clean = await first(project({ 'manifest.json': MV3(), 'popup.js': 'console.log(1)', 'node_modules/p/x.js': `k="${FAKE_SECRET}"` }), 'secret-build')
+  assert.equal(clean.status, 'pass', JSON.stringify(clean))
+})
+
+test('secret-build × web: .output/ (Nuxt/Nitro) cũng là thư mục build — khoá trong .output/ ⇒ KHÔNG ĐẠT', async () => {
+  const r = await first(project({ 'package.json': '{}', '.output/server/index.mjs': `const k="${FAKE_SECRET}"` }), 'secret-build')
+  assert.equal(r.status, 'fail', JSON.stringify(r))
+  assert.ok(r.detail.some((l) => l.startsWith('.output/server/index.mjs:1 ')))
+})
+
+test('log-secrets: không có log bài thử ⇒ KHÔNG hiện dòng nào và không chặn; log sạch ⇒ ĐẠT nêu nguồn; log có khoá ⇒ KHÔNG ĐẠT (exit 1), không in lại khoá', async () => {
+  const none = await check(project({ 'package.json': '{}', 'src/a.ts': 'x' }), ['log-secrets'])
+  assert.deepEqual(none.results, [])
+  assert.equal(none.ok, true)
+  const clean = project({ 'package.json': '{}', 'test-results/a/error-context.md': '# Page snapshot\n- heading "Chào"', '.wrangler/logs/wrangler-1.log': 'GET /api/orders 200\n' })
+  const ok = (await check(clean, ['log-secrets'])).results[0]
+  assert.equal(ok.status, 'pass', JSON.stringify(ok))
+  assert.match(ok.message, /2 file log.*test-results\/.*1 file \*\.log/)
+  const dirty = project({
+    'package.json': '{}',
+    'playwright-report/index.html': `<pre>token=${FAKE_SECRET}</pre>`,
+    'e2e/server.log': `ok\nAuthorization: ${FAKE_SECRET}\n`,
+    'test-results/b/ok.txt': `phiên: ${jwtOf({ role: 'authenticated', sub: 'u1' })}`,
+    'src/ghi-chu.log.ts': `const k="${FAKE_SECRET}"`, // không phải log: không quét
+  })
+  const rep = await check(dirty, ['log-secrets'])
+  const bad = rep.results[0]
+  assert.equal(bad.status, 'fail', JSON.stringify(bad))
+  assert.deepEqual(bad.detail.map((l) => l.replace(/ \(.*\)$/, '')).sort(), ['e2e/server.log:2 stripe', 'playwright-report/index.html:1 stripe', 'test-results/b/ok.txt:1 jwt'])
+  assert.ok(!JSON.stringify(bad).includes(FAKE_SECRET))
+  assert.equal(exitCode(rep), 1)
+  assert.match(bad.fix, /safeLog/)
+})
+
+test('log-secrets: khoá công khai (JWT role anon) trong log không bị báo; node_modules và thư mục build không bị quét', async () => {
+  const dir = project({
+    'package.json': '{}',
+    'test-results/a.log': `anon=${jwtOf({ role: 'anon' })}\n`,
+    'node_modules/p/debug.log': `k="${FAKE_SECRET}"`,
+    'dist/build.log': `k="${FAKE_SECRET}"`,
+  })
+  const r = await first(dir, 'log-secrets')
+  assert.equal(r.status, 'pass', JSON.stringify(r))
+})
+
+test('log-secrets chạy SAU axe: log mà bước axe vừa ghi vào test-results/ trong CÙNG lần chạy bị bắt', async () => {
+  const dir = project({ 'package.json': { devDependencies: { '@playwright/test': '1', '@axe-core/playwright': '4' } } })
+  const exec = async (file, args) => {
+    if (args[0] === 'test') put(dir, 'test-results/axe/console.log', `[browser] đăng nhập xong: ${FAKE_SECRET}\n`)
+    return OK
+  }
+  const rep = await check(dir, ['axe', 'log-secrets'], { exec })
+  assert.deepEqual(rep.results.map((r) => [r.id, r.status]), [['axe', 'pass'], ['log-secrets', 'fail']])
+  assert.equal(rep.ok, false)
 })

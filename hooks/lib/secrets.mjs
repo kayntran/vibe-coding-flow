@@ -15,6 +15,8 @@
 //   scanPatch(patch)                    → { findings: [{ file, line, name, value }], allowed: Set<file> }   (git diff -U0 --no-prefix, chỉ dòng THÊM)
 //   scanDiff(diff, { projectCfg, allow })→ [{ file, line, name, value, removed }]       (diff bất kỳ; CẢ dòng xoá; kèm file nhạy cảm/dữ liệu riêng)
 //   scanDir(dir, { build, outbound, projectCfg, maxFileBytes, maxFiles }) → [{ file, line, name, value }]
+//   scanFiles(root, files, { maxFileBytes }) → [{ file, line, name, value }]     quét đúng danh sách file (đường dẫn tương đối, dấu /), cùng luật đọc với scanDir; dùng cho log bài thử (lib/log-scan.mjs)
+//   extensionBuilds(dir)                → [{ rel, mtimeMs }]   bản build của extension (dist/, build/, .output/<trình duyệt>/), MỚI nhất trước
 //   unquoteGitPath(s)                   → đường dẫn git bọc nháy C-quote ("a\"b", \\, \t, \ooo bát phân UTF-8) giải ra tên thật
 //   diffSectionPaths(section)           → mọi đường dẫn (đã giải nháy) mà MỘT mục `diff --git` đụng tới (tiêu đề, ---/+++, rename|copy)
 //   isSensitiveFile(path) · isPrivateData(path, projectCfg) · scanHidden(text) → [{ line, col, kind, count, codepoints }]
@@ -310,7 +312,8 @@ export function scanDiff(diff, { projectCfg, allow = false } = {}) {
 
 // ---------- quét thư mục ----------
 
-export const BUILD_DIRS = ['dist', 'build', '.next', 'out']
+// .output = WXT (.output/chrome-mv3…) và Nuxt/Nitro; trước đây thiếu nên bản build của extension WXT lọt khỏi máy kiểm.
+export const BUILD_DIRS = ['dist', 'build', '.next', 'out', '.output']
 const SKIP_DIRS = new Set(['.git', 'node_modules'])
 const BINARY_EXT = /\.(?:png|jpe?g|gif|webp|avif|ico|bmp|woff2?|ttf|otf|eot|mp[34]|webm|mov|zip|gz|br|tgz|7z|wasm|pdf|exe|dll|so|dylib)$/i
 const isBinary = (buf) => buf.subarray(0, 8000).includes(0)
@@ -371,7 +374,33 @@ function walk(root, { build, maxFiles }, visit) {
   return rec(root, '', BUILD_DIRS.includes(path.basename(path.resolve(root))))
 }
 
-// build:true ⇒ chỉ quét thư mục build (dist/ build/ .next/ out/, ở mọi độ sâu, hoặc chính dir nếu nó là thư mục build); mặc định quét cả cây.
+// Quét MỘT file (đã chắc là file thường) rồi đẩy phát hiện vào findings. Dùng chung cho scanDir và scanFiles để hai đường đọc file y hệt nhau.
+function scanFileInto(findings, abs, rel, { outbound, projectCfg, maxFileBytes }) {
+  const note = (file, name) => findings.push({ file, line: null, name, value: null })
+  if (isSensitiveFile(rel)) note(rel, 'file nhạy cảm')
+  else if (outbound && isPrivateData(rel, projectCfg)) note(rel, 'dữ liệu riêng')
+  if (BINARY_EXT.test(rel) && !outbound) return // outbound không tin đuôi file: tên .png mà ruột là chữ vẫn phải quét
+  let buf
+  try {
+    if (fs.statSync(abs).size > maxFileBytes) return note(rel, 'quá lớn, chưa quét')
+    buf = fs.readFileSync(abs)
+  } catch (e) {
+    return note(rel, `không đọc được (${e.code ?? 'lỗi'})`)
+  }
+  const views = textViews(buf)
+  if (views === null) { if (outbound) note(rel, 'binary'); return } // outbound: không quét được ⇒ báo để người gọi loại file khỏi thứ gửi đi
+  const seen = new Set() // cùng một khoá thấy ở nhiều bản đọc ⇒ báo một lần
+  for (const text of views) {
+    for (const h of scanText(text)) {
+      const key = `${h.line}:${h.name}:${h.value}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      findings.push({ file: rel, line: h.line, name: h.name, value: h.value })
+    }
+  }
+}
+
+// build:true ⇒ chỉ quét thư mục build (dist/ build/ .next/ out/ .output/, ở mọi độ sâu, hoặc chính dir nếu nó là thư mục build); mặc định quét cả cây.
 // outbound:true ⇒ kiểm một thư mục sắp đưa cho bên ngoài: báo thêm file dữ liệu riêng (isPrivateData + projectCfg) và liên kết tượng trưng (có thể trỏ ra ngoài).
 // File nhạy cảm luôn được báo. File quá lớn / không đọc được ⇒ báo (line = null), không coi là sạch. Thư mục gốc không đọc được ⇒ ném lỗi.
 // File có byte NUL: quét CẢ bản giải UTF-16 (BOM hoặc NUL xen kẽ) LẪN bản thô (UTF-8 và bản bỏ NUL) rồi gộp phát hiện — file trộn mã hoá không
@@ -382,30 +411,54 @@ export function scanDir(dir, { build = false, outbound = false, projectCfg, maxF
   const note = (file, name) => findings.push({ file, line: null, name, value: null })
   const complete = walk(dir, { build, maxFiles }, (abs, rel, kind) => {
     if (kind === 'symlink') { if (outbound) note(rel, 'liên kết tượng trưng (không quét)'); return }
-    if (isSensitiveFile(rel)) note(rel, 'file nhạy cảm')
-    else if (outbound && isPrivateData(rel, projectCfg)) note(rel, 'dữ liệu riêng')
-    if (BINARY_EXT.test(rel) && !outbound) return // outbound không tin đuôi file: tên .png mà ruột là chữ vẫn phải quét
-    let buf
-    try {
-      if (fs.statSync(abs).size > maxFileBytes) return note(rel, 'quá lớn, chưa quét')
-      buf = fs.readFileSync(abs)
-    } catch (e) {
-      return note(rel, `không đọc được (${e.code ?? 'lỗi'})`)
-    }
-    const views = textViews(buf)
-    if (views === null) { if (outbound) note(rel, 'binary'); return } // outbound: không quét được ⇒ báo để người gọi loại file khỏi thứ gửi đi
-    const seen = new Set() // cùng một khoá thấy ở nhiều bản đọc ⇒ báo một lần
-    for (const text of views) {
-      for (const h of scanText(text)) {
-        const key = `${h.line}:${h.name}:${h.value}`
-        if (seen.has(key)) continue
-        seen.add(key)
-        findings.push({ file: rel, line: h.line, name: h.name, value: h.value })
-      }
-    }
+    scanFileInto(findings, abs, rel, { outbound, projectCfg, maxFileBytes })
   })
   if (!complete) note('.', `quá ${maxFiles} file, chưa quét hết`)
   return findings
+}
+
+// Quét đúng danh sách file `files` (đường dẫn tương đối tính từ root, dấu /) — file không tồn tại / không đọc được ⇒ báo (không coi là sạch). Không đi theo liên kết:
+// người gọi (log-scan) chỉ đưa file thường. Dùng chế độ thường của scanDir (ảnh/nén theo đuôi bỏ qua, nhị phân thật bỏ qua).
+export function scanFiles(root, files, { maxFileBytes = 10 * 1024 * 1024 } = {}) {
+  const findings = []
+  for (const rel of files) scanFileInto(findings, path.join(root, ...rel.split('/')), rel, { outbound: false, maxFileBytes })
+  return findings
+}
+
+// mtime lớn nhất của file thường trong cây `abs` (bỏ node_modules, .git, liên kết); null = không có file nào. Dừng sau maxFiles file (đủ để so "mới/cũ").
+function newestMtime(abs, maxFiles) {
+  let newest = null
+  let count = 0
+  const rec = (d) => {
+    let entries
+    try { entries = fs.readdirSync(d, { withFileTypes: true }) } catch { return }
+    for (const e of entries) {
+      if (count >= maxFiles) return
+      const p = path.join(d, e.name)
+      if (e.isDirectory()) { if (!SKIP_DIRS.has(e.name)) rec(p) } else if (e.isFile()) {
+        count++
+        try { const t = fs.statSync(p).mtimeMs; if (newest === null || t > newest) newest = t } catch { /* file biến mất giữa chừng: bỏ qua */ }
+      }
+    }
+  }
+  rec(abs)
+  return newest
+}
+
+// Bản build của extension: dist/ và build/ (Plasmo, tự dựng) ở gốc dự án + từng thư mục con của .output/ (WXT: chrome-mv3, firefox-mv2…). Chỉ tính thư mục có ít nhất một file.
+// Xếp MỚI nhất trước (theo file mới nhất bên trong; bằng nhau thì theo tên) — máy kiểm quét bản mới nhất, bản build cũ còn sót ở nơi khác (vd dist/ của lần dựng trước) không được
+// che bản mới (dist/ cũ sạch, .output/ mới chứa khoá ⇒ phải thấy khoá).
+export function extensionBuilds(dir, { maxFiles = 20000 } = {}) {
+  const rels = ['dist', 'build']
+  try {
+    for (const e of fs.readdirSync(path.join(dir, '.output'), { withFileTypes: true })) if (e.isDirectory()) rels.push(`.output/${e.name}`)
+  } catch { /* không có .output ⇒ chỉ dist/ build/ */ }
+  const found = []
+  for (const rel of rels) {
+    const mtimeMs = newestMtime(path.join(dir, ...rel.split('/')), maxFiles)
+    if (mtimeMs !== null) found.push({ rel, mtimeMs })
+  }
+  return found.sort((a, b) => b.mtimeMs - a.mtimeMs || (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))
 }
 
 // ---------- ký tự ẩn ----------

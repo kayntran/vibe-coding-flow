@@ -31,8 +31,10 @@ Luật cho AI sửa app này. Người dùng không viết code: giữ giao di�
 - Khoá bí mật chỉ ở `.env.local` / biến của nền tảng; biến `VITE_*` vào trình duyệt nên KHÔNG đặt khoá bí mật ở đó. Người dùng tự dán khoá, AI không nhập hộ.
 - `public/_headers` là hàng rào trình duyệt: thêm tên miền dữ liệu vào `connect-src` khi cần; KHÔNG nới `script-src`, KHÔNG thêm `'unsafe-eval'`.
 - Dữ liệu từ người dùng: kiểm ở máy chủ, truy vấn tham số hoá; không ghép chuỗi vào SQL.
+- Ghi nhật ký chỉ qua `safeLog` (`src/shared/safe-log.ts`: chỉ trường trong danh sách cho phép được ghi, phần còn lại bị che). KHÔNG `console.log` thẳng mật khẩu, token, khoá, email hay chữ người dùng nhập; code máy chủ cũng ghi log qua hàm tương đương. Máy kiểm `log-secrets` quét log của bài thử.
 
 ## Lệnh
 - Chạy thử: `{{PM_DEV}}` (http://localhost:{{PORT}}) · Test: `{{PM_RUN}} test:e2e` · Kiểm tổng: `node ~/.claude/hooks/flow-check.mjs --dir .`
 - Cổng đọc từ biến `PORT` (mặc định {{PORT}}): chạy nhiều bản song song thì mỗi bản một `PORT`.
+- Bài thử nhanh sau phát hành: test gắn `{ tag: '@smoke' }` CHỈ ĐỌC (mở màn, nhìn; không bấm/nhập/ghi dữ liệu). Chạy vào bản đã đưa lên: `BASE_URL=<địa chỉ>` (và `SMOKE_EXTRA_HTTP_HEADERS='{"tên":"giá trị"}'` nếu cần header thêm) rồi `{{PM_EXEC}} playwright test --grep @smoke`. Màn thật thay màn đầu ⇒ giữ ít nhất một test `@smoke` cho màn đó.
 - Máy kiểm đã cấu hình sẵn (`eslint.config.js`, `knip.jsonc`, `.size-limit.json`, `osv-scanner.toml`): sửa code cho đạt, đừng nới cấu hình để lách; cần nới thì hỏi người dùng.

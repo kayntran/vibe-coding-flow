@@ -13,6 +13,8 @@ Chỉ chạy khi user đã gật trong chat. Nhánh chính tên `master`/khác �
 2. **Test ĐỦ BỘ ngay trong worktree sau rebase** (Agent `test-runner`, chạy qua
    `node ~/.claude/hooks/flow-gate.mjs stamp test -- <lệnh test đủ bộ>` để đóng **dấu test xanh** — hook chặn gộp nếu thiếu). Gộp là fast-forward nên đây chính là
    test trên `main` sau gộp. Đỏ ⇒ sửa trên branch, không gộp.
+   Repo là kit (`~/.claude`) ⇒ chạy thêm `node ~/.claude/hooks/mac-check.mjs` (cùng bộ test trên Mac, bản đã commit; exit 3 =
+   không tới được Mac ⇒ báo user một dòng, không chặn gộp).
    Rebase làm diff đổi nội dung (conflict, main có sửa chạm vùng mình) ⇒ dấu review/QA mất hiệu lực ⇒ hook
    chặn gộp ⇒ chạy lại `flow-review` (và `flow-qa` nếu đụng UI) cho phần đổi.
 3. `ExitWorktree` `action: "keep"` → về thư mục chính, soi lại `git worktree list` + file các phiên khác đang đổi,

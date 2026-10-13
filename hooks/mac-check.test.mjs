@@ -5,22 +5,22 @@ import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
-import { MARK, UsageError, buildCommands, macTest, main, makeId, missingTool, parseArgs, parseTap, remoteScript, shq, summarize } from './mac-check.mjs'
+import { MARK, UsageError, buildCommands, macTest, main, missingTool, parseArgs, parseTap, remoteCommands, remoteScript, shq, summarize } from './mac-check.mjs'
 
 const SHA = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678'
 
 test('tên CLI không khớp mẫu file test mặc định của node --test (khớp ⇒ chạy toàn bộ test sẽ tự gọi sang Mac)', () => {
   assert.doesNotMatch('mac-check.mjs', /^test[-.]|[-._]test\.[cm]?js$|^test\.[cm]?js$/)
 })
-const NOW = new Date('2026-10-13T10:15:30.123Z')
-const ID = 'flowtest-a1b2c3d-20261013-101530123'
+// Thư mục riêng do `mktemp -d /tmp/flowtest-XXXXXX` trên Mac tạo (0700, tên ngẫu nhiên) — bundle và bản sao nằm TRONG đó.
+const DIR = '/tmp/flowtest-aB3xY9'
 const REPO = path.join(os.tmpdir(), 'Dự án', 'bộ kit thử')
 const TMP_DIR = path.join(os.tmpdir(), 'Thư mục tạm', 'lần 1')
 // Hợp đồng: không phần tử mảng tham số nào được là lệnh xoá thư mục (xoá chỉ nằm trong script gửi qua stdin).
 const DANGER = /(^|[\s;&|])(rm|rmdir|rd|del|erase)(\s|$)|-rf\b|-fr\b|Remove-Item|rimraf/i
 
 // TAP thật của node:test (nhóm có 1 bài hỏng thường + 1 bài thiếu công cụ), đường dẫn kiểu Mac.
-const LOC = (line) => `      location: '/tmp/${ID}/kit/hooks/demo.test.mjs:${line}:3'`
+const LOC = (line) => `      location: '${DIR}/kit/hooks/demo.test.mjs:${line}:3'`
 const TAP_MIXED = [
   'TAP version 13', '# Subtest: nhóm A',
   '    # Subtest: đạt', '    ok 1 - đạt', '      ---', '      duration_ms: 9.08', "      type: 'test'", '      ...',
@@ -37,7 +37,7 @@ const TAP_GREEN = ['TAP version 13', '# Subtest: a', 'ok 1 - a', '  ---', '  ...
 const TAP_ONLY_MACHINE = TAP_MIXED.replace('    not ok 2 - hỏng thường', '    ok 2 - hỏng thường').replace('# pass 2', '# pass 3').replace('# fail 2', '# fail 1')
 const out = (tap, { cleaned = true } = {}) => `${MARK} node v24.18.0\n${tap}\n${cleaned ? `${MARK} cleaned\n` : ''}`
 
-// run giả: ghi lại lệnh, trả kết quả theo kiểu lệnh. over = { probe, copy, run, clean, bundle, dirty, branch }
+// run giả: ghi lại lệnh, trả kết quả theo kiểu lệnh. over = { probe, mkdir, copy, run, clean, bundle, dirty, branch }
 function fake(over = {}) {
   const calls = []
   const run = (cmd, args, o = {}) => {
@@ -49,6 +49,7 @@ function fake(over = {}) {
     if (cmd === 'git' && args[0] === 'bundle') return over.bundle ?? ok
     if (cmd === 'scp') return over.copy ?? ok
     if (cmd === 'ssh' && args.at(-1) === 'true') return over.probe ?? ok
+    if (cmd === 'ssh' && o.input?.includes('mktemp -d')) return over.mkdir ?? { ...ok, stdout: `${MARK} dir ${DIR}\n` }
     if (cmd === 'ssh' && o.input?.includes('trap cleanup EXIT')) return over.run ?? { ...ok, stdout: out(TAP_GREEN) }
     if (cmd === 'ssh') return over.clean ?? { ...ok, stdout: `${MARK} cleaned\n` }
     throw new Error(`lệnh lạ ${cmd}`)
@@ -59,7 +60,7 @@ function go(over = {}, opts = {}) {
   const f = fake(over)
   const removed = []
   const said = []
-  const res = macTest({ repo: REPO, host: 'macmini', now: NOW, run: f.run, tmp: { make: () => TMP_DIR, remove: (d) => removed.push(d) }, say: (s) => said.push(s), ...opts })
+  const res = macTest({ repo: REPO, host: 'macmini', run: f.run, tmp: { make: () => TMP_DIR, remove: (d) => removed.push(d) }, say: (s) => said.push(s), ...opts })
   return { ...res, calls: f.calls, removed, said }
 }
 
@@ -85,19 +86,24 @@ describe('parseArgs', () => {
 })
 
 describe('remoteScript', () => {
-  test('mã thư mục: sha7 + ngày + giờ-ms, mỗi lần một mã mới', () => {
-    assert.equal(makeId(SHA, NOW), ID)
-    assert.notEqual(makeId(SHA, new Date(NOW.getTime() + 1)), ID)
+  test('thư mục tạm trên Mac do mktemp -d tạo (0700, tên ngẫu nhiên) TRƯỚC khi chép gì sang — không có tên đoán trước được theo commit/giờ', () => {
+    const c = buildCommands({ host: 'macmini', repo: REPO, bundleDir: TMP_DIR })
+    assert.ok(c.mkdir.input.includes('mktemp -d /tmp/flowtest-XXXXXX'), c.mkdir.input)
+    assert.deepEqual(c.mkdir.args.slice(-3), ['--', 'macmini', 'bash -s'])
+    assert.ok(!/node --test|git clone|rm /.test(c.mkdir.input), 'script tạo thư mục chỉ tạo, không chạy/xoá gì')
+    assert.match(c.mkdir.input, /mktemp -d [^\n]*\|\| exit 98/)
   })
   test('run: PATH Homebrew, trap dọn, kiểm node/git, clone từ bundle rồi checkout đúng sha, node --test tap; mọi lệnh con có </dev/null', () => {
-    const s = remoteScript({ id: ID, sha: SHA, only: ['hooks/lib/luu.test.mjs'] })
+    const s = remoteScript({ dir: DIR, sha: SHA, only: ['hooks/lib/luu.test.mjs'] })
     assert.match(s, /export PATH='\/opt\/homebrew\/bin:\/usr\/local\/bin'":\$PATH"/)
     assert.match(s, /trap cleanup EXIT/)
     assert.match(s, /trap 'exit 129' HUP/)
-    assert.ok(s.includes(`DIR=/tmp/${ID}`) && s.includes(`BUNDLE=/tmp/${ID}.bundle`))
+    assert.ok(s.includes(`DIR=${DIR}\n`) && s.includes('BUNDLE="$DIR/flowtest.bundle"'), 'bundle nằm TRONG thư mục riêng')
     assert.match(s, /case "\$DIR" in \/tmp\/flowtest-\*\) rm -rf -- "\$DIR" ;; esac/, 'chỉ xoá khi đường dẫn thuộc /tmp/flowtest-*')
+    assert.ok(!/\brm -f\b/.test(s), 'không xoá riêng file nào ngoài thư mục riêng (bundle nằm trong DIR nên đi theo DIR)')
     assert.match(s, /command -v "\$t"[^\n]*exit 97/)
-    assert.match(s, /mkdir "\$DIR" \|\| exit 98/, 'mkdir không -p: thư mục phải MỚI')
+    assert.match(s, /\[ -d "\$DIR" \] && \[ ! -L "\$DIR" \] \|\| exit 98/, 'thư mục phải có thật và không là symlink')
+    assert.ok(!/mkdir "\$DIR"/.test(s), 'thư mục đã được mktemp tạo sẵn, script không tự mkdir')
     assert.match(s, /git -c advice\.detachedHead=false clone -q "\$BUNDLE" "\$DIR\/kit" <\/dev\/null \|\| exit 98/)
     assert.ok(s.includes(`git checkout -q --detach ${SHA} </dev/null || exit 98`))
     assert.ok(s.includes("node --test --test-reporter=tap 'hooks/lib/luu.test.mjs' </dev/null"))
@@ -105,18 +111,20 @@ describe('remoteScript', () => {
     assert.ok(!s.includes('\r') && /^[\x09\x0a\x20-\x7e]*$/.test(s), 'chỉ ASCII, không CR')
   })
   test('không --only ⇒ node --test trần (toàn bộ bộ kiểm); nhiều --only ⇒ mỗi glob một cặp nháy đơn', () => {
-    assert.ok(remoteScript({ id: ID, sha: SHA }).includes('node --test --test-reporter=tap </dev/null'))
-    assert.ok(remoteScript({ id: ID, sha: SHA, only: ['a/*.test.mjs', 'b/{x,y}.test.mjs'] }).includes("tap 'a/*.test.mjs' 'b/{x,y}.test.mjs' </dev/null"))
+    assert.ok(remoteScript({ dir: DIR, sha: SHA }).includes('node --test --test-reporter=tap </dev/null'))
+    assert.ok(remoteScript({ dir: DIR, sha: SHA, only: ['a/*.test.mjs', 'b/{x,y}.test.mjs'] }).includes("tap 'a/*.test.mjs' 'b/{x,y}.test.mjs' </dev/null"))
   })
-  test('clean: chỉ dọn + báo cleaned, không chạm node/git; gọi lại được', () => {
-    const s = remoteScript({ id: ID, sha: SHA, mode: 'clean' })
+  test('clean: chỉ dọn đúng thư mục riêng + báo cleaned, không chạm node/git; gọi lại được', () => {
+    const s = remoteScript({ dir: DIR, sha: SHA, mode: 'clean' })
     assert.ok(s.includes('rm -rf --') && s.includes('cleanup\nexit 0'))
     assert.ok(!/node --test|git clone|trap/.test(s))
+    assert.ok(s.includes(`if [ ! -e "$DIR" ]; then echo '${MARK} cleaned'`), 'chỉ xác nhận thư mục riêng đã biến mất')
   })
-  test('mã thư mục/commit lạ ⇒ ném lỗi (không bao giờ ghép giá trị lạ vào script)', () => {
-    assert.throws(() => remoteScript({ id: 'flowtest-x; ls', sha: SHA }))
-    assert.throws(() => remoteScript({ id: '../../etc', sha: SHA }))
-    assert.throws(() => remoteScript({ id: ID, sha: 'HEAD; ls' }))
+  test('thư mục/commit lạ ⇒ ném lỗi (chỉ nhận /tmp/flowtest-<chữ+số> do mktemp trả; không bao giờ ghép giá trị lạ vào script)', () => {
+    for (const bad of ['/tmp/flowtest-x; ls', '/tmp/../etc', '/tmp/flowtest-', '/tmp/flowtest-ab', '/tmp/flowtest-abcdef/../..', '/etc/flowtest-abcdef', '/tmp/flowtest-abc def', '/tmp/flowtest-abcdef\n', 'flowtest-abcdef', '/tmp/flowtest-abc.def', undefined]) {
+      assert.throws(() => remoteScript({ dir: bad, sha: SHA }), undefined, `dir ${JSON.stringify(bad)}`)
+    }
+    assert.throws(() => remoteScript({ dir: DIR, sha: 'HEAD; ls' }))
   })
   test('shq: nháy đơn trong chuỗi được thoát đúng', () => {
     assert.equal(shq("a'b"), `'a'\\''b'`)
@@ -124,15 +132,19 @@ describe('remoteScript', () => {
   })
   test('cú pháp bash hợp lệ (bỏ qua nếu máy không có bash)', (t) => {
     for (const mode of ['run', 'clean']) {
-      const r = spawnSync('bash', ['-n'], { input: remoteScript({ id: ID, sha: SHA, only: ['hooks/*.test.mjs'], mode }), encoding: 'utf8' })
+      const r = spawnSync('bash', ['-n'], { input: remoteScript({ dir: DIR, sha: SHA, only: ['hooks/*.test.mjs'], mode }), encoding: 'utf8' })
       if (r.error) return t.skip('không có bash')
       assert.equal(r.status, 0, `bash -n (${mode}): ${r.stderr}`)
     }
+    const m = spawnSync('bash', ['-n'], { input: buildCommands({ host: 'macmini', repo: REPO, bundleDir: TMP_DIR }).mkdir.input, encoding: 'utf8' })
+    if (m.error) return t.skip('không có bash')
+    assert.equal(m.status, 0, `bash -n (mkdir): ${m.stderr}`)
   })
 })
 
-describe('buildCommands', () => {
-  const cmds = buildCommands({ host: 'macmini', id: ID, sha: SHA, only: ['hooks/lib/luu.test.mjs'], repo: REPO, bundleDir: TMP_DIR })
+describe('buildCommands / remoteCommands', () => {
+  const pre = buildCommands({ host: 'macmini', repo: REPO, bundleDir: TMP_DIR })
+  const cmds = { ...pre, ...remoteCommands({ host: 'macmini', dir: DIR, sha: SHA, only: ['hooks/lib/luu.test.mjs'], bundleDir: TMP_DIR }) }
   test('ssh: mảng tham số cố định (-T, BatchMode, timeout kết nối, --, host, "bash -s"); script đi qua stdin', () => {
     assert.deepEqual(cmds.probe.args.slice(0, 2), ['-T', '-o'])
     assert.ok(cmds.probe.args.includes('BatchMode=yes') && cmds.probe.args.includes('ConnectTimeout=10'))
@@ -144,10 +156,16 @@ describe('buildCommands', () => {
     assert.equal(cmds.bundle.cwd, REPO)
     assert.deepEqual(cmds.bundle.args, ['bundle', 'create', path.join(TMP_DIR, 'flowtest.bundle'), 'HEAD'])
     assert.equal(cmds.copy.cwd, TMP_DIR)
-    assert.deepEqual(cmds.copy.args.slice(-3), ['--', 'flowtest.bundle', `macmini:/tmp/${ID}.bundle`])
-    for (const c of [cmds.probe, cmds.copy, cmds.run, cmds.clean]) {
+    for (const c of [cmds.probe, cmds.mkdir, cmds.copy, cmds.run, cmds.clean]) {
       const all = `${c.args.join('\n')}\n${c.input ?? ''}`
       assert.ok(!all.includes(REPO) && !all.includes(TMP_DIR) && !all.includes('Dự án'), `${c.cmd} không chứa đường dẫn máy này`)
+    }
+  })
+  test('scp ghi bundle VÀO thư mục riêng mktemp đã tạo (đích không đoán trước được, không ghi thẳng /tmp/flowtest-<sha>…bundle)', () => {
+    assert.deepEqual(cmds.copy.args.slice(-3), ['--', 'flowtest.bundle', `macmini:${DIR}/flowtest.bundle`])
+    for (const c of Object.values(cmds)) {
+      const all = `${c.args.join('\n')}\n${c.input ?? ''}`
+      assert.ok(!/\/tmp\/flowtest-[0-9a-f]{7}-/.test(all) && !/\/tmp\/flowtest-[^\s/"']*\.bundle/.test(all), `${c.cmd}: tên trên Mac không chứa sha/ngày/giờ và không có file bundle nằm ngay dưới /tmp`)
     }
   })
   test('KHÔNG dòng lệnh nào chứa thao tác xoá thư mục; việc xoá chỉ nằm trong script stdin', () => {
@@ -166,7 +184,7 @@ describe('parseTap / summarize', () => {
     ])
   })
   test('file test hỏng ngay từ đầu (không có bài con) vẫn tính là một bài hỏng, tên file bỏ tiền tố /tmp/flowtest-…/kit/', () => {
-    const t = parseTap(`not ok 1 - /tmp/${ID}/kit/hooks/x.test.mjs\n  ---\n  error: 'Cannot find module'\n  ...\n1..1\n# tests 1\n# pass 0\n# fail 1`)
+    const t = parseTap(`not ok 1 - ${DIR}/kit/hooks/x.test.mjs\n  ---\n  error: 'Cannot find module'\n  ...\n1..1\n# tests 1\n# pass 0\n# fail 1`)
     assert.deepEqual(t.failures.map((f) => f.name), ['hooks/x.test.mjs'])
   })
   test('missingTool: spawn ENOENT / command not found / env: x: No such file; lỗi thường ⇒ null', () => {
@@ -214,10 +232,13 @@ describe('parseTap / summarize', () => {
 })
 
 describe('macTest (run giả)', () => {
-  test('đường xanh: đúng thứ tự git → ssh thử → bundle → scp → ssh chạy; tổng kết + đã dọn; gỡ thư mục tạm máy này', () => {
+  const kindOf = (c) => c.cmd + ' ' + (c.cmd === 'ssh' ? (c.args.at(-1) === 'true' ? 'probe' : c.input.includes('mktemp -d') ? 'mkdir' : c.input.includes('trap cleanup EXIT') ? 'run' : 'clean') : c.args[0])
+  test('đường xanh: đúng thứ tự git → ssh thử → bundle → ssh mktemp (thư mục riêng) → scp vào thư mục đó → ssh chạy; tổng kết + đã dọn; gỡ thư mục tạm máy này', () => {
     const r = go()
     assert.equal(r.exit, 0)
-    assert.deepEqual(r.calls.map((c) => c.cmd + ' ' + (c.cmd === 'ssh' ? (c.args.at(-1) === 'true' ? 'probe' : 'run') : c.args[0])), ['git rev-parse', 'git rev-parse', 'git status', 'ssh probe', 'git bundle', 'scp -q', 'ssh run'])
+    assert.deepEqual(r.calls.map(kindOf), ['git rev-parse', 'git rev-parse', 'git status', 'ssh probe', 'git bundle', 'ssh mkdir', 'scp -q', 'ssh run'])
+    assert.equal(r.calls.find((c) => c.cmd === 'scp').args.at(-1), `macmini:${DIR}/flowtest.bundle`, 'scp ghi vào thư mục mktemp trả về')
+    assert.ok(r.calls.at(-1).input.includes(`DIR=${DIR}\n`))
     assert.deepEqual(r.lines, ['Mac (macmini, node v24.18.0): 2 bài · 2 đạt · 0 hỏng — xanh', 'Đã dọn thư mục tạm trên Mac.'])
     assert.deepEqual(r.removed, [TMP_DIR])
     assert.match(r.said[0], /nhánh flow-v7-dot4 \(commit a1b2c3d\)/)
@@ -258,10 +279,34 @@ describe('macTest (run giả)', () => {
     const last = r.calls.at(-1)
     assert.ok(last.cmd === 'ssh' && last.input.includes('cleanup\nexit 0') && !last.input.includes('node --test'))
   })
-  test('git bundle lỗi ⇒ exit 1, không scp', () => {
+  test('git bundle lỗi ⇒ exit 1, không scp, chưa tạo gì trên Mac', () => {
     const r = go({ bundle: { status: 128, stdout: '', stderr: 'fatal: Refusing to create empty bundle' } })
     assert.equal(r.exit, 1)
     assert.ok(!r.calls.some((c) => c.cmd === 'scp'))
+    assert.ok(!r.calls.some((c) => c.cmd === 'ssh' && c.input?.includes('mktemp')), 'bundle local hỏng thì chưa mktemp')
+  })
+  test('mktemp trên Mac lỗi / không trả thư mục hợp lệ (kể cả đường dẫn lạ như /etc, ../) ⇒ exit 3, KHÔNG scp, không chạy gì', () => {
+    const bad = [
+      ['mktemp lỗi', { status: 1, stdout: '', stderr: 'mktemp: mkstemp failed on /tmp/flowtest-XXXXXX: No space left' }, /No space left/],
+      ['không có dòng thư mục', { status: 0, stdout: 'Welcome to macOS\n', stderr: '' }, /không trả đường dẫn/],
+      ['đường dẫn ngoài /tmp/flowtest-', { status: 0, stdout: `${MARK} dir /etc\n`, stderr: '' }, /không trả đường dẫn/],
+      ['đường dẫn có ..', { status: 0, stdout: `${MARK} dir /tmp/flowtest-abcdef/../../etc\n`, stderr: '' }, /không trả đường dẫn/],
+    ]
+    for (const [name, mkdir, re] of bad) {
+      const r = go({ mkdir })
+      assert.equal(r.exit, 3, name)
+      assert.match(r.lines[0], /Không tạo được thư mục tạm trên Mac/, name)
+      assert.match(r.lines[0], re, name)
+      assert.ok(!r.calls.some((c) => c.cmd === 'scp'), `${name}: không scp`)
+      assert.ok(!r.calls.some((c) => c.cmd === 'ssh' && c.input?.includes('trap cleanup EXIT')), `${name}: không chạy test`)
+      assert.deepEqual(r.removed, [TMP_DIR], name)
+    }
+  })
+  test('thư mục riêng khác nhau mỗi lần (mktemp): đích scp và script chạy/dọn đều theo thư mục mktemp trả về, không theo giờ/sha', () => {
+    const r = go({ mkdir: { status: 0, stdout: `${MARK} dir /tmp/flowtest-Q9zK2m\n`, stderr: '' } })
+    assert.equal(r.exit, 0)
+    assert.equal(r.calls.find((c) => c.cmd === 'scp').args.at(-1), 'macmini:/tmp/flowtest-Q9zK2m/flowtest.bundle')
+    assert.ok(r.calls.at(-1).input.includes('DIR=/tmp/flowtest-Q9zK2m\n'))
   })
   test('Mac thiếu node/git (mã 97) ⇒ exit 3 nêu tên công cụ; không dựng được bản sao (98) ⇒ exit 1', () => {
     const miss = go({ run: { status: 97, stdout: `${MARK} missing node\n${MARK} cleaned\n`, stderr: '' } })
@@ -275,7 +320,7 @@ describe('macTest (run giả)', () => {
     const drop = go({ run: { status: 255, stdout: '', stderr: 'client_loop: send disconnect' }, clean: { status: 255, stdout: '', stderr: '' } })
     assert.equal(drop.exit, 3)
     assert.match(drop.lines[0], /Mất kết nối với Mac/)
-    assert.equal(drop.lines.at(-1), `Chưa dọn được thư mục tạm trên Mac: /tmp/${ID} (macOS tự dọn /tmp khi khởi động lại).`)
+    assert.equal(drop.lines.at(-1), `Chưa dọn được thư mục tạm trên Mac: ${DIR} (macOS tự dọn /tmp khi khởi động lại).`)
     assert.equal(drop.calls.filter((c) => c.cmd === 'ssh' && c.input?.includes('cleanup\nexit 0')).length, 1)
     const slow = go({ run: { status: null, stdout: '', stderr: '', error: Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' }) } })
     assert.equal(slow.exit, 1)
@@ -309,7 +354,7 @@ describe('main', () => {
   test('chạy đủ qua main với run giả: in tiến trình rồi tổng kết, trả mã thoát của lõi', () => {
     const f = fake({ run: { status: 1, stdout: out(TAP_MIXED), stderr: '' } })
     const o = sink()
-    const code = main(['--only', 'hooks/lib/luu.test.mjs'], { repo: REPO, run: f.run, now: NOW, stdout: o, tmp: { make: () => TMP_DIR, remove() {} } })
+    const code = main(['--only', 'hooks/lib/luu.test.mjs'], { repo: REPO, run: f.run, stdout: o, tmp: { make: () => TMP_DIR, remove() {} } })
     assert.equal(code, 1)
     assert.match(o.text(), /Đóng gói bản hiện tại…\nChép sang Mac…\nChạy bộ kiểm trên Mac…\nMac \(macmini, node v24\.18\.0\): 4 bài/)
   })

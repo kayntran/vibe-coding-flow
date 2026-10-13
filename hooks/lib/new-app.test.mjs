@@ -7,12 +7,20 @@ import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { loadConfig } from '../ui-check.mjs'
 import { extensionPermProblems, headerProblems } from './app-safety.mjs'
 import { syncCheck } from './arch.mjs'
-import { scanHiddenPaths } from './secrets.mjs'
+import { scanHiddenPaths, scanText } from './secrets.mjs'
 import { traceCodes } from './spec-codes.mjs'
-import { KIT_DIR, NewAppError, TOKEN_NAMES, TYPES, applyOverlay, classifyFailure, create, defaultRun, doctor, generatorCommand, installLines, loadTemplate, loadVersions, validateName } from './new-app.mjs'
+import { KIT_DIR, NewAppError, TOKEN_NAMES, TYPES, applyOverlay, classifyFailure, create as createReal, defaultRun, doctor as doctorReal, generatorCommand, installLines, loadTemplate, loadVersions, requiredTools, validateName } from './new-app.mjs'
+
+// doctor tìm công cụ của máy kiểm (osv-scanner, ast-grep…) bằng findTool của flow-check trên máy THẬT; test mặc định coi mọi công cụ là "có" (kết quả không phụ thuộc máy chạy test).
+// Ca cần máy thiếu công cụ truyền io.which riêng (hoặc `which: undefined` để dùng findTool thật).
+const FAKE_BIN = (name) => `/fake/bin/${name}`
+const withWhich = (o = {}) => ({ ...o, io: { which: FAKE_BIN, ...o.io } })
+const create = (o) => createReal(withWhich(o))
+const doctor = (o) => doctorReal(withWhich(o))
 
 const TMP = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'new-app thử ')))
 const GITCFG = path.join(TMP, 'gitconfig')
@@ -106,6 +114,7 @@ function makeRun({ missing = [], fail = {}, genResult = {}, probes = {} } = {}) 
     const key = `${cmd} ${args.join(' ')}`
     for (const [re, res] of Object.entries(fail)) if (new RegExp(re).test(key)) return res
     if (missing.includes(cmd)) return ENOENT
+    if (/[\\/]ast-grep(?:\.\w+)?$/.test(cmd) && args[0] === '--version') return ok('ast-grep 0.40.0\n') // doctor xác nhận đúng ast-grep (không phải lệnh `sg` khác) như flow-check
     if (cmd === 'git') return defaultRun(cmd, args, o)
     const p = { ...PROBES, ...probes }[cmd]
     if (p && /^(--version|version|-p|query)$/.test(args[0] ?? '')) return p
@@ -197,6 +206,89 @@ describe('kit/templates', () => {
   })
 })
 
+// ---------- AC-30: hàm ghi log an toàn của mẫu web + desktop ----------
+
+describe('safe-log.ts của mẫu (AC-30)', () => {
+  const WEB = path.join(KIT_DIR, 'templates', 'web', 'overlay', 'src', 'shared', 'safe-log.ts')
+  const DESKTOP = path.join(KIT_DIR, 'templates', 'desktop', 'overlay', 'frontend', 'src', 'shared', 'safe-log.ts')
+  const GHP = 'ghp_' + 'a'.repeat(36)
+  const b64u = (o) => Buffer.from(JSON.stringify(o)).toString('base64url')
+  const JWT = [b64u({ alg: 'HS256', typ: 'JWT' }), b64u({ role: 'authenticated', sub: 'u1' }), 'x'.repeat(43)].join('.')
+
+  test('web và desktop dùng CÙNG một bản (sửa một nơi phải sửa cả hai)', () => {
+    assert.equal(fs.readFileSync(WEB, 'utf8'), fs.readFileSync(DESKTOP, 'utf8'))
+  })
+
+  // Node đọc thẳng .ts (gỡ kiểu) từ 22.18/23.6; bản cũ hơn thì bỏ qua phần chạy thử hành vi. Chép sang thư mục tạm có package.json "type": "module" cho chắc cách nạp.
+  test('chỉ ghi trường trong danh sách cho phép; phần còn lại chỉ được đếm; giá trị trông như bí mật bị che; log không còn thứ scanText thấy là bí mật', { skip: !process.features.typescript && 'Node này chưa đọc được file .ts' }, async (t) => {
+    const d = mk('safe log')
+    put(d, 'package.json', '{"type":"module"}')
+    fs.copyFileSync(WEB, path.join(d, 'safe-log.ts'))
+    const { LOG_ALLOW, redact, safeLog } = await import(pathToFileURL(path.join(d, 'safe-log.ts')).href)
+    const out = { log: [], warn: [], error: [] }
+    for (const k of Object.keys(out)) t.mock.method(console, k, (s) => { out[k].push(s) })
+
+    safeLog('order_saved', { feature: 'orders', status: 201, durationMs: 42, email: 'an@example.com', password: 'hunter2', token: GHP, body: { a: 1 } })
+    assert.deepEqual(out.log.map((s) => JSON.parse(s)), [{ event: 'order_saved', feature: 'orders', status: 201, durationMs: 42, che: 4 }])
+    assert.ok(!/email|password|token|hunter2|example\.com/.test(out.log[0]), 'tên trường bị che cũng không lộ')
+
+    safeLog('x_failed', { level: 'error', code: 'E_DB', route: '/u/an@example.com', requestId: JWT, errorName: GHP, count: Number.NaN })
+    safeLog('x_slow', { level: 'warn', durationMs: 900, feature: undefined })
+    assert.deepEqual(JSON.parse(out.error[0]), { event: 'x_failed', level: 'error', code: 'E_DB', route: '[che]', requestId: '[che]', errorName: '[che]', che: 1 })
+    assert.deepEqual(JSON.parse(out.warn[0]), { event: 'x_slow', level: 'warn', durationMs: 900 })
+
+    safeLog('mật khẩu của an@example.com là hunter2', { feature: 'login' })
+    assert.deepEqual(JSON.parse(out.log[1]), { event: '[che]', feature: 'login' }, 'tên sự kiện phải là mã ngắn, không phải câu chứa dữ liệu')
+    safeLog('long_text', { route: 'a b '.repeat(100) })
+    assert.equal(JSON.parse(out.log[2]).route.length, 200)
+    safeLog(GHP, { feature: 'login' })
+    assert.deepEqual(JSON.parse(out.log[3]), { event: '[che]', feature: 'login' }, 'tên sự kiện trông như token cũng bị che')
+
+    assert.deepEqual(redact({ a: 1, status: 5 }, ['a']), { kept: { a: 1 }, hidden: 1 }, 'danh sách cho phép tự chọn')
+    assert.ok(LOG_ALLOW.includes('status') && !LOG_ALLOW.some((k) => /pass|token|secret|key|email|body/i.test(k)), 'danh sách mặc định không có trường nhạy cảm')
+
+    for (const line of [...out.log, ...out.warn, ...out.error]) assert.deepEqual(scanText(line), [], line)
+  })
+})
+
+describe('công thức nền dữ liệu: nhật ký an toàn + nguồn log (AC-30, AC-48e)', () => {
+  const recipe = (name) => fs.readFileSync(path.join(KIT_DIR, '..', 'skills', 'flow-new-app', 'recipes', `${name}.md`), 'utf8')
+  // Nguồn log hợp lệ theo hợp đồng .claude/release.json (PLAN dot4, mục Hợp đồng): logs.source
+  const SOURCES = ['workers-observability', 'supabase', 'vps-journald', 'none']
+  const loggedSource = (text) => /"logs": \{ "source": "([a-z-]+)", "retentionDays": (\d+) \}/.exec(text)
+
+  test('cả 3 công thức dặn code máy chủ (Worker, Edge/hàm Supabase, API VPS) ghi log chỉ qua safeLog hoặc hàm tương đương, và ghi nguồn log vào release.json', () => {
+    for (const name of ['cloudflare-d1', 'supabase', 'postgres-vps']) {
+      const text = recipe(name)
+      assert.match(text, /\*\*Nhật ký \(log\):\*\*/, name)
+      assert.match(text, /safeLog/, name)
+      assert.match(text, /\.claude\/release\.json/, name)
+      assert.match(text, /log-secrets/, name)
+      const m = loggedSource(text)
+      assert.ok(m && SOURCES.includes(m[1]), `${name}: nguồn log ${m?.[1]} không thuộc ${SOURCES.join(' | ')}`)
+    }
+  })
+
+  test('cloudflare-d1 bật Workers Logs (observability.enabled) và ghi nguồn workers-observability giữ 3 ngày (Free); supabase giữ 1 ngày; VPS ghi journald với số ngày đã đặt', () => {
+    assert.match(recipe('cloudflare-d1'), /"observability": \{ "enabled": true \}/)
+    assert.deepEqual(loggedSource(recipe('cloudflare-d1')).slice(1), ['workers-observability', '3'])
+    assert.deepEqual(loggedSource(recipe('supabase')).slice(1), ['supabase', '1'])
+    assert.match(recipe('supabase'), /"observability": \{ "enabled": true \}/, 'web tĩnh chạy trên Workers cũng bật Workers Logs')
+    const vps = recipe('postgres-vps')
+    assert.deepEqual(loggedSource(vps).slice(1), ['vps-journald', '30'])
+    assert.match(vps, /MaxRetentionSec=30day/, 'số ngày ghi trong release.json khớp cấu hình journald đã dặn')
+    assert.match(vps, /journalctl -u/)
+  })
+
+  test('postgres-vps: giới hạn tần suất dùng nginx limit_req (có sẵn); Caddy rate_limit được nói rõ là module ngoài, không coi là có sẵn', () => {
+    const vps = recipe('postgres-vps')
+    assert.match(vps, /nginx `limit_req` \(module có sẵn/)
+    assert.match(vps, /KHÔNG dựa vào Caddy `rate_limit`/)
+    assert.match(vps, /module ngoài/)
+    assert.ok(!/nginx `limit_req`, Caddy rate_limit/.test(vps), 'câu cũ coi Caddy rate_limit là có sẵn đã bỏ')
+  })
+})
+
 describe('validateName', () => {
   test('chấp nhận tên thư mục an toàn', () => {
     for (const n of ['quan-ly-don-hang', 'app1', 'abc']) assert.equal(validateName(n), null, n)
@@ -252,10 +344,55 @@ describe('classifyFailure', () => {
       assert.ok(c.detail.length <= 300)
     })
   }
+  // Lỗi #2 (nghiệm thu rút gọn): máy bị chặn kết nối ra ngoài báo EACCES kèm địa chỉ:cổng — đó là MẠNG, không phải quyền ghi thư mục.
+  const connectDenied = [
+    'npm error code EACCES\nnpm error syscall connect\nnpm error errno EACCES\nnpm error connect EACCES 104.16.6.34:443',
+    'ERR_PNPM_META_FETCH_FAIL  GET https://registry.npmjs.org/shadcn: request to https://registry.npmjs.org/shadcn failed, reason: connect EACCES 104.16.6.34:443',
+    'Error: connect EACCES [2606:4700::6810:84e5]:443',
+    "node:internal/process: { errno: -13, code: 'EACCES', syscall: 'connect', address: '104.16.6.34', port: 443 }",
+    'npm error code EACCES\nnpm error syscall getaddrinfo\nnpm error errno EACCES',
+    'getaddrinfo EACCES registry.npmjs.org',
+    'Get "https://proxy.golang.org/x": dial tcp 142.250.1.1:443: connect: permission denied',
+    'dial tcp 142.250.1.1:443: connectex: An attempt was made to access a socket in a way forbidden by its access permissions.',
+    'connect EPERM 10.0.0.5:8080 - Local (0.0.0.0:0)',
+  ]
+  for (const stderr of connectDenied) {
+    test(`kết nối bị chặn ⇒ network, không phải quyền ghi: ${stderr.split('\n').at(-1).slice(0, 50)}`, () => {
+      const c = classifyFailure(r(stderr), 'pnpm')
+      assert.equal(c.kind, 'network')
+      assert.match(c.say, /Không kết nối được mạng để tải thư viện/)
+      assert.doesNotMatch(c.say, /quyền ghi/)
+    })
+  }
+  test('lỗi mạng khác (ENOTFOUND, ECONNREFUSED, ETIMEDOUT có địa chỉ:cổng) vẫn là network', () => {
+    for (const s of ['getaddrinfo ENOTFOUND registry.npmjs.org', 'connect ECONNREFUSED 127.0.0.1:8080', 'connect ETIMEDOUT 104.16.6.34:443', 'npm error network request to https://registry.npmjs.org/x failed, reason: connect ETIMEDOUT 104.16.6.34:443']) {
+      assert.equal(classifyFailure(r(s), 'pnpm').kind, 'network', s)
+    }
+  })
+  test('quyền ghi thật (lỗi trên đường dẫn file) vẫn là permission, kể cả khi log có dòng mạng', () => {
+    for (const s of [
+      "EACCES: permission denied, mkdir 'C:\\Users\\Admin\\Documents\\app'",
+      "npm error code EACCES\nnpm error syscall mkdir\nnpm error path C:\\Program Files\\x\nnpm error errno -4048",
+      "npm warn retry connect ETIMEDOUT 104.16.6.34:443\nnpm error EACCES: permission denied, open '/usr/lib/node_modules/x/package.json'",
+      "npm error connect EACCES 104.16.6.34:443 (đã thử lại)\nnpm error syscall mkdir\nnpm error path /usr/local/lib",
+      'sh: line 1: ./node_modules/.bin/vite: Permission denied',
+    ]) {
+      const c = classifyFailure(r(s), 'pnpm')
+      assert.equal(c.kind, 'permission', s)
+      assert.match(c.say, /quyền ghi/)
+    }
+  })
   test('thiếu phần mềm (ENOENT), quá giờ, đối số không an toàn', () => {
     assert.equal(classifyFailure(ENOENT, 'wails').kind, 'missing-tool')
     assert.equal(classifyFailure({ status: null, stdout: '', stderr: '', error: { code: 'ETIMEDOUT' } }, 'pnpm').kind, 'timeout')
     assert.equal(classifyFailure({ status: null, stdout: '', stderr: '', error: { code: 'EUNSAFE', message: 'x' } }, 'pnpm').kind, 'unsafe')
+  })
+  test('lệnh không chạy được ngay lúc khởi động (spawn EPERM/EACCES, không có log) ⇒ blocked, không rơi về lỗi chung', () => {
+    for (const code of ['EPERM', 'EACCES']) {
+      const c = classifyFailure({ status: null, stdout: '', stderr: '', error: { code, message: `spawn ${code}` } }, 'pnpm')
+      assert.equal(c.kind, 'blocked')
+      assert.match(c.say, /bị chặn quyền hoặc môi trường cô lập/)
+    }
   })
   test('lời đời thường: không in lại nguyên log thô dài', () => {
     const c = classifyFailure(r(`${'dòng log dài\n'.repeat(200)}ENOTFOUND`), 'pnpm')
@@ -344,6 +481,193 @@ describe('doctor', () => {
 
   test('--pm lạ ⇒ exit 2', () => {
     assert.throws(() => doctor({ type: 'web', io: base().io, pm: 'yarn' }), (e) => e.exit === 2)
+  })
+})
+
+// Lỗi #3 (nghiệm thu rút gọn): lệnh CÓ trên máy nhưng KHÔNG CHẠY ĐƯỢC (spawn EPERM/EACCES: bị chặn quyền/sandbox) không được báo là "chưa có".
+describe('doctor — lệnh có nhưng không chạy được', () => {
+  const blockedWith = (code) => ({ status: null, stdout: '', stderr: '', error: { code, message: `spawn ${code}` } })
+  const base = (over = {}) => {
+    const { run, calls } = makeRun(over.run)
+    return { io: { run, platform: 'win32', nodeVersion: '26.8.1', ...over.io }, calls }
+  }
+
+  test('git bị chặn (EPERM) ⇒ blocked, KHÔNG nằm trong missing, lời nói "có nhưng không chạy được", không bảo cài', () => {
+    const { io } = base({ run: { fail: { '^git ': blockedWith('EPERM') } } })
+    const r = doctor({ type: 'web', io })
+    assert.equal(r.ok, false)
+    assert.deepEqual(r.missing, [])
+    assert.deepEqual(r.blocked.map((b) => b.tool), ['git'])
+    assert.match(r.blocked[0].why, /git/)
+    assert.match(r.blocked[0].why, /không chạy được/)
+    assert.match(r.blocked[0].why, /EPERM/)
+    assert.doesNotMatch(r.blocked[0].why, /Chưa có/)
+  })
+
+  test('ENOENT vẫn là chưa cài (missing), EACCES là bị chặn', () => {
+    const gone = doctor({ type: 'web', io: base({ run: { missing: ['git'] } }).io })
+    assert.deepEqual(gone.missing.map((m) => m.tool), ['git'])
+    assert.match(gone.missing[0].why, /Chưa có git/)
+    assert.deepEqual(gone.blocked, [])
+    const denied = doctor({ type: 'web', io: base({ run: { fail: { '^git ': blockedWith('EACCES') } } }).io })
+    assert.deepEqual(denied.blocked.map((b) => b.tool), ['git'])
+    assert.deepEqual(denied.missing, [])
+  })
+
+  test('npm bị chặn khi không có pnpm ⇒ blocked npm; pnpm bị chặn nhưng npm chạy được ⇒ vẫn ok, dùng npm', () => {
+    const noPnpm = base({ run: { missing: ['pnpm'], fail: { '^npm ': blockedWith('EPERM') } } })
+    const r = doctor({ type: 'web', io: noPnpm.io })
+    assert.equal(r.ok, false)
+    assert.deepEqual(r.blocked.map((b) => b.tool), ['npm'])
+    assert.deepEqual(r.missing, [])
+    const pnpmOnly = doctor({ type: 'web', io: base({ run: { fail: { '^pnpm ': blockedWith('EPERM') } } }).io })
+    assert.equal(pnpmOnly.ok, true)
+    assert.equal(pnpmOnly.pm, 'npm')
+    assert.deepEqual(pnpmOnly.blocked, [])
+  })
+
+  test('desktop: go, wails, reg (WebView2) bị chặn ⇒ blocked từng cái, không bắt cài', () => {
+    const { io } = base({ run: { fail: { '^go ': blockedWith('EPERM'), '^wails ': blockedWith('EACCES'), '^reg ': blockedWith('EPERM') } } })
+    const r = doctor({ type: 'desktop', io })
+    assert.deepEqual(r.missing, [])
+    assert.deepEqual(r.blocked.map((b) => b.tool), ['go', 'wails', 'webview2'])
+  })
+
+  test('create: máy có phần mềm nhưng bị chặn ⇒ exit 3, nói "không chạy được" (không nói thiếu/cài), không tạo gì', () => {
+    const parent = mk()
+    const { run, calls } = makeRun({ fail: { '^git ': blockedWith('EPERM') } })
+    const e = (() => { try { create({ type: 'web', name: 'don-hang', parent, io: { run, platform: 'win32' } }) } catch (x) { return x } return null })()
+    assert.equal(e.exit, 3)
+    assert.equal(e.kind, 'blocked')
+    assert.match(e.message, /không chạy được/)
+    assert.doesNotMatch(e.message, /thiếu phần mềm/)
+    assert.ok(e.lines.some((l) => /^- git: .*không chạy được/.test(l)))
+    assert.ok(!e.lines.some((l) => /winget|brew/.test(l)), 'không bắt cài thứ đã có')
+    assert.ok(!calls.some((c) => c.args.some((a) => String(a).startsWith('shadcn@'))))
+    assert.ok(!has(parent, 'don-hang'))
+  })
+})
+
+// Lỗi #1 (nghiệm thu rút gọn): doctor phải kiểm cả công cụ mà flow-check coi là BẮT BUỘC (kit/checkers.json), không thì app vừa tạo luôn đỏ.
+describe('doctor — công cụ bắt buộc của máy kiểm (kit/checkers.json)', () => {
+  const lacking = (...names) => (name) => (names.includes(name) ? null : FAKE_BIN(name))
+  const base = (over = {}) => {
+    const { run, calls } = makeRun(over.run)
+    return { io: { run, platform: 'win32', nodeVersion: '26.8.1', ...over.io }, calls }
+  }
+  const OSV_WIN = 'go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest'
+
+  test('requiredTools: chỉ công cụ CẦN CÀI TRÊN MÁY của loại app đó (không tính thứ app tự cài bằng npm i -D, không tính checker chỉ chạy khi có OpenAPI/migration…)', () => {
+    const names = (type) => requiredTools(loadTemplate(type)).map((t) => t.names[0])
+    assert.deepEqual(names('web'), ['osv-scanner', 'ast-grep'])
+    assert.deepEqual(names('extension'), ['osv-scanner', 'web-ext', 'ast-grep'])
+    assert.deepEqual(names('desktop'), ['osv-scanner', 'golangci-lint', 'govulncheck', 'ast-grep'])
+    const sg = requiredTools(loadTemplate('web')).find((t) => t.names.includes('sg'))
+    assert.deepEqual(sg.names, ['ast-grep', 'sg'])
+    assert.equal(sg.id, 'sast-ast-grep')
+  })
+
+  test('web: máy thiếu osv-scanner + ast-grep (và Go để cài osv-scanner) ⇒ missing kèm lệnh cài theo máy; không chạy lệnh cài nào', () => {
+    const { io, calls } = base({ io: { which: lacking('osv-scanner', 'ast-grep', 'sg', 'go') } })
+    const r = doctor({ type: 'web', io })
+    assert.equal(r.ok, false)
+    assert.deepEqual(r.missing.map((m) => m.tool), ['go', 'osv-scanner', 'ast-grep'])
+    const [go, osv, sg] = r.missing
+    assert.equal(go.install.win, 'winget install GoLang.Go')
+    assert.match(go.why, /osv-scanner/)
+    assert.deepEqual(osv.install, { win: OSV_WIN, mac: 'brew install osv-scanner' })
+    assert.match(osv.why, /flow-check/)
+    assert.deepEqual(sg.install, { win: 'npm i -g @ast-grep/cli', mac: 'npm i -g @ast-grep/cli' })
+    assert.deepEqual(installLines(osv.install, 'win32'), [`    Windows: ${OSV_WIN}`])
+    assert.deepEqual(installLines(osv.install, 'darwin'), ['    Mac: brew install osv-scanner'])
+    for (const c of calls) assert.ok(/^(--version|version|-p|query)$/.test(c.args[0]), `${c.cmd} ${c.args.join(' ')}`)
+  })
+
+  test('chỉ thiếu ast-grep ⇒ chỉ báo ast-grep (không đòi Go khi osv-scanner đã có)', () => {
+    const r = doctor({ type: 'web', io: base({ io: { which: lacking('ast-grep', 'sg') } }).io })
+    assert.deepEqual(r.missing.map((m) => m.tool), ['ast-grep'])
+    assert.equal(r.found['osv-scanner'], true)
+  })
+
+  test('đủ công cụ ⇒ ok và liệt kê trong found', () => {
+    const r = doctor({ type: 'web', io: base().io })
+    assert.equal(r.ok, true)
+    assert.equal(r.found['osv-scanner'], true)
+    assert.equal(r.found['ast-grep'], true)
+  })
+
+  test('ast-grep: lệnh `sg` của hệ điều hành (không phải ast-grep) không tính là có — giống flow-check', () => {
+    const run = (cmd, args = []) => (cmd.endsWith('/sg') && args[0] === '--version' ? ok('sg from shadow-utils 4.13\n') : cmd.endsWith('/ast-grep') ? ok('ast-grep 0.40.0\n') : makeRun().run(cmd, args))
+    const onlySg = doctor({ type: 'web', io: { run, platform: 'win32', nodeVersion: '26.8.1', which: lacking('ast-grep') } })
+    assert.deepEqual(onlySg.missing.map((m) => m.tool), ['ast-grep'])
+    const realSg = (cmd, args = []) => (cmd.endsWith('/sg') && args[0] === '--version' ? ok('ast-grep 0.40.0\n') : run(cmd, args))
+    const okSg = doctor({ type: 'web', io: { run: realSg, platform: 'win32', nodeVersion: '26.8.1', which: lacking('ast-grep') } })
+    assert.equal(okSg.ok, true)
+  })
+
+  test('công cụ bắt buộc có trên máy nhưng chạy bị chặn (EPERM/EACCES) ⇒ blocked, không báo thiếu, không bảo cài lại', () => {
+    const blockedWith = (code) => ({ status: null, stdout: '', stderr: '', error: { code, message: `spawn ${code}` } })
+    const r = doctor({ type: 'web', io: base({ run: { fail: { 'ast-grep --version': blockedWith('EPERM'), 'osv-scanner --version': blockedWith('EACCES') } } }).io })
+    assert.equal(r.ok, false)
+    assert.deepEqual(r.missing, [])
+    assert.deepEqual(r.blocked.map((b) => b.tool).sort(), ['ast-grep', 'osv-scanner'])
+    assert.match(r.blocked.find((b) => b.tool === 'ast-grep').why, /EPERM/)
+  })
+
+  test('extension thêm web-ext; desktop thêm golangci-lint + govulncheck (Go đã có nên không đòi lại) — lệnh cài lấy từ checkers.json', () => {
+    const ext = doctor({ type: 'extension', io: base({ io: { which: lacking('web-ext') } }).io })
+    assert.deepEqual(ext.missing.map((m) => m.tool), ['web-ext'])
+    assert.deepEqual(ext.missing[0].install, { win: 'npm i -g web-ext', mac: 'npm i -g web-ext' })
+    const desk = doctor({ type: 'desktop', io: base({ io: { which: lacking('golangci-lint', 'govulncheck') } }).io })
+    assert.deepEqual(desk.missing.map((m) => m.tool), ['golangci-lint', 'govulncheck'])
+    assert.deepEqual(desk.missing[0].install, { win: 'scoop install main/golangci-lint', mac: 'brew install golangci-lint' })
+    assert.deepEqual(desk.missing[1].install, { win: 'go install golang.org/x/vuln/cmd/govulncheck@latest', mac: 'go install golang.org/x/vuln/cmd/govulncheck@latest' })
+  })
+
+  test('tìm công cụ bằng which của flow-check với cwd/env/platform đúng; create tìm từ thư mục cha (nơi app sẽ nằm)', () => {
+    const seen = []
+    const spy = (name, o) => { seen.push({ name, ...o }); return FAKE_BIN(name) }
+    const env = { PATH: 'p' }
+    doctor({ type: 'web', cwd: '/x/y', io: { ...base().io, which: spy, env, platform: 'win32' } })
+    assert.ok(seen.length >= 2)
+    for (const s of seen) assert.deepEqual([s.cwd, s.platform, s.env], ['/x/y', 'win32', env])
+    seen.length = 0
+    const parent = mk()
+    create({ type: 'web', name: 'don-hang', parent, io: { ...base().io, which: spy } })
+    assert.ok(seen.length >= 2)
+    for (const s of seen) assert.equal(s.cwd, path.resolve(parent))
+  })
+
+  test('mặc định dùng findTool THẬT của flow-check: thấy công cụ trong node_modules/.bin mà PATH không có', () => {
+    const dir = mk('thư mục có công cụ')
+    const bin = path.join(dir, 'node_modules', '.bin')
+    const ext = process.platform === 'win32' ? '.cmd' : ''
+    for (const t of ['osv-scanner', 'ast-grep']) { put(bin, `${t}${ext}`, '@echo off\n'); fs.chmodSync(path.join(bin, `${t}${ext}`), 0o755) }
+    const io = { run: makeRun().run, platform: process.platform, nodeVersion: '26.8.1', env: { PATH: '' }, which: undefined }
+    const r = doctor({ type: 'web', cwd: dir, io })
+    assert.equal(r.found['osv-scanner'], true)
+    assert.equal(r.found['ast-grep'], true)
+    assert.ok(!r.missing.some((m) => m.tool === 'osv-scanner' || m.tool === 'ast-grep'), JSON.stringify(r.missing))
+  })
+
+  test('kit không có checkers.json ⇒ báo rõ (không lặng lẽ bỏ qua bước kiểm)', () => {
+    const kit = mk('kit thiếu checkers')
+    fs.cpSync(path.join(KIT_DIR, 'templates'), path.join(kit, 'templates'), { recursive: true })
+    const e = (() => { try { doctor({ type: 'web', io: { ...base().io, kit } }) } catch (x) { return x } return null })()
+    assert.ok(e instanceof NewAppError)
+    assert.match(e.message, /checkers\.json/)
+  })
+
+  test('create: thiếu công cụ bắt buộc ⇒ exit 3 kèm lệnh cài đúng hệ điều hành, không tạo gì', () => {
+    const parent = mk()
+    const { run, calls } = makeRun()
+    const e = (() => { try { create({ type: 'web', name: 'don-hang', parent, io: { run, platform: 'win32', which: lacking('osv-scanner') } }) } catch (x) { return x } return null })()
+    assert.equal(e.exit, 3)
+    assert.ok(e.lines.some((l) => l.startsWith('- osv-scanner:')))
+    assert.ok(e.lines.includes(`    Windows: ${OSV_WIN}`))
+    assert.ok(!e.lines.some((l) => /Mac:/.test(l)))
+    assert.ok(!calls.some((c) => c.args.some((a) => String(a).startsWith('shadcn@'))))
+    assert.ok(!has(parent, 'don-hang'))
   })
 })
 
@@ -565,6 +889,62 @@ describe('create — web (repo git do lệnh tạo lập sẵn, như shadcn)', (
     assert.deepEqual(syncCheck(dir).problems, [])
   })
 
+  test('bài thử nhanh @smoke (hợp đồng với `release`): có test @smoke CHỈ ĐỌC ở màn đầu; playwright.config.ts đọc BASE_URL + SMOKE_EXTRA_HTTP_HEADERS', () => {
+    const pw = read(dir, 'playwright.config.ts')
+    assert.match(pw, /const baseURL = process\.env\.BASE_URL \|\| `http:\/\/localhost:\$\{port\}`/)
+    assert.match(pw, /process\.env\.SMOKE_EXTRA_HTTP_HEADERS \? \(JSON\.parse\(process\.env\.SMOKE_EXTRA_HTTP_HEADERS\)/)
+    assert.match(pw, /use: \{ baseURL, extraHTTPHeaders \}/)
+    const smoke = read(dir, 'e2e/first-screen.spec.ts').split(/^test\(/m).slice(1).filter((body) => body.includes("tag: '@smoke'"))
+    assert.ok(smoke.length >= 1, 'ít nhất một test @smoke')
+    for (const body of smoke) {
+      assert.match(body, /data-s="S-01"/, 'mở màn đầu, thấy S-01')
+      assert.doesNotMatch(body, /\.(click|dblclick|fill|type|press|check|uncheck|selectOption|setInputFiles|dragTo|dispatchEvent)\(|\.(post|put|patch|delete)\(|\.route\(|\.evaluate\(/, 'test @smoke không được ghi/bấm gì')
+    }
+    assert.match(read(dir, 'AI_RULES.md'), /@smoke.*BASE_URL.*SMOKE_EXTRA_HTTP_HEADERS/)
+  })
+
+  // Chạy THẬT cấu hình (Node gỡ kiểu .ts) với @playwright/test giả: không đặt env ⇒ như cũ; có BASE_URL ⇒ không bật server trên máy, header thêm vào use.
+  test('playwright.config.ts: không đặt env ⇒ localhost:PORT + bật server; BASE_URL ⇒ địa chỉ đó, không bật server; SMOKE_EXTRA_HTTP_HEADERS (JSON) ⇒ use.extraHTTPHeaders', { skip: !process.features.typescript && 'Node này chưa đọc được file .ts' }, async () => {
+    const d = mk('pw config')
+    put(d, 'package.json', '{"type":"module"}')
+    put(d, 'node_modules/@playwright/test/package.json', '{"name":"@playwright/test","type":"module","main":"index.js"}')
+    put(d, 'node_modules/@playwright/test/index.js', "export const defineConfig = (c) => c\nexport const devices = { 'Desktop Chrome': { browserName: 'chromium' } }\n")
+    fs.writeFileSync(path.join(d, 'playwright.config.ts'), read(dir, 'playwright.config.ts'))
+    const KEYS = ['PORT', 'BASE_URL', 'SMOKE_EXTRA_HTTP_HEADERS']
+    const saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]))
+    let n = 0
+    const load = async (env) => {
+      for (const k of KEYS) delete process.env[k]
+      Object.assign(process.env, env)
+      return (await import(`${pathToFileURL(path.join(d, 'playwright.config.ts')).href}?c=${++n}`)).default
+    }
+    try {
+      const local = await load({})
+      assert.equal(local.use.baseURL, 'http://localhost:5173')
+      assert.equal(local.use.extraHTTPHeaders, undefined)
+      assert.deepEqual([local.webServer.url, local.webServer.reuseExistingServer], ['http://localhost:5173', true])
+      assert.match(local.webServer.command, /dev .*--strictPort$/)
+      assert.equal((await load({ PORT: '4150' })).use.baseURL, 'http://localhost:4150')
+      const headers = { 'x-chon-ban': 'moi', 'cf-access-token': 'abc' }
+      const remote = await load({ PORT: '4150', BASE_URL: 'https://thu.example.workers.dev', SMOKE_EXTRA_HTTP_HEADERS: JSON.stringify(headers) })
+      assert.equal(remote.use.baseURL, 'https://thu.example.workers.dev')
+      assert.deepEqual(remote.use.extraHTTPHeaders, headers)
+      assert.equal(remote.webServer, undefined, 'chạy vào bản trên mạng thì không bật server trên máy')
+      await assert.rejects(load({ SMOKE_EXTRA_HTTP_HEADERS: '{ hỏng' }), /JSON|Expected|Unexpected/, 'JSON header hỏng phải báo lỗi, không im lặng bỏ qua')
+    } finally {
+      for (const k of KEYS) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k] }
+    }
+  })
+
+  test('AC-30: app có src/shared/safe-log.ts (module shared trong docs/arch.json), AI_RULES dặn ghi log qua safeLog, knip miễn file này', () => {
+    assert.ok(has(dir, 'src/shared/safe-log.ts'))
+    const arch = JSON.parse(read(dir, 'docs/arch.json'))
+    assert.ok(arch.parts[0].modules.some((m) => m.path === 'src/shared' && m.mayDependOn.length === 0), 'shared là module không phụ thuộc ai')
+    assert.match(read(dir, 'docs/ARCHITECTURE.md'), /`src\/shared`/)
+    assert.match(read(dir, 'AI_RULES.md'), /safeLog.*src\/shared\/safe-log\.ts/)
+    assert.match(read(dir, 'knip.jsonc'), /"ignore": \[[^\]]*"src\/shared\/safe-log\.ts"/)
+  })
+
   test('kết quả cho captain: lệnh chạy thử + địa chỉ', () => {
     assert.equal(r.pm, 'pnpm')
     assert.equal(r.next.dev, 'pnpm dev')
@@ -646,7 +1026,13 @@ describe('create — desktop (Wails v2, chưa có git)', () => {
     const arch = JSON.parse(read(dir, 'docs/arch.json'))
     const go = arch.parts.find((p) => p.stack === 'go')
     assert.deepEqual(go.modules, [], 'phần Go chưa có miền')
-    assert.deepEqual(arch.parts.find((p) => p.stack === 'web').modules.map((m) => m.path), ['frontend/src/features/home'])
+    assert.deepEqual(arch.parts.find((p) => p.stack === 'web').modules.map((m) => m.path), ['frontend/src/features/home', 'frontend/src/shared'], 'shared có sẵn safe-log.ts (AC-30)')
+  })
+
+  test('AC-30: giao diện có frontend/src/shared/safe-log.ts, AI_RULES dặn ghi log qua safeLog, knip miễn file này', () => {
+    assert.ok(has(dir, 'frontend/src/shared/safe-log.ts'))
+    assert.match(read(dir, 'AI_RULES.md'), /safeLog.*frontend\/src\/shared\/safe-log\.ts/)
+    assert.match(read(dir, 'frontend/knip.jsonc'), /"ignore": \[[^\]]*"src\/shared\/safe-log\.ts"/)
   })
 
   test('wails.json đổi sang trình quản lý gói đang dùng; Go dùng đúng module', () => {
@@ -859,8 +1245,15 @@ describe('create — an toàn', () => {
     assert.match(e.message, /pnpm add -D @playwright\/test@/)
     const failBrowser = { 'playwright install': { status: 1, stdout: '', stderr: 'ENOTFOUND cdn.playwright.dev', error: null } }
     const r = create({ type: 'web', name: 'app-b', parent: mk(), io: { run: makeRun({ fail: failBrowser }).run, platform: 'win32' } })
-    assert.ok(r.notes.some((n) => /Chưa tải được trình duyệt kiểm thử \(network\).*pnpm exec playwright install chromium/.test(n)))
+    assert.ok(r.notes.some((n) => /Chưa tải được trình duyệt kiểm thử \(network\)\. Khi mạng ổn chạy: .*pnpm exec playwright install chromium/.test(n)))
     assert.equal(g(r.dir, 'status', '--porcelain'), '')
+    // Lỗi không phải mạng (vd sandbox chặn quyền) ⇒ không khuyên "khi mạng ổn"
+    const permBrowser = { 'playwright install': { status: 1, stdout: '', stderr: 'EACCES: permission denied, mkdir /Users/x/Library/Caches/ms-playwright', error: null } }
+    const p = create({ type: 'web', name: 'app-c', parent: mk(), io: { run: makeRun({ fail: permBrowser }).run, platform: 'win32' } })
+    const note = p.notes.find((n) => n.startsWith('Chưa tải được trình duyệt'))
+    assert.match(note, /\(permission\)/)
+    assert.doesNotMatch(note, /mạng ổn/)
+    assert.match(note, /Không có quyền ghi.*Sửa xong chạy: .*playwright install chromium/)
   })
 
   test('dựng thử lỗi ⇒ báo kèm lệnh chạy lại, thư mục app giữ nguyên (không tự xoá, chưa có điểm lưu)', () => {
@@ -877,6 +1270,7 @@ describe('create — an toàn', () => {
   test('thiếu bản ghim (versions.json) hoặc devDeps trỏ tới bản ghim không có ⇒ báo rõ, không chạy lệnh nào', () => {
     const kit = mk('kit thiếu bản ghim')
     fs.cpSync(path.join(KIT_DIR, 'templates'), path.join(kit, 'templates'), { recursive: true })
+    fs.copyFileSync(path.join(KIT_DIR, 'checkers.json'), path.join(kit, 'checkers.json')) // doctor đọc danh sách công cụ bắt buộc ở đây
     const versions = JSON.parse(read(kit, 'templates/versions.json'))
     const { knip: _bo, ...thieu } = versions
     put(kit, 'templates/versions.json', JSON.stringify(thieu))

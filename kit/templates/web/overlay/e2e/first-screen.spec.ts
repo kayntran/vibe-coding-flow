@@ -1,7 +1,8 @@
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 
-test('S-01: màn đầu hiện tên app và lời mời làm màn đầu tiên', async ({ page }) => {
+// @smoke = bài thử nhanh sau phát hành (chạy vào bản đã đưa lên, xem playwright.config.ts): CHỈ ĐỌC (mở màn, nhìn), không bấm/nhập/ghi gì vào dữ liệu.
+test('S-01: màn đầu hiện tên app và lời mời làm màn đầu tiên', { tag: '@smoke' }, async ({ page }) => {
   await page.goto('/')
   const screen = page.locator('[data-s="S-01"]')
   await expect(screen).toBeVisible()

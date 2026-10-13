@@ -2,12 +2,14 @@
 // mac-check: chạy bộ kiểm của kit trên Mac bằng MỘT lệnh (cùng bộ `node --test` đang chạy trên Windows). Spec: docs/specs/2026-10-13-flow-v7-dot4 (AC-26).
 // Tên KHÔNG được khớp mẫu file test mặc định của `node --test` (*-test.mjs …) — nếu khớp, chạy toàn bộ test sẽ tự gọi sang Mac.
 //   node hooks/mac-check.mjs [--host macmini] [--only <glob test>]…     ví dụ: --only hooks/lib/luu.test.mjs   (--only lặp được; gạch chéo ngược tự đổi thành /)
-// Cách làm: git bundle của HEAD (chỉ phần ĐÃ commit; có file chưa commit thì in lưu ý) -> scp sang Mac thành /tmp/flowtest-<sha7>-<ngày>-<giờ> (thư mục MỚI mỗi lần)
+// Cách làm: git bundle của HEAD (chỉ phần ĐÃ commit; có file chưa commit thì in lưu ý) -> ssh `mktemp -d /tmp/flowtest-XXXXXX` tạo thư mục RIÊNG trên Mac
+//   (0700, tên ngẫu nhiên; không dùng tên đoán trước được như sha/giờ — user khác trên Mac đặt sẵn symlink thì scp đã ghi đè đích) -> scp bundle VÀO thư mục đó
 //   -> ssh chạy `node --test --test-reporter=tap` -> in tổng kết (tests/pass/fail + tên bài hỏng). Mọi giá trị đi sang Mac nằm TRONG script gửi qua stdin của `ssh host bash -s`
-//   (đã trích dẫn); dòng lệnh ssh/scp chỉ có mảng tham số cố định. Việc dọn thư mục trên Mac nằm TRONG script đó (trap EXIT/HUP/INT/TERM, chỉ xoá đúng /tmp/flowtest-*):
-//   không có dòng lệnh nào của người dùng hay AI chứa thao tác xoá thư mục. Bài hỏng vì Mac thiếu công cụ (spawn x ENOENT, "x: command not found") được tách khỏi lỗi kit.
+//   (đã trích dẫn; đường thư mục do mktemp trả về chỉ được nhận khi đúng /tmp/flowtest-<chữ+số>); dòng lệnh ssh/scp chỉ có mảng tham số cố định. Việc dọn nằm TRONG script đó
+//   (trap EXIT/HUP/INT/TERM, chỉ xoá đúng thư mục riêng khớp /tmp/flowtest-*, bundle nằm trong đó nên đi theo): không có dòng lệnh nào của người dùng hay AI chứa thao tác xoá thư mục.
+//   Bài hỏng vì Mac thiếu công cụ (spawn x ENOENT, "x: command not found") được tách khỏi lỗi kit.
 // Exit: 0 xanh (kể cả khi chỉ có bài không chạy được vì Mac thiếu công cụ) · 1 có bài hỏng / Mac không dựng được bản sao / không đọc được kết quả · 2 dùng sai · 3 không ssh được hoặc Mac chưa có node/git.
-// Lõi (buildCommands, remoteScript, parseTap, summarize, macTest) là hàm thuần/tiêm `run`: test không cần Mac thật.
+// Lõi (buildCommands, remoteCommands, remoteScript, parseTap, summarize, macTest) là hàm thuần/tiêm `run`: test không cần Mac thật.
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -19,7 +21,9 @@ export const MAC_PATH = '/opt/homebrew/bin:/usr/local/bin'
 export const MARK = '@@FLOWTEST@@'
 const BUNDLE_NAME = 'flowtest.bundle'
 const SSH_OPTS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=4']
-const ID_RE = /^flowtest-[0-9a-f]{7}-\d{8}-\d{9}$/
+// Thư mục riêng do mktemp trên Mac trả về: /tmp/flowtest- + 6..32 chữ/số (mktemp thật cho 6 ký tự). Dùng cả để nhận đường dẫn lẫn để chặn giá trị lạ vào script.
+const DIR_PATTERN = '/tmp/flowtest-[A-Za-z0-9]{6,32}'
+const DIR_RE = new RegExp(`^${DIR_PATTERN}$`)
 const SHA_RE = /^[0-9a-f]{40}$/
 const HOST_RE = /^([\w.][\w.-]*@)?[A-Za-z0-9][\w.-]*$/
 const GLOB_RE = /^[\w.\/*?[\]{},@+=-]+$/
@@ -60,24 +64,21 @@ export function parseArgs(argv) {
   return o
 }
 
-export function makeId(sha, now) {
-  const m = /^(\d{8})T(\d{6})\.(\d{3})Z$/.exec(now.toISOString().replace(/[-:]/g, ''))
-  if (!m || !SHA_RE.test(sha)) throw new Error('không dựng được mã thư mục tạm')
-  return `flowtest-${sha.slice(0, 7)}-${m[1]}-${m[2]}${m[3]}`
-}
+// Script tạo thư mục riêng trên Mac: mktemp -d (0700, tên ngẫu nhiên) rồi in đường dẫn sau MARK. Chưa chép gì sang nên chưa có gì để dọn nếu lỗi.
+const MKDIR_SCRIPT = [`export PATH=${shq(MAC_PATH)}":$PATH"`, 'd=$(mktemp -d /tmp/flowtest-XXXXXX </dev/null) || exit 98', `echo "${MARK} dir $d"`, ''].join('\n')
 
-// Script bash gửi qua stdin của `ssh host bash -s` (bash 3.2 của macOS chạy được; chỉ ASCII). mode: 'run' = dựng bản sao + chạy test, 'clean' = chỉ dọn (gọi lại được nhiều lần).
-export function remoteScript({ id, sha, only = [], mode = 'run' }) {
-  if (!ID_RE.test(id)) throw new Error(`mã thư mục tạm lạ: ${id}`)
+// Script bash gửi qua stdin của `ssh host bash -s` (bash 3.2 của macOS chạy được; chỉ ASCII). dir = thư mục riêng mktemp đã tạo (bundle nằm trong đó).
+// mode: 'run' = dựng bản sao + chạy test, 'clean' = chỉ dọn thư mục riêng (gọi lại được nhiều lần).
+export function remoteScript({ dir, sha, only = [], mode = 'run' }) {
+  if (!DIR_RE.test(dir ?? '')) throw new Error(`thư mục tạm lạ: ${dir}`)
   if (!SHA_RE.test(sha)) throw new Error(`mã commit lạ: ${sha}`)
   const lines = [
     `export PATH=${shq(MAC_PATH)}":$PATH"`,
-    `DIR=/tmp/${id}`,
-    `BUNDLE=/tmp/${id}.bundle`,
+    `DIR=${dir}`,
+    'BUNDLE="$DIR/flowtest.bundle"',
     'cleanup() {',
     '  case "$DIR" in /tmp/flowtest-*) rm -rf -- "$DIR" ;; esac',
-    '  case "$BUNDLE" in /tmp/flowtest-*.bundle) rm -f -- "$BUNDLE" ;; esac',
-    `  if [ ! -e "$DIR" ] && [ ! -e "$BUNDLE" ]; then echo '${MARK} cleaned'; else echo '${MARK} not-cleaned'; fi`,
+    `  if [ ! -e "$DIR" ]; then echo '${MARK} cleaned'; else echo '${MARK} not-cleaned'; fi`,
     '}',
   ]
   if (mode === 'clean') return [...lines, 'cleanup', 'exit 0', ''].join('\n')
@@ -91,7 +92,7 @@ export function remoteScript({ id, sha, only = [], mode = 'run' }) {
     `  command -v "$t" >/dev/null 2>&1 || { echo "${MARK} missing $t"; exit 97; }`,
     'done',
     `echo "${MARK} node $(node -v </dev/null)"`,
-    'mkdir "$DIR" || exit 98',
+    '[ -d "$DIR" ] && [ ! -L "$DIR" ] || exit 98',
     'git -c advice.detachedHead=false clone -q "$BUNDLE" "$DIR/kit" </dev/null || exit 98',
     `cd "$DIR/kit" && git checkout -q --detach ${sha} </dev/null || exit 98`,
     `node --test --test-reporter=tap${only.map((g) => ` ${shq(g)}`).join('')} </dev/null`,
@@ -102,14 +103,21 @@ export function remoteScript({ id, sha, only = [], mode = 'run' }) {
 }
 
 // Dựng các lệnh dưới dạng { cmd, args, cwd?, input?, timeout }. Đường dẫn máy này chỉ xuất hiện làm phần tử mảng (git cwd / đích bundle); scp dùng tên tương đối + cwd.
-export function buildCommands({ host, id, sha, only = [], repo, bundleDir }) {
-  const ssh = (script, timeout) => ({ cmd: 'ssh', args: ['-T', ...SSH_OPTS, '--', host, 'bash -s'], input: script, timeout })
+const sshScript = (host, script, timeout) => ({ cmd: 'ssh', args: ['-T', ...SSH_OPTS, '--', host, 'bash -s'], input: script, timeout })
+// Các lệnh chưa cần biết thư mục riêng trên Mac: thử ssh, đóng gói bản local, tạo thư mục riêng (mktemp).
+export function buildCommands({ host, repo, bundleDir }) {
   return {
     probe: { cmd: 'ssh', args: ['-T', ...SSH_OPTS, '--', host, 'true'], timeout: TIMEOUT.probe },
     bundle: { cmd: 'git', args: ['bundle', 'create', path.join(bundleDir, BUNDLE_NAME), 'HEAD'], cwd: repo, timeout: TIMEOUT.bundle },
-    copy: { cmd: 'scp', args: ['-q', ...SSH_OPTS, '--', BUNDLE_NAME, `${host}:/tmp/${id}.bundle`], cwd: bundleDir, timeout: TIMEOUT.copy },
-    run: ssh(remoteScript({ id, sha, only, mode: 'run' }), TIMEOUT.run),
-    clean: ssh(remoteScript({ id, sha, only, mode: 'clean' }), TIMEOUT.clean),
+    mkdir: sshScript(host, MKDIR_SCRIPT, TIMEOUT.probe),
+  }
+}
+// Các lệnh sau khi mktemp trả thư mục riêng `dir`: chép bundle VÀO thư mục đó, chạy bộ kiểm, dọn đúng thư mục đó.
+export function remoteCommands({ host, dir, sha, only = [], bundleDir }) {
+  return {
+    copy: { cmd: 'scp', args: ['-q', ...SSH_OPTS, '--', BUNDLE_NAME, `${host}:${dir}/${BUNDLE_NAME}`], cwd: bundleDir, timeout: TIMEOUT.copy },
+    run: sshScript(host, remoteScript({ dir, sha, only, mode: 'run' }), TIMEOUT.run),
+    clean: sshScript(host, remoteScript({ dir, sha, only, mode: 'clean' }), TIMEOUT.clean),
   }
 }
 
@@ -196,43 +204,49 @@ const defaultTmp = {
 
 // Chạy cả quy trình. deps tiêm để test: { run(cmd,args,{cwd,input,timeout}) -> {status,stdout,stderr,error}, tmp:{make,remove}, say(dòng tiến trình), now }.
 // Trả { exit, lines } (lines = kết quả cuối). Thư mục tạm trên máy này luôn được gỡ ở finally (Node API, không phải dòng lệnh).
-export function macTest({ repo, host = DEFAULT_HOST, only = [], run = defaultRun, tmp = defaultTmp, say = () => {}, now = new Date() }) {
+export function macTest({ repo, host = DEFAULT_HOST, only = [], run = defaultRun, tmp = defaultTmp, say = () => {} }) {
   const git = (...args) => run('git', args, { cwd: repo, timeout: 30_000 })
   const head = git('rev-parse', 'HEAD')
   const sha = String(head.stdout ?? '').trim()
   if (head.status !== 0 || !SHA_RE.test(sha)) return { exit: 1, lines: ['Không đọc được git của kit (thư mục này có phải repo git không?).'] }
   const branch = clean(git('rev-parse', '--abbrev-ref', 'HEAD').stdout, 80) || 'HEAD'
-  const id = makeId(sha, now)
   say(`Gửi sang ${host}: nhánh ${branch} (commit ${sha.slice(0, 7)}).`)
   if (String(git('status', '--porcelain').stdout ?? '').trim()) say('Lưu ý: còn thay đổi chưa commit — Mac chỉ nhận phần đã commit.')
 
   const bundleDir = tmp.make()
   try {
-    const cmds = buildCommands({ host, id, sha, only, repo, bundleDir })
+    const cmds = buildCommands({ host, repo, bundleDir })
     const exec = (c) => run(c.cmd, c.args, c)
     const probe = exec(cmds.probe)
     if (probe.error?.code === 'ENOENT') return { exit: 3, lines: ['Máy này chưa có lệnh ssh nên không nối được tới Mac.'] }
     if (probe.status !== 0) {
       return { exit: 3, lines: [`Không nối được tới Mac (${host}). ${clean(probe.stderr || probe.error?.message, 160)}`, `Kiểm tra: Mac đang bật, cùng mạng, và gõ "ssh ${host}" vào được mà không hỏi mật khẩu.`] }
     }
-    const dropTemp = () => {
-      const c = exec(cmds.clean)
-      return String(c.stdout ?? '').includes(`${MARK} cleaned`)
-    }
     say('Đóng gói bản hiện tại…')
     const b = exec(cmds.bundle)
     if (b.status !== 0) return { exit: 1, lines: [`Không đóng gói được bản hiện tại: ${clean(b.stderr || b.error?.message, 160)}`] }
+    // Thư mục riêng trên Mac tạo TRƯỚC khi chép: tên ngẫu nhiên + 0700 nên user khác trên Mac không đặt sẵn được symlink để scp ghi đè đích.
+    const mk = exec(cmds.mkdir)
+    const dir = new RegExp(`${MARK} dir (${DIR_PATTERN})\\s*$`, 'm').exec(String(mk.stdout ?? ''))?.[1]
+    if (mk.status !== 0 || !dir) {
+      return { exit: 3, lines: [`Không tạo được thư mục tạm trên Mac (${host}): ${clean(mk.stderr || mk.error?.message, 160) || 'mktemp không trả đường dẫn thư mục hợp lệ'}`] }
+    }
+    const remote = remoteCommands({ host, dir, sha, only, bundleDir })
+    const dropTemp = () => {
+      const c = exec(remote.clean)
+      return String(c.stdout ?? '').includes(`${MARK} cleaned`)
+    }
     say('Chép sang Mac…')
-    const c = exec(cmds.copy)
+    const c = exec(remote.copy)
     if (c.status !== 0) {
       dropTemp()
       return { exit: 3, lines: [`Không chép được sang Mac (${host}): ${clean(c.stderr || c.error?.message, 160)}`] }
     }
     say('Chạy bộ kiểm trên Mac…')
-    const r = exec(cmds.run)
+    const r = exec(remote.run)
     const out = String(r.stdout ?? '')
     const cleaned = out.includes(`${MARK} cleaned`) || dropTemp()
-    const tail = [cleaned ? 'Đã dọn thư mục tạm trên Mac.' : `Chưa dọn được thư mục tạm trên Mac: /tmp/${id} (macOS tự dọn /tmp khi khởi động lại).`]
+    const tail = [cleaned ? 'Đã dọn thư mục tạm trên Mac.' : `Chưa dọn được thư mục tạm trên Mac: ${dir} (macOS tự dọn /tmp khi khởi động lại).`]
     const done = (res) => ({ exit: res.exit, lines: [...res.lines, ...tail] })
     if (r.error?.code === 'ETIMEDOUT') return done({ exit: 1, lines: [`Bộ kiểm trên Mac chạy quá ${TIMEOUT.run / 60_000} phút nên đã dừng.`] })
     if (r.status === 255 || (r.status === null && r.error)) return done({ exit: 3, lines: [`Mất kết nối với Mac (${host}) giữa chừng: ${clean(r.stderr || r.error?.message, 160)}`] })
@@ -248,7 +262,7 @@ export function macTest({ repo, host = DEFAULT_HOST, only = [], run = defaultRun
   }
 }
 
-// deps tiêm để test: { run, tmp, now, repo, stdout, stderr }. Trả mã thoát.
+// deps tiêm để test: { run, tmp, repo, stdout, stderr }. Trả mã thoát.
 export function main(argv = process.argv.slice(2), deps = {}) {
   const out = deps.stdout ?? process.stdout
   const errOut = deps.stderr ?? process.stderr
@@ -265,7 +279,7 @@ export function main(argv = process.argv.slice(2), deps = {}) {
     return 0
   }
   const repo = deps.repo ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-  const res = macTest({ repo, host: o.host, only: o.only, run: deps.run, tmp: deps.tmp, now: deps.now, say: (s) => out.write(`${s}\n`) })
+  const res = macTest({ repo, host: o.host, only: o.only, run: deps.run, tmp: deps.tmp, say: (s) => out.write(`${s}\n`) })
   out.write(`${res.lines.join('\n')}\n`)
   return res.exit
 }

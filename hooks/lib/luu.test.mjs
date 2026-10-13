@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import * as lu from './luu.mjs'
 
 const TMP = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'luu thử đường dẫn ')))
@@ -44,6 +45,7 @@ const at = (min, hour = 10) => new Date(2026, 9, 12, hour, min)
 const tagsOf = (root) => g(root, 'tag', '-l', 'luu/*').split('\n').filter(Boolean)
 const caught = (fn) => { try { fn() } catch (e) { return e } return assert.fail('đáng lẽ phải ném LuuError') }
 const noCheck = { runCheck: null }
+const cliLuu = (...args) => spawnSync(process.execPath, [path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'luu.mjs'), ...args], { encoding: 'utf8', env: process.env })
 function snapshot(root) {
   const out = {}
   const walk = (d) => {
@@ -245,6 +247,96 @@ describe('tao', () => {
     assert.equal(r.tag, p3.tag)
     assert.equal(r.name, 'Thêm giỏ hàng')
     assert.equal(tagsOf(root).length, 3)
+  })
+
+  describe('còn thay đổi chưa commit', () => {
+    test('HEAD đã có điểm mà đĩa có sửa + file mới + file xoá ⇒ lưu thành commit mới rồi gắn điểm (không báo "đã là điểm lưu")', () => {
+      const { root, p3 } = scenario()
+      wr(root, 'README.md', 'v2 dở\n'); wr(root, 'moi.txt', 'mới\n'); fs.rmSync(path.join(root, 'notes/keep.txt'))
+      const head = g(root, 'rev-parse', 'HEAD')
+      const r = lu.tao(root, 'Giữa chừng', { now: at(40) })
+      assert.equal(r.created, true)
+      assert.notEqual(r.tag, p3.tag)
+      assert.equal(r.name, 'Giữa chừng')
+      assert.deepEqual([...r.files].sort(), ['README.md', 'moi.txt', 'notes/keep.txt'])
+      assert.equal(g(root, 'rev-parse', `${r.tag}^{commit}`), g(root, 'rev-parse', 'HEAD'))
+      assert.equal(g(root, 'rev-parse', 'HEAD~1'), head, 'commit mới nối ngay sau HEAD cũ')
+      assert.equal(g(root, 'log', '-1', '--format=%s'), 'Giữa chừng')
+      assert.equal(g(root, 'show', `${r.tag}:README.md`), 'v2 dở')
+      assert.equal(g(root, 'show', `${r.tag}:moi.txt`), 'mới')
+      assert.equal(gStatus(root, 'cat-file', '-e', `${r.tag}:notes/keep.txt`) === 0, false, 'file đã xoá không còn trong điểm lưu')
+      assert.equal(g(root, 'status', '--porcelain'), '', 'sau khi lưu không còn gì dở')
+      assert.equal(rd(root, 'README.md'), 'v2 dở\n', 'file trên đĩa giữ nguyên')
+      assert.equal(tagsOf(root).length, 4)
+    })
+
+    test('HEAD chưa có điểm + còn thay đổi ⇒ điểm nằm trên commit mới chứa thay đổi', () => {
+      const root = mk()
+      wr(root, 'a.txt', '1'); lu.bat(root, { now: at(0) })
+      wr(root, 'a.txt', '2'); commit(root, 'đổi a')
+      wr(root, 'a.txt', '3'); wr(root, 'b.txt', 'b')
+      const r = lu.tao(root, 'Đang dở', { now: at(5) })
+      assert.equal(r.created, true)
+      assert.equal(g(root, 'show', `${r.tag}:a.txt`), '3')
+      assert.equal(g(root, 'show', `${r.tag}:b.txt`), 'b')
+      assert.equal(g(root, 'status', '--porcelain'), '')
+    })
+
+    test('bản đã stage (git add) mà đĩa trùng bản đã stage ⇒ cũng được lưu', () => {
+      const { root } = scenario()
+      wr(root, 'README.md', 'đã stage\n'); g(root, 'add', 'README.md')
+      const r = lu.tao(root, 'Đã add', { now: at(41) })
+      assert.equal(r.created, true)
+      assert.equal(g(root, 'show', `${r.tag}:README.md`), 'đã stage')
+    })
+
+    test('chỉ có dữ liệu / file bị .gitignore thay đổi ⇒ không tính là thay đổi (trả điểm cũ); code đổi cùng lúc ⇒ commit chỉ chứa code', () => {
+      const { root, p3 } = scenario()
+      wr(root, 'app.db', 'db'); wr(root, 'data/x.json', '{}'); wr(root, 'node_modules/m/i.js', 'x')
+      const same = lu.tao(root, 'Chỉ dữ liệu', { now: at(42) })
+      assert.equal(same.created, false)
+      assert.equal(same.tag, p3.tag)
+      wr(root, 'README.md', 'code đổi\n')
+      const r = lu.tao(root, 'Code và dữ liệu', { now: at(43) })
+      assert.equal(r.created, true)
+      assert.deepEqual(r.files, ['README.md'])
+      assert.equal(g(root, 'show', '--name-only', '--format=', 'HEAD'), 'README.md')
+      assert.equal(rd(root, 'app.db'), 'db')
+      assert.equal(rd(root, 'data/x.json'), '{}')
+    })
+
+    test('thay đổi có khoá bí mật ⇒ từ chối, không commit, không tạo điểm, chỉ mục như cũ; gỡ khoá rồi chạy lại được', () => {
+      const { root } = scenario()
+      const head = g(root, 'rev-parse', 'HEAD')
+      wr(root, 'src/secret.js', `const k = "${FAKE_KEY}"\n`)
+      const e = caught(() => lu.tao(root, 'Có khoá', { now: at(44) }))
+      assert.equal(e.exit, 1)
+      assert.match(e.message, /src\/secret\.js:1/)
+      assert.equal(e.message.includes(FAKE_KEY), false)
+      assert.equal(g(root, 'rev-parse', 'HEAD'), head)
+      assert.equal(tagsOf(root).length, 3)
+      assert.equal(g(root, 'diff', '--cached', '--name-only'), '')
+      fs.rmSync(path.join(root, 'src/secret.js'))
+      assert.equal(lu.tao(root, 'Hết khoá', { now: at(45) }).created, false, 'không còn gì dở, HEAD đã là điểm lưu')
+    })
+
+    test('đang dở gộp nhánh ⇒ không commit thay đổi, nói rõ lý do', () => {
+      const { root } = scenario()
+      wr(root, 'README.md', 'dở\n')
+      fs.writeFileSync(path.join(g(root, 'rev-parse', '--absolute-git-dir'), 'MERGE_HEAD'), `${g(root, 'rev-parse', 'HEAD')}\n`)
+      const e = caught(() => lu.tao(root, 'Giữa gộp', { now: at(46) }))
+      assert.match(e.message, /đang dở một lần gộp nhánh/)
+      assert.equal(tagsOf(root).length, 3)
+    })
+
+    test('CLI: còn thay đổi ⇒ "Đã lưu điểm … gồm N file", không in "đã là điểm lưu"', () => {
+      const { root } = scenario()
+      wr(root, 'README.md', 'dở\n'); wr(root, 'moi.txt', 'mới\n')
+      const r = cliLuu('tao', root, 'Giữa chừng')
+      assert.equal(r.status, 0, r.stderr)
+      assert.match(r.stdout, /^Đã lưu điểm "Giữa chừng" \(luu\/\S+, commit [0-9a-f]{7}\), gồm 2 file đang sửa dở\./)
+      assert.doesNotMatch(r.stdout, /đã là điểm lưu/)
+    })
   })
 
   test('tên trùng (cùng phút, cùng slug) ⇒ hậu tố -2, -3', () => {
@@ -958,6 +1050,52 @@ describe('quay', () => {
       assert.equal(g(root, 'show', '--name-only', '--format=', `${r.saved.tag}^{commit}`), 'a.txt', 'lưu tạm chỉ chứa code')
       assert.equal(g(root, 'diff', '--cached', '--name-only'), 'app.db', 'dữ liệu vẫn đang stage')
       assert.equal(rd(root, 'app.db'), 'db2')
+    })
+
+    test('trạng thái phát hành (.claude/release.json) là dữ liệu: điểm lưu giữ bản cũ, hiện tại là bản mới ⇒ sau quay vẫn là bản mới, xem không liệt kê nó trong file sẽ đổi', () => {
+      const root = mk()
+      wr(root, 'a.txt', '1')
+      lu.bat(root, { now: at(0) })
+      wr(root, '.claude/release.json', '{"v":1,"rollbackTested":false}\n'); commit(root, 'phát hành lần 1')
+      const p1 = lu.tao(root, 'Phát hành lần 1', { now: at(2) })
+      wr(root, 'a.txt', '2'); wr(root, '.claude/release.json', '{"v":1,"rollbackTested":true}\n'); commit(root, 'phát hành lần 2')
+      const x = lu.xem(root, p1.tag)
+      assert.deepEqual(x.changes.map((c) => c.file), ['a.txt'], 'release.json không nằm trong file sẽ đổi')
+      assert.deepEqual(x.keptData, ['.claude/release.json'])
+      const r = lu.quay(root, p1.tag, { ...noCheck, now: at(5) })
+      assert.equal(rd(root, '.claude/release.json'), '{"v":1,"rollbackTested":true}\n', 'rollbackTested vẫn true')
+      assert.equal(rd(root, 'a.txt'), '1')
+      assert.deepEqual(r.keptData, ['.claude/release.json'])
+      assert.equal(g(root, 'show', '--name-only', '--format=', 'HEAD'), 'a.txt', 'commit Quay lại không chứa release.json')
+    })
+
+    test('CLI xem · quay: lời "không quay theo" nhắc thêm trạng thái phát hành, vẫn đúng một câu "không quay theo"', () => {
+      const root = mk()
+      wr(root, 'a.txt', '1')
+      const p1 = lu.bat(root, { now: at(0) })
+      wr(root, 'a.txt', '2'); wr(root, '.claude/release.json', '{"v":1}\n'); commit(root, 'phát hành')
+      const xem = cliLuu('xem', root, p1.tag)
+      assert.equal(xem.status, 0, xem.stderr)
+      assert.match(xem.stdout, /\n- giữ nguyên dữ liệu: \.claude\/release\.json\n/)
+      assert.match(xem.stdout, /Dữ liệu trong app .* không quay theo\. Trạng thái phát hành cũng giữ nguyên\./)
+      const quay = cliLuu('quay', root, p1.tag, '--khong-kiem')
+      assert.equal(quay.status, 0, quay.stderr)
+      assert.match(quay.stdout, /không quay theo; giữ nguyên: \.claude\/release\.json\. Trạng thái phát hành cũng giữ nguyên\./)
+      assert.equal(quay.stdout.match(/không quay theo/g).length, 1)
+    })
+
+    test('release.json đang sửa dở không tính là việc dở và không vào .gitignore (health ghi mốc trong worktree rồi gộp nên vẫn phải commit được)', () => {
+      const root = mk()
+      wr(root, 'a.txt', '1'); lu.bat(root, { now: at(0) })
+      assert.equal(rd(root, '.gitignore').includes('release.json'), false)
+      wr(root, '.claude/release.json', '{"v":1}\n'); wr(root, 'a.txt', '2'); g(root, 'add', '-f', '.claude/release.json'); commit(root, 'có release.json')
+      wr(root, '.claude/release.json', '{"v":1,"health":{"lastAt":"x"}}\n')
+      const p2 = lu.tao(root, 'Chỉ đổi mốc', { now: at(2) })
+      assert.equal(p2.created, true, 'a.txt đã commit ⇒ HEAD chưa có điểm ⇒ gắn điểm; release.json dở không tạo commit')
+      assert.equal(g(root, 'rev-parse', `${p2.tag}^{commit}`), g(root, 'rev-parse', 'HEAD'))
+      const r = lu.quay(root, p2.tag, { ...noCheck, now: at(3) })
+      assert.equal(r.status, 'same', 'không có việc dở nào ngoài release.json')
+      assert.equal(rd(root, '.claude/release.json'), '{"v":1,"health":{"lastAt":"x"}}\n')
     })
 
     test('.claude/luu.json thêm mẫu dữ liệu của dự án', () => {

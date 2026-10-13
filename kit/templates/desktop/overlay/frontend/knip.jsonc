@@ -2,7 +2,8 @@
   // knip tìm file và thư viện không dùng.
   "$schema": "https://unpkg.com/knip@6/schema.json",
   // wailsjs: Wails tự sinh cầu nối tới phần Go mỗi lần chạy; chưa dùng thì chưa ai import, không phải code thừa.
-  "ignore": ["wailsjs/**"],
+  // safe-log.ts: hàm ghi nhật ký an toàn (AC-30) có sẵn cho code AI viết sau; màn đầu trống chưa ghi log nào nên chưa ai import.
+  "ignore": ["wailsjs/**", "src/shared/safe-log.ts"],
   "ignoreDependencies": [
     "jscpd", // chạy bằng lệnh của máy kiểm (flow-check), không import trong code
     "dependency-cruiser" // cấu hình .dependency-cruiser.cjs nằm ở thư mục gốc của app (ngoài frontend/), knip chạy ở frontend/ không thấy

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // new-app: tạo app mới từ số 0 (skill flow-new-app). Thư viện: lib/new-app.mjs. Mẫu: kit/templates/<loại>/ (template.json + overlay/**), bản ghim: kit/templates/versions.json.
 //   doctor --type web|desktop|extension [--pm pnpm|npm] [--json]
-//          kiểm máy đủ phần mềm chưa (Node, Git, pnpm/npm; app máy tính: Go, Wails, WebView2/Xcode). KHÔNG cài gì; thiếu gì thì in đúng lệnh cài của hệ điều hành đang chạy (Windows hoặc Mac).
+//          kiểm máy đủ phần mềm chưa (Node, Git, pnpm/npm; app máy tính: Go, Wails, WebView2/Xcode; và công cụ máy kiểm flow-check coi là bắt buộc theo kit/checkers.json: osv-scanner, ast-grep…).
+//          KHÔNG cài gì; thiếu gì thì in đúng lệnh cài của hệ điều hành đang chạy (Windows hoặc Mac). Có phần mềm nhưng KHÔNG CHẠY ĐƯỢC (EPERM/EACCES: bị chặn quyền/sandbox) ⇒ báo riêng, không bảo là chưa có.
 //   create --type <loại> --name <tên> [--dir <thư mục cha>] [--pm pnpm|npm] [--json]
 //          tạo <thư mục cha>/<tên> bằng lệnh chính hãng ghim bản + lớp phủ của kit, bật git và điểm lưu "Tạo app". Thư mục đích đã có đồ ⇒ từ chối, không đè.
 // Exit: 0 xong · 1 lỗi hoặc từ chối (mạng, quyền, ổ đĩa, thư mục đã có đồ…) · 2 dùng sai · 3 máy thiếu phần mềm (doctor/create).
@@ -46,10 +47,17 @@ function doctorLines(r, label) {
     const have = Object.entries(r.found).filter(([, v]) => v).map(([k, v]) => (v === true ? k : `${k} ${v}`))
     return [`Máy đủ phần mềm để tạo ${label} (${have.join(', ')}). Trình quản lý gói sẽ dùng: ${r.pm}.`]
   }
+  const blocked = r.blocked ?? []
   return [
-    `Máy còn thiếu ${r.missing.length} thứ để tạo ${label}:`,
-    ...r.missing.flatMap((m) => [`- ${m.tool}: ${m.why}`, ...installLines(m.install, r.platform)]),
-    'Cài xong (mở cửa sổ dòng lệnh mới) rồi chạy lại doctor.',
+    ...(r.missing.length ? [
+      `Máy còn thiếu ${r.missing.length} thứ để tạo ${label}:`,
+      ...r.missing.flatMap((m) => [`- ${m.tool}: ${m.why}`, ...installLines(m.install, r.platform)]),
+      'Cài xong (mở cửa sổ dòng lệnh mới) rồi chạy lại doctor.',
+    ] : []),
+    ...(blocked.length ? [
+      `Có ${blocked.length} phần mềm trên máy nhưng không chạy được (bị chặn quyền hoặc môi trường cô lập):`,
+      ...blocked.map((b) => `- ${b.tool}: ${b.why}`),
+    ] : []),
   ]
 }
 

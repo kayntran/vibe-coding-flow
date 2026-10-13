@@ -72,6 +72,8 @@ AGENTS.md, `.claude/rules/`) thắng phần này.
 | chạy thử, test thử, kiểm tra như người dùng | skill `flow-qa` |
 | review, soát code, bảo mật | skill `flow-review` (cũng tự chạy trước mỗi lần gộp) |
 | gộp, merge, push, "xong rồi đẩy lên" | skill `flow-merge` — chỉ khi user đã gật |
+| "phát hành", "đưa lên mạng", "quay lại bản trước", "app có lỗi không", sao lưu, đổi khoá | skill `flow-production` |
+| "khám sức khoẻ app", nhắc khám định kỳ · "app chậm", "chịu được bao nhiêu người" | skill `flow-maintain` · skill `flow-scale` |
 | X ở đâu, chỗ nào dùng Y | tự tìm bằng công cụ Grep có sẵn hoặc `rg` một lệnh nhiều `-e` (không `grep -r`/`find` quét thư mục); thư mục bị git bỏ qua (worktree, thư mục nội bộ) ⇒ thêm `-uu` kẻo tìm sót |
 | giao việc cho worker / chạy song song | skill `flow-team` |
 | sắp sửa file trong git repo | skill `flow-worktree` |

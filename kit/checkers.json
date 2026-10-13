@@ -1,5 +1,5 @@
 {
-  "$comment": "Danh sách checker của hooks/flow-check.mjs (AC-11/43). stack: web | extension | go | wails | all. cmd = tên công cụ (mảng = ứng viên theo thứ tự; tìm trong node_modules/.bin rồi PATH) hoặc internal = checker viết sẵn trong flow-check.mjs. args: {kit} = thư mục kit/, {hooks} = thư mục hooks/ (script kèm kit, vd ui-check.mjs). detect = khi nào áp dụng (xem hooks/lib/stack.mjs; không khớp ⇒ BỎ QUA). requires = gói npm phải có trong package.json. passOn = {exit:[mã đạt], match: regex phải thấy trong output}. install = lệnh cài chính thức (chuỗi hoặc {win32, posix}); thiếu công cụ ⇒ THIẾU, không cài ngầm. hint = lời dặn sửa khi không đạt. plan = tên hàm trong PLANNERS của flow-check.mjs quyết định lần này chạy gì (đối số tính từ docs/arch.json, git, docs/arch-baseline.json). quietSkip = không áp dụng thì không hiện dòng BỎ QUA. exclusive = checker tự bật app trên cổng cố định (axe qua webServer của Playwright, ui-rules bật dev server): chạy NỐI TIẾP từng cái sau nhóm song song, kẻo hai cái tranh cùng cổng và tắt server của nhau. Test đối chiếu: hooks/flow-check.test.mjs (thiếu checker bắt buộc ⇒ đỏ).",
+  "$comment": "Danh sách checker của hooks/flow-check.mjs (AC-11/43). stack: web | extension | go | wails | all, hoặc mảng các stack đó (chạy một lần khi dự án có một trong số đó). cmd = tên công cụ (mảng = ứng viên theo thứ tự; tìm trong node_modules/.bin rồi PATH) hoặc internal = checker viết sẵn trong flow-check.mjs. args: {kit} = thư mục kit/, {hooks} = thư mục hooks/ (script kèm kit, vd ui-check.mjs). detect = khi nào áp dụng (xem hooks/lib/stack.mjs; không khớp ⇒ BỎ QUA). requires = gói npm phải có trong package.json. passOn = {exit:[mã đạt], match: regex phải thấy trong output}. install = lệnh cài chính thức (chuỗi hoặc {win32, posix}); thiếu công cụ ⇒ THIẾU, không cài ngầm. hint = lời dặn sửa khi không đạt. plan = tên hàm trong PLANNERS của flow-check.mjs quyết định lần này chạy gì (đối số tính từ docs/arch.json, git, docs/arch-baseline.json). quietSkip = không áp dụng thì không hiện dòng BỎ QUA. exclusive = checker tự bật app trên cổng cố định (axe qua webServer của Playwright, ui-rules bật dev server): chạy NỐI TIẾP từng cái sau nhóm song song, kẻo hai cái tranh cùng cổng và tắt server của nhau; log-secrets cũng exclusive vì phải quét log mà axe/ui-rules vừa sinh ra (đặt SAU hai cái đó). Test đối chiếu: hooks/flow-check.test.mjs (thiếu checker bắt buộc ⇒ đỏ).",
   "version": 1,
   "checkers": [
     {
@@ -144,11 +144,11 @@
     },
     {
       "id": "secret-build",
-      "stack": "web",
+      "stack": ["web", "extension"],
       "title": "Quét khoá bí mật trong bản build",
       "internal": "secret-scan-build",
       "required": true,
-      "hint": "Bản build đang chứa khoá bí mật: bỏ khoá khỏi code chạy ở trình duyệt, đổi (xoay) khoá đã lộ, build lại rồi kiểm lại."
+      "hint": "Bản build đang chứa khoá bí mật: bỏ khoá khỏi code chạy ở trình duyệt, đổi (xoay) khoá đã lộ, build lại rồi kiểm lại. Extension: máy kiểm quét bản build MỚI nhất (dist/, build/ hoặc .output/<trình duyệt>/); bản cũ còn sót thì xoá đi."
     },
     {
       "id": "web-headers",
@@ -175,6 +175,16 @@
       "install": "Cài Node từ https://nodejs.org",
       "docs": "https://nodejs.org/en/download",
       "hint": "Sửa từng lỗi giao diện ở trên theo dòng \"Sửa:\" ngay dưới nó (mỗi màn một nút chính, nút chỉ có hình thì thêm chữ hoặc tên, nhãn nêu rõ việc thay cho OK/Có/Không, không bật hộp thoại lúc mở màn). Lỗi cũ đã chốt trong docs/ui-baseline.json không tính; đừng sửa tay mốc hay .claude/ui.json để lách, nới luật phải hỏi người dùng."
+    },
+    {
+      "id": "log-secrets",
+      "stack": "all",
+      "title": "Log bài thử không lộ bí mật",
+      "internal": "log-scan",
+      "exclusive": true,
+      "quietSkip": true,
+      "required": true,
+      "hint": "Log của bài thử (test-results/, playwright-report/, file .log) đang chứa thứ giống mật khẩu, token hay khoá: sửa code ghi log để chỉ ghi qua safeLog (danh sách trường cho phép, xem src/shared/safe-log.ts của mẫu; code máy chủ dùng hàm tương đương), chạy lại bài thử, xoá log cũ, và đổi (xoay) khoá nếu là khoá thật. Zip trace và ảnh chụp không quét được ruột."
     },
     {
       "id": "go-vet",

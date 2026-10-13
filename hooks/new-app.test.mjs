@@ -7,7 +7,10 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { main } from './new-app.mjs'
+import { main as mainReal } from './new-app.mjs'
+
+// doctor tìm công cụ của máy kiểm (osv-scanner, ast-grep…) bằng findTool của flow-check trên máy THẬT; test mặc định coi mọi công cụ là "có" (kết quả không phụ thuộc máy chạy test).
+const main = (argv, io = {}) => mainReal(argv, { which: (name) => `/fake/bin/${name}`, ...io })
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'new-app.mjs')
 const TMP = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'new-app cli thử ')))
@@ -28,6 +31,7 @@ function fakeRun({ missing = [] } = {}) {
     calls.push({ cmd, args, cwd: o.cwd })
     if (missing.includes(cmd)) return ENOENT
     if (cmd === 'git') return spawnSync('git', args, { cwd: o.cwd, encoding: 'utf8' })
+    if (/[\\/]ast-grep$/.test(cmd) && args[0] === '--version') return ok('ast-grep 0.40.0\n')
     if (/^(--version|version)$/.test(args[0] ?? '')) return ok(cmd === 'pnpm' ? '12.9.1\n' : '11.19.0\n')
     if (args.some((a) => String(a).startsWith('shadcn@'))) {
       const d = path.join(o.cwd, args[args.indexOf('-n') + 1])
@@ -114,6 +118,36 @@ describe('doctor (lệnh ngoài giả)', () => {
     assert.equal(r.code, 3)
     assert.match(r.lines.join('\n'), /node: Node 18\.0\.0 cũ hơn/)
   })
+
+  test('thiếu công cụ bắt buộc của máy kiểm (osv-scanner, ast-grep) ⇒ exit 3, in lệnh cài của hệ điều hành đang chạy, --json có missing', async () => {
+    const which = (name) => (['osv-scanner', 'ast-grep', 'sg'].includes(name) ? null : `/fake/bin/${name}`)
+    const io = { run: fakeRun().run, platform: 'win32', nodeVersion: '26.8.1', which }
+    const r = await main(['doctor', '--type', 'extension'], io)
+    assert.equal(r.code, 3)
+    const text = r.lines.join('\n')
+    assert.match(text, /thiếu \d+ thứ để tạo extension trình duyệt/)
+    assert.match(text, /- osv-scanner: /)
+    assert.match(text, /Windows: go install github\.com\/google\/osv-scanner\/v2\/cmd\/osv-scanner@latest/)
+    assert.match(text, /- ast-grep: [\s\S]*Windows: npm i -g @ast-grep\/cli/)
+    assert.doesNotMatch(text, /Mac:/)
+    const j = JSON.parse((await main(['doctor', '--type', 'extension', '--json'], io)).lines[0])
+    assert.equal(j.ok, false)
+    assert.deepEqual(j.missing.map((m) => m.tool), ['osv-scanner', 'ast-grep'])
+  })
+
+  test('git CÓ nhưng không chạy được (EPERM) ⇒ exit 3, nói "không chạy được" chứ không nói "chưa có git"', async () => {
+    const run = (cmd, args = []) => (cmd === 'git' ? { status: null, stdout: '', stderr: '', error: { code: 'EPERM', message: 'spawn git EPERM' } } : fakeRun().run(cmd, args))
+    const r = await main(['doctor', '--type', 'web'], { run, platform: 'win32', nodeVersion: '26.8.1' })
+    assert.equal(r.code, 3)
+    const text = r.lines.join('\n')
+    assert.match(text, /- git: .*không chạy được/)
+    assert.doesNotMatch(text, /Chưa có git|thiếu \d+ thứ|winget/)
+    const j = JSON.parse((await main(['doctor', '--type', 'web', '--json'], { run, platform: 'win32', nodeVersion: '26.8.1' })).lines[0])
+    assert.deepEqual([j.missing.length, j.blocked.map((b) => b.tool)], [0, ['git']])
+    const none = await main(['create', '--type', 'web', '--name', 'moi', '--dir', mk()], { run, platform: 'win32', nodeVersion: '26.8.1' })
+    assert.equal(none.code, 3)
+    assert.match(none.errLines.join('\n'), /không chạy được[\s\S]*- git: /)
+  })
 })
 
 describe('create (lệnh ngoài giả)', () => {
@@ -163,6 +197,7 @@ describe('create (lệnh ngoài giả)', () => {
   test('lệnh tạo lỗi mạng ⇒ exit 1, một câu đời thường + chi tiết ngắn (JSON có kind)', async () => {
     const parent = mk()
     const run = (cmd, args = []) => {
+      if (/[\\/]ast-grep$/.test(cmd) && args[0] === '--version') return ok('ast-grep 0.40.0\n')
       if (/^(--version|version)$/.test(args[0] ?? '')) return cmd === 'git' ? spawnSync('git', args, { encoding: 'utf8' }) : ok('1.0.0\n')
       return { status: 1, stdout: '', stderr: 'getaddrinfo ENOTFOUND registry.npmjs.org', error: null }
     }
@@ -170,6 +205,21 @@ describe('create (lệnh ngoài giả)', () => {
     assert.equal(r.code, 1)
     assert.match(r.errLines[0], /^lỗi: Không tải được thư viện từ mạng/)
     assert.match(r.errLines[0], /Chi tiết: getaddrinfo ENOTFOUND/)
+    const j = await main(['create', '--type', 'web', '--name', 'don-hang', '--dir', parent, '--json'], { run, platform: 'win32', nodeVersion: '26.8.1' })
+    assert.equal(JSON.parse(j.lines[0]).kind, 'network')
+  })
+
+  test('mạng bị chặn (EACCES kèm địa chỉ:cổng) ⇒ nói mạng, KHÔNG nói "quyền ghi vào thư mục"', async () => {
+    const parent = mk()
+    const run = (cmd, args = []) => {
+      if (/[\\/]ast-grep$/.test(cmd) && args[0] === '--version') return ok('ast-grep 0.40.0\n')
+      if (/^(--version|version)$/.test(args[0] ?? '')) return cmd === 'git' ? spawnSync('git', args, { encoding: 'utf8' }) : ok('1.0.0\n')
+      return { status: 1, stdout: '', stderr: 'ERR_PNPM_META_FETCH_FAIL request to https://registry.npmjs.org/shadcn failed, reason: connect EACCES 104.16.6.34:443', error: null }
+    }
+    const r = await main(['create', '--type', 'web', '--name', 'don-hang', '--dir', parent], { run, platform: 'win32', nodeVersion: '26.8.1' })
+    assert.equal(r.code, 1)
+    assert.match(r.errLines[0], /^lỗi: Không kết nối được mạng để tải thư viện/)
+    assert.doesNotMatch(r.errLines[0], /quyền ghi/)
     const j = await main(['create', '--type', 'web', '--name', 'don-hang', '--dir', parent, '--json'], { run, platform: 'win32', nodeVersion: '26.8.1' })
     assert.equal(JSON.parse(j.lines[0]).kind, 'network')
   })

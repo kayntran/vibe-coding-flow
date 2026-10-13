@@ -9,7 +9,7 @@ skill tự bật theo câu user nói, hook ép các cổng. Thiết kế gốc: 
 | Path | Vai trò |
 |---|---|
 | `CLAUDE.md` | Thứ DUY NHẤT nạp vào mọi phiên (~3,6KB): ngôn ngữ, nguyên tắc, phân cỡ, bảng định tuyến "user nói gì → làm gì" |
-| `skills/flow-*` | Quy trình, chỉ nạp khi cần: `flow-spec` (ý tưởng → plan), `flow-impact` (tính năng anh em + test đối chiếu), `flow-team` (worker, brief, song song), `flow-worktree`, `flow-qa` (kiểm, test thực tế, debug), `flow-review` (Codex), `flow-merge` |
+| `skills/flow-*` | Quy trình, chỉ nạp khi cần: `flow-spec` (ý tưởng → plan), `flow-impact` (tính năng anh em + test đối chiếu), `flow-team` (worker, brief, song song), `flow-worktree`, `flow-qa` (kiểm, test thực tế, debug), `flow-review` (Codex), `flow-merge`, `flow-production` (phát hành, quay lại, xem lỗi, sao lưu, đổi khoá), `flow-maintain` (khám sức khoẻ định kỳ), `flow-scale` (đo tải khi app chậm) |
 | `agents/` | Worker: `researcher` (GitHub + agy), `recon`, `coder`, `coder-lite`, `test-runner`, `qa-tester` (Playwright), `debugger` (+ Codex), `code-reviewer` |
 | `hooks/flow-gate.mjs` | Chặn: sửa thẳng thư mục chính repo, gộp thiếu dấu review/QA, commit/push có secret; bắt worker trả receipt |
 | `hooks/session-start.mjs` | Mở phiên / sau khi nén ngữ cảnh: tự nạp sổ `progress.md` đang dở; nhắc báo cáo MCP sau 30 ngày |
@@ -17,7 +17,9 @@ skill tự bật theo câu user nói, hook ép các cổng. Thiết kế gốc: 
 | `hooks/wt-env.mjs` | Cấp cửa sổ 20 port riêng cho mỗi worktree (`alloc`/`release`/`list`/`prune`), có khoá chống cấp trùng |
 | `hooks/grok.mjs` | Gọi Grok CLI không nạp MCP/hook/skill của Claude Code và Cursor (nguyên nhân treo) |
 | `hooks/review-ext.mjs` | Gọi Grok 4.7 / Gemini 3.8 Flash review chỉ-đọc, ra JSON đúng schema (tắt cấu hình Claude/Cursor mà Grok tự nạp) |
-| `hooks/strix-scan.mjs` | Bọc Strix (pentest bằng AI): chỉ cho quét thư mục trên máy hoặc app ở localhost, tắt telemetry |
+| `hooks/zap-scan.mjs` | Quét bảo mật miễn phí bằng ZAP (Java 17, không Docker) trên app chạy ở localhost: mức cao chặn phát hành, mức vừa cảnh báo, miễn trừ có hạn trong `docs/security-ignore.json` |
+| `hooks/strix-scan.mjs` | Bọc Strix (pentest bằng AI, cần Docker, bắt buộc `--max-budget`): chỉ cho quét thư mục trên máy hoặc app ở localhost, tắt telemetry |
+| `hooks/release.mjs` · `hooks/backup.mjs` · `hooks/health.mjs` | Phát hành (`preflight`/`cf`/`vps`/`rollback`/`logs`) · sao lưu chỉ khi user gật + khôi phục thử + lịch theo hệ điều hành · khám sức khoẻ ra `docs/HEALTH.md`; trạng thái chung ở `.claude/release.json` của app, đọc/ghi chỉ qua `hooks/lib/release-state.mjs` |
 | `hooks/mac-check.mjs` | Chạy bộ test của kit trên Mac qua ssh một lệnh, tự dọn |
 | `hooks/mcp-usage.mjs` | Ghi mỗi lần gọi MCP vào `~/.claude/logs/mcp-usage.jsonl`; `report` liệt kê MCP không dùng để tắt bớt |
 | `workers/` | Brief + JSON schema cho review (chất lượng, bảo mật) — dùng chung cho Codex, Grok, Gemini |

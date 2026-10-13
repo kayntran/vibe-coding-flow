@@ -3,7 +3,7 @@
 //
 // Hàm xuất (đều nhận thư mục dự án làm đối số đầu):
 //   bat(dir, { now })                  → { created, initialized, nested, root, tag?, commit? }   git init nếu chưa có + .gitignore + commit đầu + điểm "Bắt đầu"
-//   tao(dir, name, { now })            → { created, tag, name, commit }                         điểm lưu trên HEAD; HEAD đã có điểm ⇒ trả điểm cũ (created=false)
+//   tao(dir, name, { now })            → { created, tag, name, commit, files? }                 còn thay đổi chưa commit ⇒ lưu chúng thành commit mới (files) rồi gắn điểm; không còn gì dở và HEAD đã có điểm ⇒ trả điểm cũ (created=false)
 //   ds(dir)                            → [{ tag, name, time, iso, commit, since }]              mới nhất trước; since = số việc kể từ điểm đó
 //   tim(dir, query, { limit })         → [{ ...điểm, score, matched }]                          khớp không dấu trên tên + tiêu đề commit giữa các điểm; tên khớp nguyên văn đứng đầu, cụm từ liền nặng hơn khớp rời
 //   xem(dir, tag)                      → { target, after, commits, commitCount, dirty, worktrees, unmerged, changes, ruleFiles, keptData, blocker }
@@ -15,7 +15,7 @@
 //
 // Ranh giới an toàn (đã soát):
 //   - Không reset, không xoá tag/commit, không push. Quay = `git restore --source=<commit> --staged --worktree -- :/ <loại trừ dữ liệu>` rồi commit MỚI.
-//   - Dữ liệu (db, data/, uploads/, storage/ + .claude/luu.json) bị loại khỏi restore, khỏi việc dở và khỏi .gitignore được thêm.
+//   - Dữ liệu (db, data/, uploads/, storage/, trạng thái phát hành .claude/release.json + mẫu thêm trong .claude/luu.json) bị loại khỏi restore và khỏi việc dở; mẫu dữ liệu (trừ release.json) được thêm vào .gitignore.
 //   - Việc dở luôn được lưu thành commit + điểm lưu trước khi quay (giữ hay bỏ đều không mất), sau khi quét khoá bí mật như cổng commit (lib/secrets.mjs, mirror flow-gate:
 //     scanPatch + file nhạy cảm, quá giới hạn quét ⇒ từ chối). Có khoá ⇒ từ chối, chỉ in file:dòng + tên mẫu, không in giá trị; chỉ mục (index) được trả về như cũ.
 //   - Quay mà diff HEAD → điểm đích chạm file luật (lib/rule-files.mjs), hoặc file luật trong việc dở khác điểm đích ⇒ exit 4, chỉ chạy với doiLuat.
@@ -173,7 +173,10 @@ function commitCfg(repo) {
 
 // ---------- ranh giới code / dữ liệu ----------
 
-export const DEFAULT_DATA = ['*.db', '*.sqlite', '*.sqlite3', '*.db-wal', '*.db-shm', 'data/**', 'uploads/**', 'storage/**']
+// Trạng thái phát hành (bản đang chạy, đã thử quay lại, lựa chọn sao lưu, mốc khám) ghi sự thật BÊN NGOÀI repo ⇒ quay về điểm cũ không được kéo nó về bản cũ.
+// Không vào .gitignore: lệnh khám sức khoẻ ghi mốc trong worktree rồi gộp nên file vẫn phải commit được.
+const STATE_DATA = ['.claude/release.json']
+export const DEFAULT_DATA = ['*.db', '*.sqlite', '*.sqlite3', '*.db-wal', '*.db-shm', 'data/**', 'uploads/**', 'storage/**', ...STATE_DATA]
 
 function globProblem(g) {
   if (typeof g !== 'string' || !g.trim()) return 'phải là chuỗi không rỗng'
@@ -309,13 +312,22 @@ function makePoint(repo, commit, name, now) {
   return { tag, name, commit }
 }
 
+// Còn thay đổi chưa commit ⇒ lưu chúng thành commit mới (cùng đường với "lưu tạm" của quay: quét khoá, trừ dữ liệu) rồi gắn điểm ở đó; `files` = các file đã lưu.
+// Không còn gì dở và HEAD đã là điểm lưu ⇒ trả điểm cũ (created=false). Nếu không, tạo điểm ở HEAD.
 export function tao(dir, name, { now = new Date() } = {}) {
   const label = cleanName(name)
   const repo = needRepo(dir)
-  const head = needHead(repo)
-  const old = pointAt(repo, head)
+  needHead(repo)
+  const ex = excludeSpecs(dataGlobs(repo.root))
+  const files = unsavedFiles(repo, ex)
+  if (files.length) {
+    guardGitIdle(repo, 'lưu thay đổi')
+    const saved = stageScanCommit(repo, ex, label)
+    if (saved) return { created: true, ...makePoint(repo, saved, label, now), files }
+  }
+  const old = pointAt(repo, headOf(repo))
   if (old) return { created: false, ...old }
-  return { created: true, ...makePoint(repo, head, label, now) }
+  return { created: true, ...makePoint(repo, headOf(repo), label, now) }
 }
 
 export function ds(dir) {
@@ -467,7 +479,7 @@ function ensureGitignore(root, globs) {
   const file = path.join(root, '.gitignore')
   const cur = isFile(file) ? fs.readFileSync(file, 'utf8') : null
   const have = new Set((cur ?? '').split(/\r?\n/).map(ignoreKey))
-  const want = [...baseIgnore(root), ...globs.map(toGitignore)].filter((l, i, a) => a.findIndex((x) => ignoreKey(x) === ignoreKey(l)) === i)
+  const want = [...baseIgnore(root), ...globs.filter((g) => !STATE_DATA.includes(g)).map(toGitignore)].filter((l, i, a) => a.findIndex((x) => ignoreKey(x) === ignoreKey(l)) === i)
   const missing = want.filter((l) => !have.has(ignoreKey(l)))
   if (cur === null) {
     fs.writeFileSync(file, `# điểm lưu (luu.mjs): giữ khoá bí mật, thư viện cài sẵn và dữ liệu ngoài git\n${want.join('\n')}\n`)
@@ -574,6 +586,15 @@ function dirtyFiles(repo, ex) {
   return files
 }
 
+// File code trên đĩa khác HEAD (đã stage hay chưa) + file mới chưa theo dõi (không kể file bị .gitignore), trừ dữ liệu: những gì một điểm lưu ở HEAD sẽ KHÔNG chứa.
+// Bản đã stage mà đĩa lại trùng HEAD không tính: đĩa không có gì để lưu (tao không đụng chỉ mục).
+function unsavedFiles(repo, ex) {
+  const scope = ['--', ':/', ...ex]
+  const tracked = git(repo.root, ['diff', 'HEAD', '--name-only', '-z', '--no-renames', '--no-ext-diff', '--no-textconv', ...scope]).split('\0')
+  const fresh = git(repo.root, ['ls-files', '-z', '--others', '--exclude-standard', ...scope]).split('\0')
+  return [...new Set([...tracked, ...fresh].filter(Boolean))]
+}
+
 // File sẽ đổi khi quay từ `from` tới `to`: [{ st: 'A'|'M'|'D'|'T', file }] (A = thêm lại, D = sẽ bị gỡ). specs = cả danh sách pathspec (có ':/' nếu muốn xét hết).
 // to = null ⇒ so `from` với cây làm việc (file đã theo dõi): chiều ngược lại (A = có ở cây làm việc mà `from` không có).
 function diffStatus(repo, from, to, specs) {
@@ -635,6 +656,14 @@ function isMainBranch(repo, branch) {
   return names.size === 0 && locals.length === 1 && locals[0] === branch
 }
 
+// Đang giữa rebase/gộp/cherry-pick… hoặc còn file xung đột ⇒ ném (commit lúc này sẽ chốt thao tác dở đó). doing = việc đang định làm, vd "quay về".
+function guardGitIdle(repo, doing) {
+  for (const [name, why] of IN_PROGRESS) {
+    if (exists(path.join(repo.gitDir, name))) throw new LuuError(`Dự án ${why} nên chưa ${doing} được. Xong hoặc huỷ việc dở đó (vd git rebase --abort / git merge --abort) rồi chạy lại.`)
+  }
+  if ((gitTry(repo.root, ['ls-files', '-u']) ?? '').trim()) throw new LuuError(`Dự án còn file đang xung đột chưa giải quyết nên chưa ${doing} được. Giải quyết xong rồi chạy lại.`)
+}
+
 // Quay chỉ chạy ở thư mục chính, nhánh chính, không có thao tác git dở. Trả branch.
 function guardQuay(repo) {
   if (!same(repo.dir, repo.root)) throw new LuuError(`Hãy chạy ở thư mục gốc của dự án (${oneLine(repo.root, 200)}), không phải thư mục con.`)
@@ -642,10 +671,7 @@ function guardQuay(repo) {
   const branch = (gitTry(repo.root, ['symbolic-ref', '-q', '--short', 'HEAD']) ?? '').trim()
   if (!branch) throw new LuuError('Dự án đang không đứng trên nhánh nào (HEAD tách rời). Quay về chỉ chạy trên nhánh chính.')
   if (!isMainBranch(repo, branch)) throw new LuuError(`Đang ở nhánh "${oneLine(branch, 80)}", không phải nhánh chính. Quay về chỉ chạy trên nhánh chính của thư mục chính.`)
-  for (const [name, why] of IN_PROGRESS) {
-    if (exists(path.join(repo.gitDir, name))) throw new LuuError(`Dự án ${why} nên chưa quay về được. Xong hoặc huỷ việc dở đó (vd git rebase --abort / git merge --abort) rồi chạy lại.`)
-  }
-  if ((gitTry(repo.root, ['ls-files', '-u']) ?? '').trim()) throw new LuuError('Dự án còn file đang xung đột chưa giải quyết nên chưa quay về được. Giải quyết xong rồi chạy lại.')
+  guardGitIdle(repo, 'quay về')
   const v = /(\d+)\.(\d+)/.exec(gitTry(repo.root, ['--version']) ?? '')
   if (v && (Number(v[1]) < 2 || (Number(v[1]) === 2 && Number(v[2]) < 23))) throw new LuuError(`Git ${v[0]} quá cũ (cần từ 2.23). Cập nhật git rồi chạy lại.`)
   return branch

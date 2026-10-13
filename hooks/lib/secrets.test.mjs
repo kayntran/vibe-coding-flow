@@ -10,7 +10,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   SECRET_PATTERNS, KNOWN_FALSE_POSITIVES, ALLOW_MARK,
-  isSensitiveFile, isPrivateData, scanLine, scanText, scanPatch, scanDiff, scanDir, scanHidden, scanHiddenPaths, unquoteGitPath,
+  BUILD_DIRS, isSensitiveFile, isPrivateData, scanLine, scanText, scanPatch, scanDiff, scanDir, scanFiles, extensionBuilds, scanHidden, scanHiddenPaths, unquoteGitPath,
 } from './secrets.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -400,6 +400,14 @@ describe('scanDir (bản build)', () => {
     assert.ok(!JSON.stringify(f).includes(GHP.slice(0, 8)))
     fs.rmSync(r, { recursive: true, force: true })
   })
+  test('.output (WXT, Nuxt) là thư mục build: khoá trong .output/chrome-mv3 bị thấy, .output/.. không quét mã nguồn', () => {
+    assert.ok(BUILD_DIRS.includes('.output'))
+    const r = tmp()
+    put(r, '.output/chrome-mv3/background.js', `var k="${GHP}"`)
+    put(r, 'src/a.js', `var k="${GHP}"`)
+    assert.deepEqual(scanDir(r, { build: true }).map((x) => `${x.file}:${x.line}:${x.name}`), ['.output/chrome-mv3/background.js:1:github'])
+    fs.rmSync(r, { recursive: true, force: true })
+  })
   test('quét thẳng vào thư mục build (dist) cũng được tính là bản build', () => {
     const r = tmp()
     put(r, 'dist/a.js', `k="${JWT_SERVICE}"`)
@@ -509,6 +517,66 @@ describe('scanDir (bản build)', () => {
 
   test('thư mục không tồn tại ⇒ ném lỗi (không coi là sạch)', () => {
     assert.throws(() => scanDir(path.join(os.tmpdir(), 'khong-co-thu-muc-nay-' + Date.now()), { build: true }))
+  })
+})
+
+describe('scanFiles (danh sách file cụ thể — log bài thử)', () => {
+  const brief = (f) => f.map((x) => `${x.file}:${x.line}:${x.name}`).sort()
+  test('quét đúng file được đưa, cùng luật đọc với scanDir: thấy khoá + đúng dòng; UTF-16 (PowerShell) vẫn bắt; file sạch ⇒ []', () => {
+    const r = tmp()
+    put(r, 'a.log', `ok\nk="${GHP}"\n`)
+    put(r, 'sub dir/b.log', Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from(`k = "${GHP}"\n`, 'utf16le')]))
+    put(r, 'clean.log', 'chỉ có chữ thường\n')
+    put(r, 'khong-duoc-dua.log', `k="${GHP}"`)
+    assert.deepEqual(brief(scanFiles(r, ['a.log', 'sub dir/b.log', 'clean.log'])), ['a.log:2:github', 'sub dir/b.log:1:github'])
+    assert.ok(!JSON.stringify(scanFiles(r, ['a.log'])).includes(GHP.slice(0, 8)), 'value đã che')
+    fs.rmSync(r, { recursive: true, force: true })
+  })
+  test('file quá lớn hoặc không còn tồn tại KHÔNG bị coi là sạch; đuôi nhị phân (ảnh, zip) bỏ qua như chế độ thường', () => {
+    const r = tmp()
+    put(r, 'big.log', 'a'.repeat(5000))
+    put(r, 'trace.zip', Buffer.concat([Buffer.from([0, 1]), Buffer.from(GHP)]))
+    const f = scanFiles(r, ['big.log', 'mat.log', 'trace.zip'], { maxFileBytes: 1000 })
+    assert.deepEqual(f.map((x) => [x.file, x.line]), [['big.log', null], ['mat.log', null]])
+    assert.match(f[0].name, /quá lớn/)
+    assert.match(f[1].name, /không đọc được/)
+    fs.rmSync(r, { recursive: true, force: true })
+  })
+})
+
+describe('extensionBuilds (bản build extension: dist/, build/, .output/<trình duyệt>/)', () => {
+  const age = (root, rel, ms) => {
+    const f = path.join(root, ...rel.split('/'))
+    const t = new Date(Date.now() - ms)
+    fs.utimesSync(f, t, t)
+  }
+  const DAY = 24 * 3600 * 1000
+  test('xếp MỚI nhất trước: dist/ cũ + .output/chrome-mv3 mới ⇒ .output/chrome-mv3 đứng đầu; thư mục rỗng hoặc không có thì không tính', () => {
+    const r = tmp()
+    put(r, 'dist/manifest.json', '{}')
+    put(r, '.output/chrome-mv3/manifest.json', '{}')
+    put(r, '.output/firefox-mv2/manifest.json', '{}')
+    put(r, 'build/.keep/.gitkeep', '')
+    fs.mkdirSync(path.join(r, '.output', 'rong'), { recursive: true })
+    put(r, 'src/a.ts', 'x')
+    put(r, 'node_modules/p/dist/i.js', 'x') // không phải dist của dự án
+    age(r, 'dist/manifest.json', 3 * DAY)
+    age(r, '.output/firefox-mv2/manifest.json', 1 * DAY)
+    age(r, 'build/.keep/.gitkeep', 5 * DAY)
+    assert.deepEqual(extensionBuilds(r).map((b) => b.rel), ['.output/chrome-mv3', '.output/firefox-mv2', 'dist', 'build'])
+    fs.rmSync(r, { recursive: true, force: true })
+  })
+  test('dist/ mới hơn .output/ cũ ⇒ dist đứng đầu; không có bản build nào ⇒ []', () => {
+    const r = tmp()
+    put(r, 'dist/a.js', 'x')
+    put(r, '.output/chrome-mv3/a.js', 'x')
+    age(r, '.output/chrome-mv3/a.js', 2 * DAY)
+    assert.deepEqual(extensionBuilds(r).map((b) => b.rel), ['dist', '.output/chrome-mv3'])
+    const empty = tmp()
+    put(empty, 'manifest.json', '{}')
+    assert.deepEqual(extensionBuilds(empty), [])
+    fs.rmSync(r, { recursive: true, force: true })
+    fs.rmSync(empty, { recursive: true, force: true })
   })
 })
 

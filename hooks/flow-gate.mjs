@@ -1514,7 +1514,7 @@ async function hookBash(input) {
 // ngay dưới dòng `Làn:`; gặp dòng không phải danh sách (vd `Ghi chú:`) là hết mục.
 function hasOpenLane(text) {
   const lines = String(text).normalize('NFC').split(/\r?\n/)
-  const start = lines.findIndex((l) => /^[ \t>*_#-]*Làn[ \t*_]*[:：]/u.test(l))
+  const start = lines.findIndex((l) => /^[ \t>*_#-]*Làn(?:[ \t]*\([^)\n]*\))?[ \t*_]*[:：]/u.test(l)) // "Làn:" hoặc "Làn (ghi chú):"
   if (start < 0) return false
   for (const l of lines.slice(start + 1)) {
     if (l.trim() === '') continue

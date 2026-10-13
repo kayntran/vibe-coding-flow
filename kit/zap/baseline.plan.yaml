@@ -1,0 +1,34 @@
+# Plan mẫu ZAP 2.17 Automation Framework cho hooks/zap-scan.mjs (SPEC AC-22): quét THỤ ĐỘNG bản chạy ở máy, không Docker.
+#   zap.bat|zap.sh -cmd -autorun <plan>.yaml        (Java 17+; lib/zap.mjs điền 4 chỗ "__…__" rồi mới chạy)
+# Thụ động = chỉ đọc phản hồi của app (spider đi theo link, không gửi tấn công): thiếu header, cookie lỏng, lộ thông tin.
+# Bám plan baseline do `zap-baseline.py --plan-only` sinh (passiveScan-config → spider → passiveScan-wait → report), KHÔNG dùng
+# job exitStatus: mức chặn/cảnh báo và danh sách miễn (docs/security-ignore.json, có lý do + hạn) do lib/zap.mjs tính từ báo cáo JSON.
+env:
+  contexts:
+    - name: app
+      urls:
+        - "__TARGET__"          # địa chỉ app ở localhost, lib chỉ nhận localhost|127.0.0.1|[::1]
+      includePaths:
+        - "__INCLUDE__"         # regex: chỉ trong origin của app ⇒ spider không đi ra ngoài
+  parameters:
+    failOnError: true           # job lỗi ⇒ ZAP thoát khác 0 ⇒ zap-scan báo "quét không chạy xong" (không báo sạch)
+    failOnWarning: false
+    progressToStdout: true
+jobs:
+  - type: passiveScan-config
+    parameters:
+      scanOnlyInScope: true
+      maxAlertsPerRule: 10
+  - type: spider
+    parameters:
+      context: app
+      maxDuration: 1            # phút
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 2            # phút
+  - type: report
+    parameters:
+      template: traditional-json   # JSON: lib đọc site[].alerts[].riskcode (3 High · 2 Medium · 1 Low · 0 Info)
+      reportDir: "__REPORT_DIR__"
+      reportFile: "__REPORT_FILE__"
+      reportTitle: flow zap-scan

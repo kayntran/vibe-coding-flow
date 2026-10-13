@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // luu: CLI điểm lưu của dự án (chỉ trên máy, không đẩy lên mạng). Thư viện: lib/luu.mjs. Spec: docs/specs/2026-10-12-flow-v7-dot3 (AC-16).
 //   bat  <thư mục>                         chưa có git ⇒ git init + .gitignore + commit đầu + điểm lưu "Bắt đầu"; đã có git ⇒ không làm gì
-//   tao  <thư mục> "<tên đời thường>"      điểm lưu tại vị trí hiện tại (đã có điểm ở đây ⇒ không tạo trùng)
+//   tao  <thư mục> "<tên đời thường>"      điểm lưu tại vị trí hiện tại; còn file đang sửa dở ⇒ lưu chúng thành commit mới rồi gắn điểm (quét khoá, trừ dữ liệu); không còn gì dở và đã có điểm ở đây ⇒ không tạo trùng
 //   ds   <thư mục> [--json]                danh sách điểm lưu, mới nhất trước
 //   tim  <thư mục> "<câu>" [--json]        điểm lưu khớp câu (không dấu, không phân biệt hoa thường), xếp hạng
 //   xem  <thư mục> <điểm> [--json]         những gì sẽ bị gỡ nếu quay về điểm đó
@@ -10,7 +10,7 @@
 // <điểm> = tag (luu/… hoặc bỏ tiền tố luu/) HOẶC tên đời thường ("thêm trang đăng nhập", không dấu / hoa thường cũng được) khi khớp DUY NHẤT một điểm; khớp nhiều ⇒ exit 2 liệt kê để chọn tag.
 // --viec-do (khi còn file đang sửa dở): cả hai đều cất việc dở thành một điểm lưu trước khi quay; `giu` = quay xong đặt lại các file dở đó vào thư mục làm việc (chưa lưu), `bo` = cất rồi thôi (thư mục làm việc về đúng điểm đã chọn).
 // Sau khi quay xong, `quay` chạy máy kiểm của kit (hooks/flow-check.mjs, có thể mất vài phút) và in MỘT dòng tổng (đạt / N mục chưa đạt + lệnh xem chi tiết), không chặn; --khong-kiem để bỏ qua.
-// Captain CHỈ chạy `quay` sau khi user đã gật trong chat; chạm file luật (exit 4) thì phải hỏi user riêng câu "quay về sẽ nới luật kiểm X, đồng ý?" rồi mới thêm --doi-luat. Dữ liệu trong app (db, data/, uploads/, storage/ + .claude/luu.json) không quay theo.
+// Captain CHỈ chạy `quay` sau khi user đã gật trong chat; chạm file luật (exit 4) thì phải hỏi user riêng câu "quay về sẽ nới luật kiểm X, đồng ý?" rồi mới thêm --doi-luat. Dữ liệu trong app (db, data/, uploads/, storage/ + mẫu thêm trong .claude/luu.json) và trạng thái phát hành (.claude/release.json) không quay theo.
 // Exit: 0 xong · 1 lỗi hoặc từ chối (khoá bí mật, sai nhánh, việc git dở…) · 2 dùng sai · 3 có việc dở mà thiếu --viec-do · 4 quay chạm file luật mà thiếu --doi-luat.
 // Chỉ để test: biến môi trường FLOW_LUU_NOW (ISO) đổi "bây giờ" khi đặt tên điểm lưu.
 import { LuuError, bat, ds, quay, tao, tim, xem } from './lib/luu.mjs'
@@ -64,7 +64,8 @@ function cmdBat(dir) {
 
 function cmdTao(dir, name) {
   const r = tao(dir, name, { now: nowOf() })
-  return [r.created ? `Đã lưu điểm "${r.name}" (${r.tag}, commit ${r.commit.slice(0, 7)}).` : `Chỗ này đã là điểm lưu "${r.name}" (${r.tag}) nên không tạo thêm.`]
+  if (!r.created) return [`Chỗ này đã là điểm lưu "${r.name}" (${r.tag}) nên không tạo thêm.`]
+  return [`Đã lưu điểm "${r.name}" (${r.tag}, commit ${r.commit.slice(0, 7)})${r.files?.length ? `, gồm ${r.files.length} file đang sửa dở` : ''}.`]
 }
 
 function cmdDs(dir, json) {
@@ -81,6 +82,8 @@ function cmdTim(dir, query, json) {
   return list.flatMap((p, i) => [`${i + 1}. "${p.name}" — ${p.time} · ${p.tag} · ${p.commit}`, ...p.matched.subjects.map((s) => `   việc khớp: ${s}`)])
 }
 
+// Trạng thái phát hành (.claude/release.json) ghi sự thật bên ngoài (bản đang chạy, đã thử quay lại…) nên quay không đụng tới, như dữ liệu.
+const STATE_NOTE = ' Trạng thái phát hành cũng giữ nguyên.'
 const list = (items, max = 8) => items.slice(0, max).join('; ') + (items.length > max ? `; …và ${items.length - max} mục nữa` : '')
 
 function cmdXem(dir, tag, json) {
@@ -95,7 +98,7 @@ function cmdXem(dir, tag, json) {
   lines.push(`- ${r.changes.length} file sẽ đổi${r.changes.length ? `: ${list(r.changes.map((c) => c.file), 6)}` : ''}`)
   if (r.ruleFiles.length) lines.push(`- LUẬT KIỂM TRA sẽ đổi (cần người dùng đồng ý riêng, rồi thêm --doi-luat): ${list(r.ruleFiles)}`)
   if (r.keptData.length) lines.push(`- giữ nguyên dữ liệu: ${list(r.keptData)}`)
-  lines.push('Dữ liệu trong app (database, tệp tải lên) không quay theo.')
+  lines.push(`Dữ liệu trong app (database, tệp tải lên) không quay theo.${STATE_NOTE}`)
   if (r.blocker) lines.push(`Chưa quay được lúc này: ${r.blocker}`)
   return lines
 }
@@ -111,7 +114,7 @@ function cmdQuay(dir, tag, o) {
   lines.push(r.tag ? `Điểm lưu mới: commit ${r.commit}, ${r.tag}.` : `Không có gì khác để ghi thêm (commit ${r.commit}).`)
   lines.push(`Điểm vừa rời: "${r.left.name}" (${r.left.tag}, commit ${r.left.commit}).`)
   lines.push(`Quay nhầm thì chạy: luu.mjs quay <thư mục> ${r.left.tag}${r.restored.length ? ' --viec-do bo (cất thêm việc dở vừa đặt lại)' : ''}`)
-  lines.push(`Dữ liệu trong app (database, tệp tải lên) không quay theo${r.keptData.length ? `; giữ nguyên: ${list(r.keptData)}` : ''}.`)
+  lines.push(`Dữ liệu trong app (database, tệp tải lên) không quay theo${r.keptData.length ? `; giữ nguyên: ${list(r.keptData)}` : ''}.${STATE_NOTE}`)
   if (r.check) lines.push(...r.check.lines)
   return lines
 }

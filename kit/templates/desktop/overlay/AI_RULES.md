@@ -29,6 +29,7 @@ Luật cho AI sửa app này. Người dùng không viết code: giữ giao di�
 ## Bí mật
 - Khoá bí mật chỉ ở biến môi trường của máy / file `.env` không đưa lên git; KHÔNG nằm trong mã giao diện (mọi thứ trong giao diện đọc được). Người dùng tự dán khoá, AI không nhập hộ.
 - Không tải mã từ web ngoài vào giao diện (`<script src="https://…">`); đóng gói mọi thứ cùng app.
+- Ghi nhật ký ở giao diện chỉ qua `safeLog` (`frontend/src/shared/safe-log.ts`: chỉ trường trong danh sách cho phép được ghi, phần còn lại bị che). KHÔNG `console.log` thẳng mật khẩu, token, khoá, email hay chữ người dùng nhập. Máy kiểm `log-secrets` quét log của bài thử.
 
 ## Lệnh
 - Chạy thử: `wails dev` (cửa sổ app; cũng mở được ở http://localhost:34115) · Chỉ giao diện: `cd frontend && {{PM_DEV}}` · Test Go: `go test ./internal/...` · Đóng gói: `wails build` (chỉ khi người dùng bảo).

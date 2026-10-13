@@ -4,9 +4,13 @@
 //   TYPES                              ['web','desktop','extension']
 //   validateName(name)                 → null | lời báo       tên chỉ gồm a-z, 0-9, gạch ngang (đặt tên thư mục và tên gói)
 //   loadVersions(kit?) · loadTemplate(type, kit?)             kit/templates/versions.json · kit/templates/<type>/template.json (kiểm dạng, chặn đường dẫn lạ)
-//   doctor({ type, io })               → { ok, missing:[{tool, why, install:{win, mac}}], found:{…}, pm }   KHÔNG cài gì
+//   doctor({ type, io, cwd? })         → { ok, missing:[{tool, why, install:{win, mac}}], blocked:[{tool, why}], found:{…}, pm }   KHÔNG cài gì
+//                                       missing = chưa có / cũ quá (ENOENT); blocked = có nhưng không chạy được (spawn EPERM/EACCES: bị chặn quyền hoặc sandbox).
+//                                       Kiểm cả công cụ máy kiểm flow-check coi là BẮT BUỘC cho loại app (requiredTools: đọc kit/checkers.json, tìm bằng findTool của flow-check từ cwd).
+//   requiredTools(template, kit?)      → [{ id, title, names, identify, install:{win, mac} }]   công cụ MÁY phải có (không tính thứ app tự cài bằng `npm i -D`)
 //   generatorCommand(template, { name, pm, versions })        → { cmd, args }   lệnh tạo chính hãng (đã ghim bản)
 //   classifyFailure(r)                 → { kind, say, detail }   phân loại lỗi một lệnh ngoài: mạng · quyền · ổ đĩa · diệt virus/khoá file · đổi cờ · thiếu phần mềm · quá giờ
+//                                       (EACCES/EPERM kèm địa chỉ:cổng / syscall connect / dial tcp = kết nối mạng bị chặn ⇒ mạng; chỉ lỗi trên đường dẫn file mới là quyền ghi)
 //   applyOverlay({ template, overlayDir, appDir, tokens }) → { added, replaced, kept, removed, moved }   phủ kit/templates/<type>/overlay/**
 //   create({ type, name, parent, pm, io }) → { dir, pm, steps, overlay, luu, notes, next }
 //                                       các bước: kiểm máy → tạo → điểm lưu → lớp phủ → cài thư viện → công cụ kiểm (devDeps) → trình duyệt → bản đồ kiến trúc (arch init + gen) → dựng thử (build) → lưu
@@ -15,6 +19,7 @@
 //
 // io (tiêm khi test): run(cmd, args, { cwd, env, timeoutMs }) → { status, stdout, stderr, error }   (mặc định defaultRun: stdin đóng, CI=1, không TTY)
 //                     platform · env · nodeVersion · log(lời) gọi TRƯỚC mỗi bước · kit (thư mục kit) · now (Date, đặt tên điểm lưu)
+//                     which(name, { cwd, env, platform }) → đường dẫn | null   (mặc định findTool của hooks/flow-check.mjs: node_modules/.bin → PATH → thư mục cài quen thuộc)
 //
 // Ranh giới an toàn:
 //   - Thư mục đích đã có và không rỗng (hoặc là file) ⇒ từ chối, KHÔNG đè, KHÔNG xoá gì. Thư mục rỗng được dùng lại (chỉ rmdir thư mục rỗng).
@@ -25,6 +30,7 @@ import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { findTool, validateCheckers } from '../flow-check.mjs'
 import { gen as archGen, init as archInit } from './arch.mjs'
 import { bat as luuBat, tao as luuTao } from './luu.mjs'
 
@@ -164,6 +170,7 @@ const ioOf = (io = {}) => ({
   log: io.log ?? (() => {}),
   kit: io.kit ?? KIT_DIR,
   now: io.now ?? new Date(),
+  which: io.which ?? ((name, o) => findTool(name, o)),
 })
 
 // ---------- phân loại lỗi ----------
@@ -174,6 +181,16 @@ const RE_PERM = /EACCES|EPERM|EROFS|permission denied|access is denied|operation
 const RE_NET = /ENOTFOUND|EAI_AGAIN|ECONNRESET|ECONNREFUSED|ECONNABORTED|ETIMEDOUT|ESOCKETTIMEDOUT|network|fetch failed|getaddrinfo|socket hang up|unable to (?:get|resolve|connect)|could not resolve|dial tcp|i\/o timeout|connection (?:refused|reset|timed out)|ERR_PNPM_(?:META_)?FETCH|ERR_SOCKET|self[- ]signed|certificate|\bproxy\b|\b(?:TLS|SSL)\b|\btunnel/i
 const RE_FLAGS = /unknown (?:option|argument|flag|command)|unrecognized (?:option|argument)|invalid (?:option|argument|template|flag)|unexpected argument|too many arguments|flag provided but not defined|no such (?:template|option)|template .{0,40}not found|did you mean|required (?:argument|option) .{0,40}missing|missing required/i
 
+// Kết nối ra mạng bị chặn (tường lửa, proxy, sandbox) cũng báo EACCES/EPERM — nhưng kèm địa chỉ:cổng / syscall connect / getaddrinfo / dial tcp, KHÔNG phải quyền ghi file.
+// Quy tắc: dòng có (EACCES|EPERM|permission denied…) mà cùng dòng nói tới kết nối ⇒ mạng; trừ khi log có thao tác file rõ ràng (syscall mkdir, "EACCES: permission denied, open…") ⇒ đó mới là quyền ghi.
+const ADDR_PORT = String.raw`(?:\d{1,3}(?:\.\d{1,3}){3}|\[[0-9a-f:]+\]|(?:[a-z0-9-]+\.)+[a-z]{2,}):\d{2,5}\b`
+const RE_DENIED = /\b(?:EACCES|EPERM)\b|permission denied|forbidden by its access permissions/i
+const RE_CONNECT_CONTEXT = new RegExp(String.raw`\b(?:connect(?:ex)?|getaddrinfo|dial tcp)\b|https?://|${ADDR_PORT}`, 'i')
+const RE_NET_SYSCALL = /\bsyscall\W+(?:connect|getaddrinfo)\b/i
+const FILE_OPS = 'mkdir|open|rename|unlink|rmdir|scandir|lstat|copyfile|symlink|chmod|access'
+const RE_FILE_SYSCALL = new RegExp(String.raw`\bsyscall\W+(?:${FILE_OPS})\b|\b(?:EACCES|EPERM)\b:?\s*(?:permission denied|operation not permitted),?\s*(?:${FILE_OPS})\b`, 'i')
+const connectDenied = (text) => !RE_FILE_SYSCALL.test(text) && (RE_NET_SYSCALL.test(text) || text.split('\n').some((l) => RE_DENIED.test(l) && RE_CONNECT_CONTEXT.test(l)))
+
 // pnpm ≥ 10 trong chế độ CI báo LỖI khi một thư viện có bước cài phụ (postinstall) chưa được cho phép trong pnpm-workspace.yaml (allowBuilds).
 const RE_BUILDS = /ERR_PNPM_IGNORED_BUILDS|Ignored build scripts|approve-builds/i
 
@@ -183,9 +200,11 @@ export function classifyFailure(r = {}, what = 'lệnh') {
   const code = r.error?.code
   if (code === 'ENOENT') return { kind: 'missing-tool', say: `Máy chưa có phần mềm "${what}" (hoặc chưa nằm trong PATH). Chạy lại: new-app.mjs doctor để xem lệnh cài.`, detail }
   if (code === 'EUNSAFE') return { kind: 'unsafe', say: `Từ chối chạy "${what}" vì đối số hoặc đường dẫn có ký tự không an toàn.`, detail }
+  if (BLOCKED_CODES.has(code) && r.status == null && !text.trim()) return { kind: 'blocked', say: `Không chạy được "${what}" (${code}: bị chặn quyền hoặc môi trường cô lập/sandbox). Chạy lại ở cửa sổ dòng lệnh thường hoặc cấp quyền chạy.`, detail }
   if (code === 'ETIMEDOUT' && r.status == null) return { kind: 'timeout', say: `"${what}" chạy quá lâu nên đã dừng — thường do mạng chậm hoặc bị chặn. Kiểm tra mạng rồi chạy lại.`, detail }
   if (RE_DISK.test(text)) return { kind: 'disk', say: 'Ổ đĩa đã đầy hoặc gần đầy. Dọn bớt chỗ trống (cần vài trăm MB) rồi chạy lại.', detail }
   if (RE_AV.test(text)) return { kind: 'antivirus', say: 'Có file đang bị khoá hoặc bị chặn, thường do phần mềm diệt virus đang quét hoặc một chương trình khác đang mở thư mục. Đợi một lúc (hoặc tạm loại thư mục này khỏi quét), đóng chương trình đang mở nó rồi chạy lại.', detail }
+  if (connectDenied(text)) return { kind: 'network', say: 'Không kết nối được mạng để tải thư viện (kết nối bị chặn — thường do tường lửa, proxy/VPN hoặc máy đang chạy trong môi trường cô lập). Kiểm tra mạng rồi chạy lại.', detail }
   if (RE_PERM.test(text)) return { kind: 'permission', say: 'Không có quyền ghi vào thư mục này. Chọn thư mục bạn có quyền (vd trong Documents) hoặc chạy lại với quyền cao hơn.', detail }
   if (RE_NET.test(text)) return { kind: 'network', say: 'Không tải được thư viện từ mạng. Kiểm tra kết nối internet (hoặc proxy/VPN của công ty) rồi chạy lại.', detail }
   if (RE_BUILDS.test(text)) return { kind: 'build-scripts', say: `${what} từ chối chạy bước cài phụ của một thư viện vì mẫu của kit chưa cho phép nó (pnpm-workspace.yaml, mục allowBuilds). Đây là lỗi của kit — báo người bảo trì; đừng tự chạy "pnpm approve-builds".`, detail }
@@ -225,34 +244,72 @@ const WEBVIEW2_KEYS = [
   'HKCU\\Software\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}',
 ]
 
-function probe(io, cmd, args) {
+// Hỏi một lệnh (phiên bản…). → chữ đầu ra khi chạy được; null khi chưa có (ENOENT) hoặc chạy ra lỗi.
+// Lệnh CÓ nhưng không chạy được (spawn EPERM/EACCES: bị chặn quyền hoặc sandbox — môi trường cô lập) ghi vào `blocked` (tool → lời báo), không được coi là "chưa có".
+const BLOCKED_CODES = new Set(['EPERM', 'EACCES'])
+function probe(io, cmd, args, blocked, tool = cmd) {
   const r = io.run(cmd, args, { timeoutMs: 30_000 })
+  if (r.error && BLOCKED_CODES.has(r.error.code)) {
+    blocked.set(tool, `Có trên máy nhưng không chạy được "${cmd}" (${r.error.code}: bị chặn quyền hoặc môi trường cô lập/sandbox), nên chưa kiểm được. Chạy lại ở cửa sổ dòng lệnh thường hoặc cấp quyền chạy.`)
+    return null
+  }
   if (r.error || r.status !== 0) return null
   return `${r.stdout}\n${r.stderr}`
 }
 
-export function doctor({ type, io: rawIo, pm: wantPm } = {}) {
+// ---------- công cụ bắt buộc của máy kiểm (kit/checkers.json) ----------
+
+// Stack mà flow-check (lib/stack.mjs) nhận ra ở app vừa tạo từ mỗi mẫu: extension (WXT) có package.json ở gốc nên cũng là web; Wails có frontend/package.json (web) + go.mod (go) + wails.json (wails).
+const APP_STACKS = { web: ['web'], extension: ['web', 'extension'], wails: ['web', 'go', 'wails'], go: ['go'] }
+// doctor đã kiểm riêng (kèm phiên bản tối thiểu) nên không kiểm lại ở đây.
+const CHECKED_TOOLS = new Set(['node', 'git', 'npm', 'pnpm', 'go', 'wails', 'wails3'])
+// Lệnh cài kiểu `npm i -D …` = cài vào CHÍNH app (devDependencies, vào node_modules/.bin của app) — kit tự thêm lúc tạo app, không phải việc của máy.
+const PER_APP_INSTALL = /^\s*(?:npm|pnpm)\s+(?:i|install|add)\b(?:.*\s)?(?:-D|--save-dev)\b/
+const GO_INSTALL = /^go install /
+const installPair = (inst) => (typeof inst === 'string'
+  ? { win: inst, mac: inst }
+  : { win: inst.win32 ?? inst.posix ?? null, mac: inst.darwin ?? inst.posix ?? inst.win32 ?? null })
+
+// Công cụ máy kiểm BẮT BUỘC mà MÁY phải có để app mới của mẫu này qua `flow-check` (chỉ đọc kit/checkers.json, không sửa):
+// checker required, chạy bằng một lệnh ngoài (cmd), thuộc stack của app (hoặc "all"), không phải loại chỉ chạy khi app đã có OpenAPI/migration… (quietSkip), không phải thứ app tự cài (npm i -D).
+// → [{ id, title, names (ứng viên theo thứ tự), identify, install:{win,mac} }]
+export function requiredTools(template, kit = KIT_DIR) {
+  const obj = readJsonFile(path.join(kit, 'checkers.json'), 'danh sách công cụ kiểm kit/checkers.json')
+  const errors = validateCheckers(obj)
+  if (errors.length) throw new NewAppError(`kit/checkers.json sai: ${errors[0]}`)
+  const stacks = APP_STACKS[template.stack] ?? []
+  return obj.checkers
+    .filter((c) => c.required && c.cmd !== undefined && !c.quietSkip
+      && [].concat(c.stack).some((s) => s === 'all' || stacks.includes(s))
+      && !(typeof c.install === 'string' && PER_APP_INSTALL.test(c.install))
+      && ![].concat(c.cmd).some((n) => CHECKED_TOOLS.has(n)))
+    .map((c) => ({ id: c.id, title: c.title, names: [].concat(c.cmd), identify: c.identify, install: installPair(c.install) }))
+}
+
+export function doctor({ type, io: rawIo, pm: wantPm, cwd } = {}) {
   const io = ioOf(rawIo)
   const template = loadTemplate(type, io.kit)
   const v = loadVersions(io.kit)
   const inst = INSTALL(v)
   const missing = []
   const found = {}
-  const need = (tool, why, install) => missing.push({ tool, why, install })
+  const blocked = new Map()
+  const need = (tool, why, install) => { if (!blocked.has(tool)) missing.push({ tool, why, install }) }
+  const ask = (cmd, args, tool) => probe(io, cmd, args, blocked, tool)
   const old = (name, have, min) => `${name} ${showVer(have)} cũ hơn bản cần (${min}).`
 
   const node = versionOf(io.nodeVersion)
   found.node = node ? showVer(node) : null
   if (!node || cmpVer(node, versionOf(v.node.min)) < 0) need('node', node ? old('Node', node, v.node.min) : 'Chưa thấy Node.', inst.node)
 
-  const gitOut = probe(io, 'git', ['--version'])
+  const gitOut = ask('git', ['--version'])
   const git = gitOut && versionOf(gitOut)
   found.git = git ? showVer(git) : null
   if (!git) need('git', 'Chưa có git (dùng để lưu các lần sửa của app).', inst.git)
   else if (cmpVer(git, versionOf(v.git.min)) < 0) need('git', old('Git', git, v.git.min), inst.git)
 
-  const pnpmOut = probe(io, 'pnpm', ['--version'])
-  const npmOut = probe(io, 'npm', ['--version'])
+  const pnpmOut = ask('pnpm', ['--version'])
+  const npmOut = ask('npm', ['--version'])
   found.pnpm = pnpmOut && versionOf(pnpmOut) ? showVer(versionOf(pnpmOut)) : null
   found.npm = npmOut && versionOf(npmOut) ? showVer(versionOf(npmOut)) : null
   if (wantPm && !['pnpm', 'npm'].includes(wantPm)) throw new NewAppError(`--pm chỉ nhận pnpm hoặc npm (nhận "${tidy(wantPm).slice(0, 20)}").`, { exit: 2 })
@@ -261,14 +318,14 @@ export function doctor({ type, io: rawIo, pm: wantPm } = {}) {
   if (pm === 'npm' && !found.npm) need('npm', 'Chưa có npm (đi kèm Node).', inst.node)
 
   if (template.needs.includes('go')) {
-    const go = probe(io, 'go', ['version'])
+    const go = ask('go', ['version'])
     const gv = go && versionOf(go.replace(/^.*?go version/i, ''))
     found.go = gv ? showVer(gv) : null
     if (!gv) need('go', 'Chưa có Go (ngôn ngữ của phần lõi app máy tính).', inst.go)
     else if (cmpVer(gv, versionOf(v.go.min)) < 0) need('go', old('Go', gv, v.go.min), inst.go)
   }
   if (template.needs.includes('wails')) {
-    const out = probe(io, 'wails', ['version'])
+    const out = ask('wails', ['version'])
     const m = out && /\bv(\d+\.\d+\.\d+)/.exec(tidy(out))
     const wv = m ? versionOf(m[1]) : out ? versionOf(out) : null
     found.wails = wv ? showVer(wv) : null
@@ -277,7 +334,7 @@ export function doctor({ type, io: rawIo, pm: wantPm } = {}) {
   }
   if (template.needs.includes('webview2') && io.platform === 'win32') {
     const ok = WEBVIEW2_KEYS.some((key) => {
-      const out = probe(io, 'reg', ['query', key, '/v', 'pv'])
+      const out = ask('reg', ['query', key, '/v', 'pv'], 'webview2')
       const m = out && /\bpv\s+REG_SZ\s+(\S+)/i.exec(out)
       return Boolean(m && m[1] !== '0.0.0.0')
     })
@@ -285,11 +342,38 @@ export function doctor({ type, io: rawIo, pm: wantPm } = {}) {
     if (!ok) need('webview2', 'Chưa có WebView2 (phần hiển thị cửa sổ app của Windows; Windows 11 thường có sẵn).', inst.webview2)
   }
   if (template.needs.includes('xcode') && io.platform === 'darwin') {
-    const ok = probe(io, 'xcode-select', ['-p']) !== null
+    const ok = ask('xcode-select', ['-p'], 'xcode') !== null
     found.xcode = ok
     if (!ok) need('xcode', 'Chưa có công cụ dòng lệnh của Apple (cần để dựng app máy tính trên Mac).', inst.xcode)
   }
-  return { ok: missing.length === 0, missing, found, pm, platform: io.platform }
+
+  // Công cụ máy kiểm bắt buộc (osv-scanner, ast-grep…): tìm đúng cách flow-check tìm (findTool), từ thư mục nơi app sẽ nằm. Không cài gì.
+  const where = { cwd: cwd ?? process.cwd(), env: io.env, platform: io.platform }
+  const gone = []
+  for (const t of requiredTools(template, io.kit)) {
+    const hit = t.names.some((name) => {
+      const file = io.which(name, where)
+      if (!file) return false
+      // Chạy thử một lần: có file mà bị chặn quyền (EPERM/EACCES) ⇒ blocked như probe(), không phải "chưa có".
+      const r = io.run(file, ['--version'], { timeoutMs: 15_000 })
+      if (r.error && BLOCKED_CODES.has(r.error.code)) {
+        blocked.set(t.names[0], `Có trên máy nhưng không chạy được "${name}" (${r.error.code}: bị chặn quyền hoặc môi trường cô lập/sandbox), nên chưa kiểm được. Chạy lại ở cửa sổ dòng lệnh thường hoặc cấp quyền chạy.`)
+        return false
+      }
+      if (!t.identify) return true
+      return !r.error && new RegExp(t.identify, 'i').test(tidy(`${r.stdout}\n${r.stderr}`)) // vd lệnh `sg` của hệ điều hành không phải ast-grep
+    })
+    found[t.names[0]] = hit ? true : null
+    if (!hit && !blocked.has(t.names[0])) gone.push(t)
+  }
+  // Lệnh cài kiểu `go install …` cần có Go trước (loại app không cần Go thì doctor chưa hỏi Go ở trên).
+  const viaGo = gone.filter((t) => GO_INSTALL.test(t.install.win ?? '') || GO_INSTALL.test(t.install.mac ?? ''))
+  if (viaGo.length && found.go === undefined && !io.which('go', where)) need('go', `Cần Go để cài ${viaGo.map((t) => t.names[0]).join(', ')}.`, inst.go)
+  for (const t of gone) need(t.names[0], `Máy kiểm flow-check cần ${t.names[0]} (${t.title}); thiếu thì app vừa tạo sẽ báo đỏ ở bước kiểm.`, t.install)
+
+  // pnpm/npm chỉ cần cái được chọn: pnpm bị chặn mà npm chạy được thì vẫn đi tiếp bằng npm.
+  const stuck = [...blocked].filter(([tool]) => (tool !== 'pnpm' && tool !== 'npm') || tool === pm).map(([tool, why]) => ({ tool, why }))
+  return { ok: missing.length === 0 && stuck.length === 0, missing, blocked: stuck, found, pm, platform: io.platform }
 }
 
 // ---------- lệnh tạo ----------
@@ -507,12 +591,11 @@ export function create({ type, name, parent = '.', pm: wantPm, io: rawIo } = {})
   const step = (id, say) => { steps.push({ id, say }); io.log(say) }
 
   step('doctor', 'Kiểm máy có đủ phần mềm…')
-  const dr = doctor({ type, io: rawIo, pm: wantPm })
+  const dr = doctor({ type, io: rawIo, pm: wantPm, cwd: parentAbs })
   if (!dr.ok) {
-    throw new NewAppError('Máy còn thiếu phần mềm nên chưa tạo app. Cài rồi chạy lại.', {
-      exit: 3,
-      lines: dr.missing.flatMap((m) => [`- ${m.tool}: ${m.why}`, ...installLines(m.install, dr.platform)]),
-    })
+    const lines = [...dr.missing.flatMap((m) => [`- ${m.tool}: ${m.why}`, ...installLines(m.install, dr.platform)]), ...dr.blocked.map((b) => `- ${b.tool}: ${b.why}`)]
+    if (dr.missing.length) throw new NewAppError('Máy còn thiếu phần mềm nên chưa tạo app. Cài rồi chạy lại.', { exit: 3, lines })
+    throw new NewAppError('Có phần mềm trên máy nhưng không chạy được (bị chặn quyền hoặc môi trường cô lập) nên chưa tạo app. Chạy lại ở nơi không bị chặn.', { exit: 3, kind: 'blocked', lines })
   }
   const pm = dr.pm
   const cmds = pmCommands(pm)
@@ -566,7 +649,11 @@ export function create({ type, name, parent = '.', pm: wantPm, io: rawIo } = {})
     step('browser', 'Tải trình duyệt để kiểm thử (Chromium)…')
     const [c, a] = cmds.exec(['playwright', 'install', 'chromium'])
     const r = io.run(c, a, { cwd: pkgDir, timeoutMs: INSTALL_TIMEOUT_MS })
-    if (r.error || r.status !== 0) notes.push(`Chưa tải được trình duyệt kiểm thử (${classifyFailure(r, 'playwright').kind}). Khi mạng ổn chạy: ${[c, ...a].join(' ')} (trong thư mục ${slash(path.relative(parentAbs, pkgDir)) || name}).`)
+    if (r.error || r.status !== 0) {
+      const f = classifyFailure(r, 'playwright')
+      const then = f.kind === 'network' || f.kind === 'timeout' ? 'Khi mạng ổn chạy' : `${f.say} Sửa xong chạy`
+      notes.push(`Chưa tải được trình duyệt kiểm thử (${f.kind}). ${then}: ${[c, ...a].join(' ')} (trong thư mục ${slash(path.relative(parentAbs, pkgDir)) || name}).`)
+    }
   }
 
   step('arch', 'Lập bản đồ kiến trúc (docs/arch.json)…')

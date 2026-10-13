@@ -1,4 +1,4 @@
-// SessionStart (startup|resume|clear|compact): ghép additionalContext từ năm phần, rỗng thì không in gì. Tổng ≤ 8.500 ký tự (SPEC AC10).
+// SessionStart (startup|resume|clear|compact): ghép additionalContext từ sáu phần, rỗng thì không in gì. Tổng ≤ 8.500 ký tự (SPEC AC10).
 //   0. Lời nhắc an toàn (v7, mỗi cái một dòng, đứng đầu): đang ở Devin Local (AC-41) · MCP có khoá gõ thẳng, CHỈ nêu tên server (AC-28) ·
 //      file luật của dự án có ký tự ẩn, nêu file:dòng (AC-28). Hook chỉ đọc; không bao giờ in giá trị khoá hay nội dung dòng có ký tự ẩn.
 //   1. Sổ tiến độ: sổ docs/specs/*/progress.md chưa `Trạng thái: xong` ghi đúng nhánh git hiện tại (openProgress của lib so-chot, quét mọi thư mục);
@@ -9,6 +9,8 @@
 //   4. Nhắc bản mới của công cụ (zzma CN-01/02): MỘT dòng từ cache ~/.claude/cache/updates.json (lib/updates.mjs), mỗi ngày tối đa một lần; KHÔNG chờ mạng.
 //      Cache cũ hơn 24 giờ ⇒ kích `node hooks/updates.mjs check --fresh` chạy nền tách rời (windowsHide, không giữ phiên), CHỈ phiên giành được khoá
 //      updates.spawn.lock mới spawn (hai phiên cùng lúc chỉ một). FLOW_UPDATES=off tắt cả hai việc.
+//   5. Nhắc sau phát hành (v7 đợt 4, AC-48f/50a/30a): MỘT dòng từ <dự án>/.claude/release.json của dự án đang mở (dueReminders của lib/release-state): quá mốc xem lỗi sau phát hành ·
+//      quá 30 ngày chưa khám sức khoẻ · sao lưu chưa sẵn. CHỈ ĐỌC: không xoá mốc đã nhắc (`release logs` mới xoá), không ghi file. Không có file / file hỏng ⇒ không nhắc gì.
 // Spec: plans/flow-v6-so-chot/SPEC.md (AC10–14, 21, 22b, 23); trước đó ~/.claude/plans/flow-v3-hooks-spec.md (Làn B). Docs: https://code.claude.com/docs/en/hooks
 // Lỗi nội bộ luôn CHO QUA (exit 0, không in gì) và ghi một dòng vào ~/.claude/logs/session-start.log.
 import { spawn, spawnSync } from 'node:child_process'
@@ -17,6 +19,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { normalize } from './lib/host.mjs'
+import { dueReminders, readState } from './lib/release-state.mjs'
 import { scanHiddenPaths, scanText } from './lib/secrets.mjs'
 import { excerpt, openProgress } from './lib/so-chot.mjs'
 import { claimRefresh, isStale, noteLine, readCache as readUpdatesCache, todayOf, updateCache as patchUpdatesCache } from './lib/updates.mjs'
@@ -249,6 +252,25 @@ function updatesSection() {
   return line ? `${UPDATES_PREFIX}${line}` : ''
 }
 
+// ---------- nhắc sau phát hành / khám sức khoẻ / sao lưu (v7 đợt 4) ----------
+
+const DUE_PREFIX = 'Báo user một lần, một dòng, không chặn việc đang làm. '
+const DUE_HINT = { check: ' (nói "xem lỗi app")', health: ' (nói "khám sức khoẻ")', backup: '' }
+// Tên thư mục là dữ liệu từ ổ đĩa (không đáng tin): chỉ giữ chữ, số, dấu cách và _ . @ -, có độ dài trần.
+const labelOf = (s, max) => String(s).replace(/[^\p{L}\p{N}_.@ -]/gu, '_').slice(0, max)
+
+// Chỉ đọc release.json (readState không ghi; file hỏng ⇒ null). Thư mục cwd thắng thư mục gốc repo (monorepo có app con có file riêng).
+function dueSection(cwd, top) {
+  for (const dir of new Set([cwd, top].filter(Boolean))) {
+    const state = readState(dir)
+    if (!state) continue
+    const due = dueReminders(state, Date.now())
+    if (!due.length) return ''
+    return `${DUE_PREFIX}App ${labelOf(path.basename(dir), 40)}: ${due.map((d) => `${d.text}${DUE_HINT[d.kind] ?? ''}`).join('; ')}.`
+  }
+  return ''
+}
+
 // ---------- lời nhắc an toàn (v7) ----------
 
 // Tên server / đường dẫn lấy từ file trong repo (không đáng tin): chỉ giữ chữ an toàn, một dòng, có độ dài trần ⇒ không dùng để cài lời lẽ vào context.
@@ -376,10 +398,11 @@ try {
   const progress = repo ? safe('progress', () => progressSection(repo.top, repo.branch)) : ''
   const mcp = safe('mcp', mcpSection)
   const upd = safe('cập nhật công cụ', updatesSection)
-  // Sổ chốt lấy phần trần còn lại sau lời nhắc an toàn + tiến độ + nhắc MCP + nhắc cập nhật (và các dòng trống ngăn cách giữa các phần) ⇒ tổng luôn ≤ TOTAL_CAP.
-  const room = TOTAL_CAP - notices.length - progress.length - mcp.length - upd.length - (notices ? 2 : 0) - (progress ? 2 : 0) - (mcp ? 2 : 0) - (upd ? 2 : 0)
+  const due = safe('nhắc sau phát hành', () => dueSection(cwd, repo?.top))
+  // Sổ chốt lấy phần trần còn lại sau lời nhắc an toàn + tiến độ + nhắc MCP + nhắc sau phát hành + nhắc cập nhật (và các dòng trống ngăn cách giữa các phần) ⇒ tổng luôn ≤ TOTAL_CAP.
+  const room = TOTAL_CAP - notices.length - progress.length - mcp.length - due.length - upd.length - (notices ? 2 : 0) - (progress ? 2 : 0) - (mcp ? 2 : 0) - (due ? 2 : 0) - (upd ? 2 : 0)
   const chot = repo ? safe('so-chot', () => excerpt(repo.top, { branch: repo.branch, budget: room })) : ''
-  const parts = [notices, progress, chot, mcp, upd].filter(Boolean)
+  const parts = [notices, progress, chot, mcp, due, upd].filter(Boolean)
   if (parts.length) {
     process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: parts.join('\n\n') } }))
   }

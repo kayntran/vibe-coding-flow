@@ -2352,6 +2352,11 @@ describe('v7 Stop: nhánh có sổ tiến độ chưa xong mà mục Làn: còn 
     assertPass(hook(fx, 'stop', stopIn(fx.wt)))
   })
 
+  test('tiêu đề "Làn (ghi chú):" vẫn là mục Làn — còn "- [ ]" thì không nhắc', () => {
+    const fx = sheetFx({ body: 'Làn (PLAN.md §Làn; soát plan 5 mục đã sửa):\n- [x] A đã gộp\n- [ ] B đang làm\n' })
+    assertPass(hook(fx, 'stop', stopIn(fx.wt)))
+  })
+
   test('sổ nằm ngoài git ở THƯ MỤC CHÍNH (kit để docs ngoài git), worktree không có ⇒ vẫn đọc được: còn "- [ ]" thì không nhắc', () => {
     const fx = fixture()
     commit(fx.wt, 'feat.go', 'package x\n', 'feat')

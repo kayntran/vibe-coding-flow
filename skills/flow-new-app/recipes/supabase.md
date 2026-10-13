@@ -13,6 +13,13 @@ Hợp khi: app có tài khoản, dữ liệu riêng từng người, user muốn
 - **Giới hạn tần suất:** Supabase Auth có sẵn (đăng nhập/đăng ký 30 lần/5 phút/IP; email mặc định 2/giờ ⇒ project thử
   tắt xác nhận email hoặc dùng SMTP riêng).
 - **Header:** `public/_headers` của mẫu; `connect-src` thêm `https://<ref>.supabase.co wss://<ref>.supabase.co`.
+- **Nhật ký (log):** giao diện ghi log CHỈ qua `safeLog` (`src/shared/safe-log.ts` của mẫu web). Code chạy phía Supabase (Edge Function, hàm
+  Postgres) cũng ghi qua hàm tương đương — cùng danh sách trường cho phép, cấm `console.log(req.body)` hay `raise notice` dữ liệu
+  người dùng, khoá, token. Lỗi của app nằm ở Supabase: Free giữ log 1 ngày (bảng điều khiển → Logs; CLI không có `supabase logs`; log drain
+  chỉ gói Pro) ⇒ hỏi lỗi cũ hơn 1 ngày thì nói thật là log đã hết. Ghi nguồn log vào `.claude/release.json`:
+  `"logs": { "source": "supabase", "retentionDays": 1 }`. Web tĩnh phát hành bằng Cloudflare Workers (assets) ⇒ bật thêm
+  `"observability": { "enabled": true }` trong cấu hình wrangler để xem log truy cập ở Workers Logs (Free giữ 3 ngày); nguồn chính vẫn là
+  supabase. Máy kiểm `log-secrets` của `flow check` quét log bài thử (`test-results/`, `playwright-report/`, `*.log`).
 - **DB thử:** máy KHÔNG có Docker (thường gặp trên Windows) ⇒ project Supabase thứ hai làm "test" (dev dùng luôn
   project này); mỗi làn tạo user thử email `<làn>-a@test.invalid`, `<làn>-b@test.invalid` và dọn sau test; migration đổi
   schema chạy MỘT làn một lúc. Có Docker ⇒ `supabase start` với `[experimental] stack = true`, mỗi worktree dữ liệu riêng.
