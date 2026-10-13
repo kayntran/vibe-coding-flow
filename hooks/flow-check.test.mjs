@@ -17,6 +17,8 @@ import { STACKS, detect, matches, roots } from './lib/stack.mjs'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const SCRIPT = path.join(HERE, 'flow-check.mjs')
 const IS_WIN = process.platform === 'win32'
+// Tắt bảo trì tự động của git (Mac: commit tách `git maintenance run --auto --detach` chạy nền ⇒ dọn thư mục tạm gặp ENOTEMPTY); xem flow-dispatch.test.mjs.
+Object.assign(process.env, { GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'maintenance.auto', GIT_CONFIG_VALUE_0: 'false', GIT_CONFIG_KEY_1: 'gc.auto', GIT_CONFIG_VALUE_1: '0' })
 
 const tmpDirs = []
 // Thư mục tạm có dấu cách + tiếng Việt: bắt lỗi quote đường dẫn.

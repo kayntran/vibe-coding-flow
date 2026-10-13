@@ -15,6 +15,9 @@ import { scanText } from './lib/secrets.mjs'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const SCRIPT = path.join(HERE, 'review-ext.mjs')
 const IS_WIN = process.platform === 'win32'
+// Tắt bảo trì tự động của git (Mac: commit tách `git maintenance run --auto --detach` chạy nền ⇒ dọn thư mục tạm gặp ENOTEMPTY); xem flow-dispatch.test.mjs.
+// withOddNames nối thêm chỉ số 2, không ghi đè hai khoá này.
+Object.assign(process.env, { GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'maintenance.auto', GIT_CONFIG_VALUE_0: 'false', GIT_CONFIG_KEY_1: 'gc.auto', GIT_CONFIG_VALUE_1: '0' })
 const R = { findings: [{ severity: 'MAJOR', summary: 's', path: 'a.js', line: 1, failure_scenario: 'f', fix: 'x' }], areas_checked: 'a' }
 // Ghép lúc chạy để file test không chứa nguyên chuỗi giống khoá thật (cổng commit quét chính file này).
 const AWS_KEY = 'AKIA' + 'QWERTYUIOPASDFGH'
@@ -227,9 +230,9 @@ function indexOnly(cwd, mode, file, content) {
 
 // Windows: git từ chối " / tab trong tên cả khi git archive (core.protectNTFS) ⇒ tắt qua env cho các git con, chỉ trong test cần tên lạ.
 async function withOddNames(fn) {
-  const keys = ['GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0']
+  const keys = ['GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_2', 'GIT_CONFIG_VALUE_2']
   const keep = keys.map((k) => [k, process.env[k]])
-  Object.assign(process.env, { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.protectNTFS', GIT_CONFIG_VALUE_0: 'false' })
+  Object.assign(process.env, { GIT_CONFIG_COUNT: '3', GIT_CONFIG_KEY_2: 'core.protectNTFS', GIT_CONFIG_VALUE_2: 'false' })
   try { return await fn() } finally { for (const [k, v] of keep) { if (v === undefined) delete process.env[k]; else process.env[k] = v } }
 }
 

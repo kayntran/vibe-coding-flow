@@ -16,6 +16,10 @@ import { claudeHooks, codexHooksJson } from './hooks/lib/hostgen.mjs'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const WIN32 = process.platform === 'win32'
 const posix = (p) => p.replaceAll('\\', '/')
+// Tắt bảo trì tự động của git (Mac: commit/pull tách `git maintenance run --auto --detach` chạy nền ⇒ dọn thư mục tạm gặp ENOTEMPTY); xem hooks/flow-dispatch.test.mjs.
+// process.env cho git của test; e2eEnv thêm riêng cho install.sh/install.ps1 (git pull).
+const NO_GIT_MAINT = { GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'maintenance.auto', GIT_CONFIG_VALUE_0: 'false', GIT_CONFIG_KEY_1: 'gc.auto', GIT_CONFIG_VALUE_1: '0' }
+Object.assign(process.env, NO_GIT_MAINT)
 
 // ---------- tiện ích ----------
 
@@ -647,6 +651,7 @@ function e2eEnv(home, pathDirs, extra = {}) {
     PATH: pathDirs.filter(Boolean).join(path.delimiter),
     VIBE_FLOW_NO_LOGIN_CHECK: '1',
     VIBE_FLOW_PATH_ONLY: '1', // máy thật có codex ở /opt/homebrew/bin không được tính là "máy có Codex"
+    ...NO_GIT_MAINT,
     ...extra,
   }
 }

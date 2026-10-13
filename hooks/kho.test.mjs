@@ -14,7 +14,11 @@ const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'kho.mjs'
 const TMP = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'kho-cli-')))
 after(() => fs.rmSync(TMP, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }))
 const CACHE = path.join(TMP, 'cache')
-const GENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_'))), GIT_CONFIG_NOSYSTEM: '1' }
+// Tắt bảo trì tự động của git (Mac: commit tách `git maintenance run --auto --detach` chạy nền ⇒ dọn thư mục tạm gặp ENOTEMPTY); xem flow-dispatch.test.mjs.
+const GENV = {
+  ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_'))), GIT_CONFIG_NOSYSTEM: '1',
+  GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'maintenance.auto', GIT_CONFIG_VALUE_0: 'false', GIT_CONFIG_KEY_1: 'gc.auto', GIT_CONFIG_VALUE_1: '0',
+}
 const ENV = { ...GENV, FLOW_CHI_HOC_DIR: CACHE, FLOW_KHO_CHO_LOCAL: '1' }
 let seq = 0
 const tmp = (name = 'p') => { const d = path.join(TMP, `${name}-${++seq}`); fs.mkdirSync(d, { recursive: true }); return d }

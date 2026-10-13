@@ -24,7 +24,11 @@ const MODS_DIR = path.join(HOME, '.claude', 'mods', 'so-chot')
 
 const GITCONF = path.join(TMP, 'gitconfig')
 fs.writeFileSync(GITCONF, '[user]\n\tname = t\n\temail = t@t.t\n[core]\n\tautocrlf = false\n[init]\n\tdefaultBranch = main\n[commit]\n\tgpgsign = false\n')
-const GENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_'))), GIT_CONFIG_GLOBAL: GITCONF, GIT_CONFIG_NOSYSTEM: '1' }
+// Tắt bảo trì tự động của git (Mac: commit tách `git maintenance run --auto --detach` chạy nền ⇒ dọn thư mục tạm gặp ENOTEMPTY); xem flow-dispatch.test.mjs.
+const GENV = {
+  ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_'))), GIT_CONFIG_GLOBAL: GITCONF, GIT_CONFIG_NOSYSTEM: '1',
+  GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'maintenance.auto', GIT_CONFIG_VALUE_0: 'false', GIT_CONFIG_KEY_1: 'gc.auto', GIT_CONFIG_VALUE_1: '0',
+}
 const git = (cwd, ...args) => spawnSync('git', args, { cwd, encoding: 'utf8', env: GENV })
 function gitOk(cwd, ...args) {
   const r = git(cwd, ...args)

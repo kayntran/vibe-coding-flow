@@ -14,7 +14,11 @@ after(() => fs.rmSync(TMP, { recursive: true, force: true, maxRetries: 5, retryD
 
 const GITCONF = path.join(TMP, 'gitconfig')
 fs.writeFileSync(GITCONF, '[user]\n\tname = t\n\temail = t@t.t\n[core]\n\tautocrlf = false\n[init]\n\tdefaultBranch = main\n[commit]\n\tgpgsign = false\n')
-const GENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_'))), GIT_CONFIG_GLOBAL: GITCONF, GIT_CONFIG_NOSYSTEM: '1' }
+// Tắt bảo trì tự động của git (Mac: commit/fetch tách `git maintenance run --auto --detach` chạy nền ⇒ dọn thư mục tạm gặp ENOTEMPTY); xem flow-dispatch.test.mjs.
+// Đặt cả vào process.env: lib/kho.mjs chạy trong tiến trình test, tự commit/fetch với process.env.
+const NO_MAINT = { GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'maintenance.auto', GIT_CONFIG_VALUE_0: 'false', GIT_CONFIG_KEY_1: 'gc.auto', GIT_CONFIG_VALUE_1: '0' }
+Object.assign(process.env, NO_MAINT)
+const GENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_'))), GIT_CONFIG_GLOBAL: GITCONF, GIT_CONFIG_NOSYSTEM: '1', ...NO_MAINT }
 function git(cwd, ...args) {
   const r = spawnSync('git', args, { cwd, encoding: 'utf8', env: GENV })
   assert.equal(r.status, 0, `git ${args.join(' ')}: ${r.stderr}${r.stdout}`)

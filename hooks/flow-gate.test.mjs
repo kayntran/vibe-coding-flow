@@ -10,7 +10,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import * as K from './lib/kho.mjs'
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'flow-gate.mjs')
-const ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')))
+// Tắt bảo trì tự động của git (Mac: commit/fetch tách `git maintenance run --auto --detach` chạy nền ⇒ dọn thư mục tạm gặp ENOTEMPTY); xem flow-dispatch.test.mjs.
+// Đặt cả vào process.env: K.lay (lib/kho.mjs) chạy trong tiến trình test, clone/fetch với process.env.
+const NO_MAINT = { GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'maintenance.auto', GIT_CONFIG_VALUE_0: 'false', GIT_CONFIG_KEY_1: 'gc.auto', GIT_CONFIG_VALUE_1: '0' }
+Object.assign(process.env, NO_MAINT)
+const ENV = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_'))), ...NO_MAINT }
 const roots = []
 
 after(() => {

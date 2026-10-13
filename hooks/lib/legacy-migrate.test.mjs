@@ -21,6 +21,8 @@ fs.writeFileSync(GITCONF, '[user]\n\tname = t\n\temail = t@t.t\n[core]\n\tautocr
 for (const k of Object.keys(process.env)) if (k.startsWith('GIT_')) delete process.env[k]
 process.env.GIT_CONFIG_GLOBAL = GITCONF
 process.env.GIT_CONFIG_NOSYSTEM = '1'
+// Tắt bảo trì tự động của git (Mac: commit tách `git maintenance run --auto --detach` chạy nền ⇒ dọn thư mục tạm gặp ENOTEMPTY); xem flow-dispatch.test.mjs.
+Object.assign(process.env, { GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'maintenance.auto', GIT_CONFIG_VALUE_0: 'false', GIT_CONFIG_KEY_1: 'gc.auto', GIT_CONFIG_VALUE_1: '0' })
 
 const L = await import('./so-chot.mjs')
 const M = await import('./legacy-migrate.mjs')
