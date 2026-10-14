@@ -8,8 +8,10 @@ description: Gộp nhánh worktree (một nhánh hoặc nhiều làn song song) 
 Chỉ chạy khi user đã gật trong chat. Nhánh chính tên `master`/khác ⇒ thay `main` tương ứng.
 
 ## Một nhánh
-1. Trong worktree: `git rebase main` (conflict xử lý trên branch) → `git reset --soft main && git commit`
-   (squash một commit, message theo quy ước dự án + dòng Co-Authored-By).
+1. Trong worktree: ghim đích MỘT lần `git rev-parse main` (= `<B>`; phiên khác có thể đẩy thêm vào main giữa chừng) →
+   `git rebase <B>` (conflict xử lý trên branch) → `git reset --soft <B>` → `git diff --cached --stat <B>` chỉ gồm file
+   của việc mình (lạ ⇒ dừng, đừng commit) → `git commit` (squash một commit, message theo quy ước dự án + dòng
+   Co-Authored-By). Phiên đang cô lập trong worktree: mỗi lệnh git một dòng, không `cd "$X" && git …` (harness từ chối).
 2. **Test ĐỦ BỘ ngay trong worktree sau rebase** (Agent `test-runner`, chạy qua
    `node ~/.claude/hooks/flow-gate.mjs stamp test -- <lệnh test đủ bộ>` để đóng **dấu test xanh** — hook chặn gộp nếu thiếu). Gộp là fast-forward nên đây chính là
    test trên `main` sau gộp. Đỏ ⇒ sửa trên branch, không gộp.

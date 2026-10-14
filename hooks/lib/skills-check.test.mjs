@@ -805,7 +805,8 @@ describe('check: có cả skill lẫn MCP', () => {
 
 describe('hooks/skills-check.mjs (CLI)', () => {
   const run = (sb, args, env = {}) => {
-    const base = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.toLowerCase() !== 'path'))
+    // Bỏ CODEX_HOME của máy (Orca đặt sẵn trỏ vào home tài khoản riêng) ⇒ test chỉ đọc HOME giả
+    const base = Object.fromEntries(Object.entries(process.env).filter(([k]) => !['path', 'codex_home'].includes(k.toLowerCase())))
     const r = spawnSync(process.execPath, [CLI, ...args], {
       encoding: 'utf8',
       cwd: sb.root,

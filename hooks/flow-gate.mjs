@@ -1537,6 +1537,35 @@ async function lanesStillOpen(info) {
   }
 }
 
+// Đánh dấu "stamp test đang chạy" của diff có patch-id `pid`: gatesDir/running-test-<pid>.json {pid: tiến trình stamp, ts: giờ bắt đầu, patchId}.
+// `stamp test` ghi lúc bắt đầu, xoá khi xong (finally); hookStop dựa vào đó để không đòi dấu trong lúc AI đang chờ chính lệnh ấy chạy nền.
+const RUNNING_MARK_MAX_MS = 2 * 60 * 60 * 1000 // quá 2 giờ ⇒ coi là bỏ dở (tránh trùng pid tiến trình cũ)
+const runningMarkFile = (info, pid) => path.join(info.gatesDir, `running-test-${pid}.json`)
+
+// `stamp test` của diff này còn đang chạy? Đánh dấu cũ (tiến trình chết, quá hạn, hỏng) ⇒ xoá và coi như không chạy.
+function stampTestRunning(info, pid) {
+  const file = runningMarkFile(info, pid)
+  let alive = false
+  try {
+    const m = JSON.parse(fs.readFileSync(file, 'utf8'))
+    if (Number.isInteger(m?.pid) && m.pid > 0 && Date.now() - Date.parse(m.ts) < RUNNING_MARK_MAX_MS) {
+      try {
+        process.kill(m.pid, 0) // tín hiệu 0 = chỉ hỏi tiến trình còn không
+        alive = true
+      } catch (e) {
+        alive = e?.code === 'EPERM' // còn sống nhưng của user khác; ESRCH = đã chết
+      }
+    }
+  } catch (e) {
+    if (e?.code === 'ENOENT') return false
+    log(`stampTestRunning: ${e?.message ?? e}`) // đọc hỏng ⇒ coi là đánh dấu cũ
+  }
+  if (!alive) {
+    try { fs.rmSync(file, { force: true }) } catch (e) { log(`stampTestRunning rm: ${e?.message ?? e}`) }
+  }
+  return alive
+}
+
 async function hookStop(input) {
   if (input.stop_hook_active) return null
   const info = repoInfo(input.cwd || process.cwd())
@@ -1547,6 +1576,7 @@ async function hookStop(input) {
   if (status === null || status.trim() !== '') return null
   const st = await tryGateState(info, base, 'HEAD')
   if (!st || st.missing.length === 0) return null
+  if (stampTestRunning(info, st.pid)) return null // AI đang chờ `stamp test` chạy nền: chưa tới lúc đòi dấu, khỏi thức một lượt vô ích
   if (await lanesStillOpen(info)) return null // đang thi công dở (còn làn "- [ ]"): chưa tới lúc đòi dấu review/qa/test
   const nudged = path.join(info.gatesDir, `nudged-${st.pid}`)
   if (fs.existsSync(nudged)) return null
@@ -1724,6 +1754,7 @@ function commandLine(tokens) {
 
 // stamp test -- <lệnh…>: chạy lệnh (shell) trong cwd, in output ra màn hình đồng thời ghi test-<pid>.log;
 // exit 0 ⇒ ghi test-<pid>.json {cmd, ts, durationMs}; exit ≠ 0 ⇒ không ghi dấu (gỡ dấu cũ của cùng diff) và thoát cùng mã.
+// Suốt lúc chạy có running-test-<pid>.json (xem stampTestRunning) để hook Stop không nhắc.
 async function cliStampTest(tokens) {
   if (tokens.length === 0) return fail('Dùng: stamp test -- <lệnh test đủ bộ>')
   const { info, base, pid, err } = cliContext()
@@ -1732,23 +1763,36 @@ async function cliStampTest(tokens) {
   const cmd = commandLine(tokens)
   const stamp = path.join(info.gatesDir, `test-${pid}.json`)
   fs.mkdirSync(info.gatesDir, { recursive: true })
-  const logFile = fs.createWriteStream(path.join(info.gatesDir, `test-${pid}.log`))
-  const started = Date.now()
-  const code = await new Promise((resolve) => {
-    const child = spawn(cmd, { shell: true, stdio: ['inherit', 'pipe', 'pipe'], windowsHide: true })
-    child.stdout.on('data', (d) => { process.stdout.write(d); logFile.write(d) })
-    child.stderr.on('data', (d) => { process.stderr.write(d); logFile.write(d) })
-    child.on('error', (e) => { process.stderr.write(`Không chạy được lệnh: ${e.message}\n`); resolve(1) })
-    child.on('close', (c) => resolve(c ?? 1)) // c = null khi bị signal giết
-  })
-  logFile.end()
-  if (code !== 0) {
-    fs.rmSync(stamp, { force: true })
-    process.exitCode = code
-    return
+  // Đánh dấu "đang chạy" để hook Stop không đòi dấu trong lúc AI chờ lệnh này; xoá trong finally (đạt, hỏng hay lỗi đều xoá).
+  // Bị giết cứng thì không kịp xoá ⇒ hookStop tự bỏ đánh dấu của tiến trình đã chết.
+  const running = runningMarkFile(info, pid)
+  fs.writeFileSync(running, JSON.stringify({ pid: process.pid, ts: new Date().toISOString(), patchId: pid }) + '\n')
+  try {
+    const logFile = fs.createWriteStream(path.join(info.gatesDir, `test-${pid}.log`))
+    const started = Date.now()
+    const code = await new Promise((resolve) => {
+      const child = spawn(cmd, { shell: true, stdio: ['inherit', 'pipe', 'pipe'], windowsHide: true })
+      child.stdout.on('data', (d) => { process.stdout.write(d); logFile.write(d) })
+      child.stderr.on('data', (d) => { process.stderr.write(d); logFile.write(d) })
+      child.on('error', (e) => { process.stderr.write(`Không chạy được lệnh: ${e.message}\n`); resolve(1) })
+      child.on('close', (c) => resolve(c ?? 1)) // c = null khi bị signal giết
+    })
+    logFile.end()
+    if (code !== 0) {
+      fs.rmSync(stamp, { force: true })
+      process.exitCode = code
+      return
+    }
+    fs.writeFileSync(stamp, JSON.stringify({ cmd, ts: new Date().toISOString(), durationMs: Date.now() - started }) + '\n') // dấu xong rồi mới gỡ đánh dấu ⇒ hookStop không có lúc thấy cả hai đều trống
+    console.log(pid)
+  } finally {
+    try {
+      // Chỉ gỡ đánh dấu của chính mình (hai lần stamp cùng diff chạy song song thì lần sau đè lên, lần trước xong không được gỡ nhầm).
+      if (JSON.parse(fs.readFileSync(running, 'utf8')).pid === process.pid) fs.rmSync(running, { force: true })
+    } catch (e) {
+      if (e?.code !== 'ENOENT') log(`stamp test: không gỡ được đánh dấu đang chạy: ${e?.message ?? e}`)
+    }
   }
-  fs.writeFileSync(stamp, JSON.stringify({ cmd, ts: new Date().toISOString(), durationMs: Date.now() - started }) + '\n')
-  console.log(pid)
 }
 
 async function cliStamp(kind, file) {

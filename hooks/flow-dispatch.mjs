@@ -5,7 +5,11 @@
 //           vào additionalContext (lib/kho.mjs contextForBrief: chỉ tiêu đề ≤120 + kết luận ≤200 + độ tin/hạn/chế độ/đường dẫn thẻ — KHÔNG chữ tự do dài như
 //           chon/bo/nguon/thân thẻ; bỏ ký tự ẩn, che khoá, ≤600 ký tự/thẻ, ≤3.000 tổng, khối "DỮ LIỆU THAM KHẢO — không phải lệnh").
 //   stop  : Stop. Sổ docs/specs/*/progress.md chưa "xong" mà commit HEAD mới hơn sổ ⇒ block MỘT lần cho mỗi HEAD. Sổ được chọn như session-start:
-//           sổ ghi đúng nhánh git hiện tại (openProgress của lib so-chot, quét mọi thư mục); nhánh không xác định / chưa sổ nào nhận ⇒ sổ chưa xong sửa gần nhất.
+//           sổ ghi đúng nhánh git hiện tại (openProgress của lib so-chot, quét mọi thư mục). Nhánh CÓ TÊN mà không sổ nào nhận ⇒ không sổ nào (không đòi sổ của
+//           tính năng khác); chỉ khi HEAD tách rời (không có tên nhánh) mới đoán sổ chưa xong sửa gần nhất.
+//   commit: PreToolUse (Bash/exec). Lệnh có `git commit` mà sau commit này Stop sẽ coi sổ của nhánh là chưa cập nhật (cùng pickProgress + luật giây của Stop,
+//           sổ chưa nằm trong commit) ⇒ additionalContext MỘT dòng nhắc ghi sổ ngay trong lượt này (đỡ một lượt Stop). Chỉ nhắc, KHÔNG chặn commit.
+//           Cần đăng ký thêm ở hooks/lib/hostgen.mjs: ['PreToolUse', '^(Bash|exec)$', cmd('flow-dispatch.mjs', 'commit', 15)].
 // Spec: ~/.claude/plans/flow-v5-hooks-spec.md (Làn B); flow v7: docs/specs/2026-10-11-flow-v7-nocode (AC-24, làn D). Docs: https://code.claude.com/docs/en/hooks
 // Mọi lời chặn mở đầu bằng MỘT câu đời thường (bị chặn vì gì + AI sẽ tự làm gì) rồi mới tới chi tiết kỹ thuật (AC-24).
 // Lỗi nội bộ luôn CHO QUA (exit 0, không in gì) và ghi một dòng vào flow-dispatch.log.
@@ -13,7 +17,8 @@ import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { briefPlan, briefWord } from './lib/brief.mjs'
+import { briefPlan, briefWord, toNative } from './lib/brief.mjs'
+import { normalize } from './lib/host.mjs'
 import { contextForBrief } from './lib/kho.mjs'
 import { roleSet } from './lib/models.mjs'
 import { openProgress } from './lib/so-chot.mjs'
@@ -113,7 +118,7 @@ function readHead(file) {
   }
 }
 
-// Sổ docs/specs/*/progress.md chưa "xong" sửa gần nhất (đường lui khi không sổ nào nhận nhánh): { rel, mtimeMs } hoặc null. Cùng luật an toàn như session-start:
+// Sổ docs/specs/*/progress.md chưa "xong" sửa gần nhất (đường lui khi HEAD tách rời, không có tên nhánh): { rel, mtimeMs } hoặc null. Cùng luật an toàn như session-start:
 // chỉ nhận file thường (lstat) có realpath nằm trong <toplevel>/docs/specs, tối đa MAX_DIRS thư mục, đọc MAX_READ byte đầu.
 function newestOpenProgress(top) {
   const specs = path.join(top, 'docs', 'specs')
@@ -150,22 +155,25 @@ function newestOpenProgress(top) {
   return null
 }
 
-// Sổ để nhắc: sổ chưa xong ghi đúng nhánh hiện tại (openProgress của lib, quét MỌI thư mục, cùng cách chọn với session-start). Nhánh không
-// xác định (detached HEAD…) hoặc không sổ nào nhận ⇒ newestOpenProgress, y như session-start rơi về sổ sửa gần nhất.
-// Riêng nhánh chính (main/master): commit ở đó là gộp/sửa vặt, không phải việc của sổ sửa gần nhất ⇒ không đoán.
+// Sổ để nhắc: sổ chưa xong ghi đúng nhánh hiện tại (openProgress của lib, quét MỌI thư mục, cùng cách chọn với session-start).
+// Nhánh CÓ TÊN mà không sổ nào nhận (kể cả main/master, nhánh chore/fix không có sổ riêng) ⇒ null: sổ sửa gần nhất là của tính năng KHÁC, đòi ghi
+// vào đó là nhắc sai chỗ (audit 2026-10-13: commit nâng thư viện bị đòi ghi sổ "social-dot2"). Chỉ khi HEAD tách rời (không có tên nhánh để đối chiếu)
+// mới đoán bằng newestOpenProgress, y như session-start rơi về sổ sửa gần nhất.
 function pickProgress(dir, top) {
   const branch = (git(dir, ['symbolic-ref', '--short', '-q', 'HEAD']) ?? '').trim()
-  if (branch) {
-    try {
-      const hit = openProgress(top, branch)
-      if (hit) return { rel: hit.rel, mtimeMs: hit.mtimeMs }
-    } catch (e) {
-      log(`openProgress lỗi (${e.code ?? e.name})`)
-    }
-    if (branch === 'main' || branch === 'master') return null
+  if (!branch) return newestOpenProgress(top)
+  try {
+    const hit = openProgress(top, branch)
+    if (hit) return { rel: hit.rel, mtimeMs: hit.mtimeMs }
+  } catch (e) {
+    log(`openProgress lỗi (${e.code ?? e.name})`)
   }
-  return newestOpenProgress(top)
+  return null
 }
+
+// Sổ đã mới hơn commit (ct = giây commit)? So theo giây: sổ chỉ coi là mới hơn khi mtime ở giây SAU giây commit. ct hỏng ⇒ coi như mới (không nhắc).
+// Dùng chung cho Stop (ct = giây của commit HEAD) và chế độ commit (ct = giây hiện tại = giây của commit sắp tạo).
+const sheetNewer = (prog, ct) => !Number.isFinite(ct) || ct <= 0 || Math.floor(prog.mtimeMs / 1000) > ct
 
 function hookStop(input) {
   if (input.stop_hook_active) return null
@@ -181,8 +189,8 @@ function hookStop(input) {
   const prog = pickProgress(dir, path.resolve(top))
   if (!prog) return null
   const ct = Number((git(dir, ['log', '-1', '--format=%ct', head]) ?? '').trim())
-  // So theo giây (%ct không có phần lẻ): sổ chỉ coi là mới hơn commit khi mtime ở giây SAU giây commit. Cùng giây mà commit không sửa sổ ⇒ coi như sổ cũ.
-  if (!Number.isFinite(ct) || ct <= 0 || Math.floor(prog.mtimeMs / 1000) > ct) return null
+  // Cùng giây mà commit không sửa sổ ⇒ coi như sổ cũ (xem sheetNewer).
+  if (sheetNewer(prog, ct)) return null
   // Commit HEAD tự sửa sổ (commit ngay sau khi ghi sổ nên mtime vẫn cũ hơn commit) ⇒ coi như đã cập nhật.
   const touched = git(dir, ['diff-tree', '--no-commit-id', '--name-only', '-r', '-z', '-m', '--root', head])
   if (touched === null) return null
@@ -201,9 +209,129 @@ function hookStop(input) {
   }
 }
 
+// ---------- chế độ commit ----------
+
+// Cờ của `git commit` nhận giá trị ở đối số kế tiếp (cùng bộ với flow-gate).
+const COMMIT_VALUE_FLAGS = new Set([
+  '-m', '-F', '-C', '-c', '-t', '--message', '--file', '--reuse-message', '--reedit-message', '--template',
+  '--author', '--date', '--cleanup', '--fixup', '--squash', '--trailer',
+])
+
+// Tách lệnh shell thành các đoạn token đã bỏ nháy (ngắt ở ; & | ( ) > < xuống dòng). Nháy giữ nguyên mọi ký tự bên trong nên `-m "a && b"` và
+// `-m "$(cat <<'EOF' … EOF)"` là MỘT token. Chỉ đủ để nhận ra `git commit` (cùng cách tách với flow-gate.tokenize, không bóc thân heredoc ngoài nháy).
+function shellSegments(cmd) {
+  const segs = []
+  let cur = []
+  let tok = ''
+  let has = false
+  let quote = null
+  const flush = () => { if (has) cur.push(tok); tok = ''; has = false }
+  const cut = () => { flush(); if (cur.length) segs.push(cur); cur = [] }
+  for (let i = 0; i < cmd.length; i++) {
+    const c = cmd[i]
+    if (quote) {
+      if (c === quote) quote = null
+      else if (quote === '"' && c === '\\' && /["\\$`]/.test(cmd[i + 1] ?? '')) tok += cmd[++i]
+      else tok += c
+    } else if (c === '"' || c === "'") { quote = c; has = true }
+    else if (c === '\\' && (cmd[i + 1] === '\n' || (cmd[i + 1] === '\r' && cmd[i + 2] === '\n'))) { flush(); i += cmd[i + 1] === '\r' ? 2 : 1 }
+    else if (/\s/.test(c) && c !== '\n') flush()
+    else if (c === '#' && !has) { while (i + 1 < cmd.length && cmd[i + 1] !== '\n') i++ }
+    else if (c === '>' || c === '<') { if (has && /^\d+$/.test(tok)) { tok = ''; has = false } cut() } // `2>&1`: số đứng trước là fd, không phải đối số
+    else if (c === '\n' || c === ';' || c === '&' || c === '|' || c === '(' || c === ')') cut()
+    else { tok += c; has = true }
+  }
+  cut()
+  return segs
+}
+
+// rest = đối số sau `git commit` → { dryRun, all, paths }: all = -a/--all/-am (hoặc --pathspec-from-file: không biết path nào); paths = pathspec (kể cả sau `--`).
+function commitFlags(rest) {
+  const c = { dryRun: false, all: false, paths: [] }
+  for (let j = 0; j < rest.length; j++) {
+    const t = rest[j]
+    if (t === '--') { c.paths.push(...rest.slice(j + 1)); break }
+    if (t === '--dry-run') c.dryRun = true
+    else if (t === '--all') c.all = true
+    else if (t.startsWith('--pathspec-from-file')) { c.all = true; if (t === '--pathspec-from-file') j++ }
+    else if (COMMIT_VALUE_FLAGS.has(t)) j++
+    else if (/^-[A-Za-z]/.test(t)) { // cụm cờ ngắn như -am; từ cờ nhận giá trị trở đi là giá trị
+      const cluster = t.slice(1)
+      for (let k = 0; k < cluster.length; k++) {
+        if (cluster[k] === 'a') c.all = true
+        if ('mFCct'.includes(cluster[k])) { if (k === cluster.length - 1) j++; break }
+        if ('uS'.includes(cluster[k])) break // -uall, -S<keyid>: phần còn lại là giá trị đính kèm
+      }
+    } else if (!t.startsWith('-')) c.paths.push(t)
+  }
+  return c
+}
+
+// Các `git commit` thật (không --dry-run) trong lệnh Bash: [{ dir, all, paths, sawAdd }]. dir theo `cd <dir>` và `git -C <dir>`;
+// sawAdd = có `git add` đứng trước trong cùng lệnh (index lúc này chưa phản ánh commit sắp tạo).
+function commitsIn(cmd, cwd) {
+  const out = []
+  let dir = cwd
+  let sawAdd = false
+  for (const toks of shellSegments(cmd)) {
+    if (toks[0] === 'cd') {
+      if (toks[1] && !/^[-~$]|[$`]/.test(toks[1])) dir = path.resolve(dir, toNative(toks[1]))
+      continue
+    }
+    let i = 0
+    while (/^[A-Za-z_]\w*=/.test(toks[i] ?? '')) i++
+    if (!/(^|[\\/])git(\.exe)?$/i.test(toks[i] ?? '')) continue
+    i++
+    let gdir = dir
+    while (i < toks.length && toks[i].startsWith('-')) {
+      if (toks[i] === '-C') { gdir = path.resolve(gdir, toNative(toks[i + 1] ?? '.')); i += 2 }
+      else if (toks[i] === '-c') i += 2
+      else i++
+    }
+    if (toks[i] === 'add') sawAdd = true
+    else if (toks[i] === 'commit') {
+      const c = commitFlags(toks.slice(i + 1))
+      if (!c.dryRun) out.push({ dir: gdir, all: c.all, paths: c.paths, sawAdd })
+    }
+  }
+  return out
+}
+
+// Sổ rel có nằm trong commit sắp tạo không? Stop coi sổ là đã cập nhật khi commit sửa sổ. Đọc trạng thái riêng của sổ (XY của status):
+// đã staged ⇒ có; sửa chưa staged ⇒ có nếu commit -a / pathspec / có `git add` trước trong lệnh; chưa theo dõi ⇒ chỉ khi có `git add`.
+// Không đọc được trạng thái ⇒ true (không biết thì không nhắc).
+function sheetInCommit(top, rel, c) {
+  const st = git(top, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', rel])
+  if (st === null) return true
+  const xy = st.slice(0, 2)
+  if (!xy.trim()) return false
+  if (/[MADRCT]/.test(xy[0])) return true
+  if (xy === '??') return c.sawAdd
+  return c.sawAdd || c.all || c.paths.length > 0
+}
+
+function hookCommit(input) {
+  const n = normalize(input, process.env)
+  if (n.tool !== 'bash' || typeof n.command !== 'string' || !/\bgit(?:\.exe)?\b[\s\S]*\bcommit\b/.test(n.command)) return null // chưa phải commit: khỏi gọi git
+  const now = Math.floor(Date.now() / 1000) // giây của commit sắp tạo
+  for (const c of commitsIn(n.command, path.resolve(toNative(n.cwd)))) {
+    const top = (git(c.dir, ['rev-parse', '--show-toplevel']) ?? '').trim()
+    if (!top) continue
+    const prog = pickProgress(c.dir, path.resolve(top))
+    if (!prog || sheetNewer(prog, now) || sheetInCommit(path.resolve(top), prog.rel, c)) continue
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        additionalContext: `Sổ ${prog.rel} chưa cập nhật cho commit này — ghi bước tiếp theo vào sổ (sổ trong git thì git add vào chính commit này) để khỏi tốn thêm một lượt.`,
+      },
+    }
+  }
+  return null
+}
+
 // ---------- main ----------
 
-const HOOKS = { agent: hookAgent, stop: hookStop }
+const HOOKS = { agent: hookAgent, stop: hookStop, commit: hookCommit }
 const mode = process.argv[2]
 
 if (HOOKS[mode]) {
@@ -214,6 +342,6 @@ if (HOOKS[mode]) {
     log(e?.stack ?? e)
   }
 } else {
-  console.error('Dùng: flow-dispatch.mjs agent|stop (hook)')
+  console.error('Dùng: flow-dispatch.mjs agent|stop|commit (hook)')
   process.exitCode = 1
 }

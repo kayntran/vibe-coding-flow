@@ -100,6 +100,104 @@ describe('scanLine: giữ nguyên hành vi của flow-gate', () => {
   })
 })
 
+describe('url-credential: chuỗi DB cục bộ với mật khẩu mẫu (test, ghi chú, README)', () => {
+  // Ghép lúc chạy: file test này không được chứa nguyên một URL có mật khẩu để bộ quét của kit khỏi chặn chính nó.
+  const url = (pw, host, user = 'u', scheme = 'postgres') => [scheme, '://', user, ':', pw, '@', host].join('')
+  const SAMPLE_PWS = ['postgres', 'password', 'pass', 'test', 'example', 'secret', 'changeme', 'root', 'admin', 'user', 'dev']
+  const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]', '::1', '0.0.0.0']
+
+  test('host cục bộ + mật khẩu mẫu phổ biến (mọi kiểu hoa/thường, có cổng/đường dẫn) ⇒ không báo', () => {
+    for (const host of LOCAL_HOSTS) {
+      for (const pw of SAMPLE_PWS) {
+        for (const p of [pw, pw.toUpperCase(), pw[0].toUpperCase() + pw.slice(1)]) {
+          for (const tail of ['', ':5432/db', '/db?sslmode=disable']) {
+            const line = `DATABASE_URL=${url(p, host + tail, 'postgres')}`
+            assert.deepEqual(scanLine(line), [], line.replace(p, '***'))
+          }
+        }
+      }
+    }
+    assert.deepEqual(scanLine('# ví dụ: ' + url('postgres', 'LOCALHOST:5432/db', 'postgres', 'mysql') + ' (chạy docker)'), [])
+    assert.deepEqual(scanLine('"' + url('postgres', '127.0.0.1:5432/db', 'postgres') + '"'), [])
+    assert.deepEqual(scanLine('{"u": "' + url('postgres', 'localhost:5432/db', 'postgres') + '"},'), [])
+    assert.deepEqual(scanLine('(xem ' + url('postgres', 'localhost/db') + ')'), [])
+  })
+
+  test('host thật + mật khẩu mẫu ⇒ VẪN báo', () => {
+    for (const pw of ['postgres', 'changeme', 'secret123', 'example1']) {
+      for (const host of ['db.example.com', '10.0.0.5:5432/db', 'prod-db.internal']) {
+        const hits = scanLine('x = ' + url(pw, host))
+        assert.deepEqual(names(hits), ['url-credential'], `${pw} @ ${host}`)
+      }
+    }
+  })
+
+  test('host cục bộ + mật khẩu không thuộc danh sách mẫu (ngẫu nhiên, dài) ⇒ VẪN báo', () => {
+    for (const pw of ['hunter22pass', 'Zx9fQ2vLm8TpWk4N', 'postgres123', 'passwordX1']) {
+      for (const host of LOCAL_HOSTS) {
+        const hits = scanLine('x = ' + url(pw, host + ':5432/db'))
+        assert.deepEqual(names(hits), ['url-credential'], `${pw.slice(0, 2)}… @ ${host}`)
+      }
+    }
+  })
+
+  test('host na ná cục bộ (tên miền con, sau dấu @ thứ hai, thêm chữ số) ⇒ VẪN báo', () => {
+    for (const host of ['localhost.evil.example/db', '127.0.0.1.nip.io:5432', 'localhost-prod.example', '127.0.0.10', 'localhost@evil.example', 'localhost:5432@evil.example', 'localhosts']) {
+      assert.deepEqual(names(scanLine(url('postgres', host))), ['url-credential'], host)
+    }
+  })
+
+  test('review Codex: mật khẩu chứa "@" làm host thật nằm sau "@" cuối (localhost giả có dấu chấm cuối…) ⇒ VẪN báo', () => {
+    for (const host of ['localhost.@evil.example/db', 'localhost.@evil.example', '127.0.0.1.@evil.example:5432/db', 'localhost:@evil.example',
+      'localhost.:5432@evil.example', '[::1].@evil.example', 'localhost.', 'localhost#@evil.example', 'localhost?@evil.example']) {
+      assert.deepEqual(names(scanLine(url('postgres', host))), ['url-credential'], host)
+    }
+  })
+
+  test('review Grok: query đè host/mật khẩu, danh sách host bằng dấu phẩy, khoảng trắng Unicode, "@" xa quá 64 ký tự ⇒ VẪN báo', () => {
+    for (const host of ['127.0.0.1:5432/app?host=prod-db.example.com&password=x', 'localhost/db?sslmode=disable&HostAddr=10.0.0.5',
+      'localhost/db?user=admin', 'localhost:5432/db?Port=6543', 'localhost/db?service=prod', 'localhost,db.prod.example:5432/app',
+      'localhost:5432,10.0.0.5:5432/app', 'localhost,@db.prod.example:5432/app', 'localhost ,db.prod.example',
+      'localhost　,db.prod.example', 'localhost﻿,db.prod.example', 'localhost ,db.prod.example',
+      'localhost/' + 'a'.repeat(80) + '@evil.example', 'localhost;db.prod.example', 'localhost),db.prod.example']) {
+      assert.deepEqual(names(scanLine(url('postgres', host))), ['url-credential'], host)
+    }
+  })
+
+  test('review Grok lượt 3: tên khoá query mã hoá %XX, cắt ở < > `, mật khẩu chữ "password" kèm query/phẩy/@ ⇒ VẪN báo', () => {
+    for (const pw of ['postgres', 'password']) {
+      for (const host of ['127.0.0.1:5432/app?%70assword=x&ho%73t=db.prod.example', 'localhost/db?%68ostaddr=10.0.0.5', 'localhost/db?ssl%70assword=x',
+        'localhost<,db.prod.example:5432/app', '127.0.0.1/db<?host=db.prod.example&password=x', 'localhost>,db.prod.example', 'localhost`,db.prod.example',
+        'localhost<' + 'a'.repeat(80) + '@evil.example', 'localhost/db?host=db.prod.example&password=x', 'localhost,db.prod.example',
+        'localhost ,db.prod.example', 'localhost/' + 'a'.repeat(80) + '@evil.example', 'proxy.local:8080/?password=x', 'proxy.local,evil.example']) {
+        assert.deepEqual(names(scanLine(url(pw, host))), ['url-credential'], `${pw} @ ${host}`)
+      }
+    }
+  })
+
+  test('review Grok lượt 4: tab/CR/FF/VT giữa URL (WHATWG xoá rồi nối tiếp), dấu cách rồi phần nối host/query ⇒ VẪN báo', () => {
+    for (const pw of ['postgres', 'password']) {
+      for (const host of ['localhost\t.evil.example/db', 'localhost\r.evil.example/db', 'localhost/db?sslmode=disable\t&host=db.prod.example&password=x',
+        'localhost\t,db.prod.example:5432/app', 'localhost\f&host=x', 'localhost\v.evil.example', 'localhost/db?sslmode=disable &host=db.prod.example',
+        'localhost .evil.example', 'localhost, db.prod.example', 'localhost ?host=x']) {
+        assert.deepEqual(names(scanLine(url(pw, host))), ['url-credential'], `${pw} @ ${JSON.stringify(host)}`)
+      }
+    }
+    assert.deepEqual(scanLine(url('postgres', 'localhost:5432/db') + ' # chạy docker'), [])
+  })
+
+  test('một dòng có cả chuỗi cục bộ (miễn) lẫn chuỗi host thật ⇒ chỉ báo chuỗi thật', () => {
+    const line = url('postgres', 'localhost:5432/db') + ' ; ' + url('postgres', 'db.example.com/app')
+    const hits = scanLine(line)
+    assert.deepEqual(names(hits), ['url-credential'])
+    assert.ok(hits[0].index > line.indexOf(' ; '), 'báo nhầm chuỗi cục bộ')
+  })
+
+  test('miễn trừ cũ ":password@" ở host nào cũng giữ nguyên', () => {
+    assert.deepEqual(scanLine('proxy = ' + url('password', 'proxy.local:8080', 'user', 'http')), [])
+  })
+})
+
 describe('mẫu mới (AC-11)', () => {
   test('Stripe sk_live_ / rk_live_ bị báo; pk_live_ (công khai) và chữ x giữ chỗ thì không', () => {
     assert.deepEqual(names(scanLine(`STRIPE=${STRIPE_LIVE}`)), ['stripe'])

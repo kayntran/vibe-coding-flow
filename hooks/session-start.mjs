@@ -1,4 +1,7 @@
-// SessionStart (startup|resume|clear|compact): ghép additionalContext từ sáu phần, rỗng thì không in gì. Tổng ≤ 8.500 ký tự (SPEC AC10).
+// SessionStart (startup|resume|clear|compact): ghép additionalContext từ bảy phần, rỗng thì không in gì. Tổng ≤ 8.500 ký tự (SPEC AC10).
+//  -1. Nhắc luật ngôn ngữ (audit 2026-10-13, CHỈ source compact|resume, đứng ĐẦU tiên): bản tóm tắt nén viết tiếng Anh làm phiên chuyển sang trả lời user bằng tiếng Anh.
+//      Chép nguyên văn dòng đầu tiên chứa "Ngôn ngữ" của ~/.claude/CLAUDE.md thành "Nhắc lại sau khi nén: <dòng>". Không có file / không có dòng ⇒ không thêm gì.
+//      Tính vào trần tổng TRƯỚC các phần khác (sổ chốt co lại nhường chỗ), nên không bao giờ bị cắt.
 //   0. Lời nhắc an toàn (v7, mỗi cái một dòng, đứng đầu): đang ở Devin Local (AC-41) · MCP có khoá gõ thẳng, CHỈ nêu tên server (AC-28) ·
 //      file luật của dự án có ký tự ẩn, nêu file:dòng (AC-28). Hook chỉ đọc; không bao giờ in giá trị khoá hay nội dung dòng có ký tự ẩn.
 //   1. Sổ tiến độ: sổ docs/specs/*/progress.md chưa `Trạng thái: xong` ghi đúng nhánh git hiện tại (openProgress của lib so-chot, quét mọi thư mục);
@@ -54,6 +57,9 @@ const RULE_DIRS = [ // [thư mục trong dự án, điều kiện tên file cầ
 ]
 const WALK_LIMIT = 2000 // số mục tối đa duyệt trong mỗi thư mục luật/skill
 const WALK_DEPTH = 6
+const LANG_MARK = 'Ngôn ngữ'
+const LANG_PREFIX = 'Nhắc lại sau khi nén: '
+const LANG_MAX = 400 // dòng luật ngôn ngữ thật chỉ ~150 ký tự; trần này chỉ để file lạ không ăn hết chỗ của các phần khác
 const MCP_REMINDER = 'Đã đủ 30 ngày log MCP: chạy node ~/.claude/hooks/mcp-usage.mjs report, đưa user danh sách MCP không dùng để quyết tắt (không tự tắt).'
 // Dòng `Trạng thái: xong` (chấp nhận markdown bao quanh như `- **Trạng thái:** xong`), không phân biệt hoa thường.
 const DONE_RE = /^[ \t>*_#-]*Trạng thái[ \t]*[:：]?[ \t*_]*[:：]?[ \t*_]*xong[ \t*_.!]*$/imu
@@ -271,6 +277,31 @@ function dueSection(cwd, top) {
   return ''
 }
 
+// ---------- nhắc luật ngôn ngữ sau khi nén ----------
+
+// CLAUDE.md toàn cục là file của chính user (không phải dữ liệu repo): đi theo symlink được. Chưa có file ⇒ chuyện bình thường, không ghi log.
+function langRecall(source) {
+  if (source !== 'compact' && source !== 'resume') return ''
+  let fd
+  try {
+    fd = fs.openSync(path.join(os.homedir(), '.claude', 'CLAUDE.md'), 'r')
+  } catch (e) {
+    if (e.code === 'ENOENT' || e.code === 'ENOTDIR') return ''
+    throw e
+  }
+  let text
+  try {
+    if (!fs.fstatSync(fd).isFile()) return ''
+    const buf = Buffer.alloc(MAX_READ)
+    text = buf.toString('utf8', 0, fs.readSync(fd, buf, 0, MAX_READ, 0)).replace(/^﻿/, '')
+  } finally {
+    fs.closeSync(fd)
+  }
+  const line = text.normalize('NFC').split(/\r?\n/).find((l) => l.includes(LANG_MARK))?.trim()
+  if (!line) return ''
+  return LANG_PREFIX + (line.length > LANG_MAX ? `${line.slice(0, LANG_MAX - 1)}…` : line)
+}
+
 // ---------- lời nhắc an toàn (v7) ----------
 
 // Tên server / đường dẫn lấy từ file trong repo (không đáng tin): chỉ giữ chữ an toàn, một dòng, có độ dài trần ⇒ không dùng để cài lời lẽ vào context.
@@ -390,6 +421,7 @@ try {
     logErr(`stdin không đọc/parse được (${errTag(e)})`)
   }
   const repo = repoInfo(cwd)
+  const lang = safe('nhắc ngôn ngữ', () => langRecall(input?.source))
   const notices = [
     safe('devin', () => hostNotice(input)),
     safe('khoá MCP', () => mcpKeyNotice(cwd, repo?.top)),
@@ -399,10 +431,10 @@ try {
   const mcp = safe('mcp', mcpSection)
   const upd = safe('cập nhật công cụ', updatesSection)
   const due = safe('nhắc sau phát hành', () => dueSection(cwd, repo?.top))
-  // Sổ chốt lấy phần trần còn lại sau lời nhắc an toàn + tiến độ + nhắc MCP + nhắc sau phát hành + nhắc cập nhật (và các dòng trống ngăn cách giữa các phần) ⇒ tổng luôn ≤ TOTAL_CAP.
-  const room = TOTAL_CAP - notices.length - progress.length - mcp.length - due.length - upd.length - (notices ? 2 : 0) - (progress ? 2 : 0) - (mcp ? 2 : 0) - (due ? 2 : 0) - (upd ? 2 : 0)
+  // Sổ chốt lấy phần trần còn lại sau nhắc ngôn ngữ + lời nhắc an toàn + tiến độ + nhắc MCP + nhắc sau phát hành + nhắc cập nhật (và các dòng trống ngăn cách giữa các phần) ⇒ tổng luôn ≤ TOTAL_CAP.
+  const room = TOTAL_CAP - lang.length - notices.length - progress.length - mcp.length - due.length - upd.length - (lang ? 2 : 0) - (notices ? 2 : 0) - (progress ? 2 : 0) - (mcp ? 2 : 0) - (due ? 2 : 0) - (upd ? 2 : 0)
   const chot = repo ? safe('so-chot', () => excerpt(repo.top, { branch: repo.branch, budget: room })) : ''
-  const parts = [notices, progress, chot, mcp, due, upd].filter(Boolean)
+  const parts = [lang, notices, progress, chot, mcp, due, upd].filter(Boolean)
   if (parts.length) {
     process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: parts.join('\n\n') } }))
   }

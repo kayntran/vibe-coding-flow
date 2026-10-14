@@ -836,6 +836,68 @@ describe('AC8c đường dẫn trong thư mục dự án', () => {
   })
 })
 
+// Lỗi audit 2026-10-13: tính năng VỪA TẠO trong một worktree chỉ có docs/specs/<tên> ở worktree đó, mà phiên chạy ở thư mục chính
+// ⇒ ghi() báo "không hợp lệ". pham_vi hợp lệ nếu thư mục có trong docs/specs của gốc HOẶC của bất kỳ worktree nào cùng repo.
+describe('pham_vi là thư mục tính năng chỉ có trong worktree khác của cùng repo', () => {
+  function repoWithWorktree(tag) {
+    const main = repo(tag)
+    write(main, 'README.md', 'x\n')
+    gitOk(main, 'add', '-A')
+    gitOk(main, 'commit', '-qm', 'base')
+    const wt = path.join(TMP, `${tag}-wt-${++seq}`)
+    gitOk(main, 'worktree', 'add', '-q', '-b', `b-${seq}`, wt)
+    return { main, wt: fs.realpathSync(wt) }
+  }
+
+  test('spec chỉ có trong worktree ⇒ ghi() ở thư mục chính được; file sổ chốt vẫn nằm ở thư mục chính', () => {
+    const { main, wt } = repoWithWorktree('wtspec')
+    spec(wt, '2026-10-13-abc')
+    assert.equal(exists(main, 'docs/specs/2026-10-13-abc'), false)
+    const d = L.ghi(main, { tom_tat: 'Chọn SQLite', pham_vi: '2026-10-13-abc' })
+    assert.equal(d.pham_vi, '2026-10-13-abc')
+    assert.equal(d.file, `2026-10-13-abc/${d.ma}-chon-sqlite.md`)
+    assert.ok(exists(main, `.claude/so-chot/${d.file}`))
+    assert.equal(exists(wt, '.claude'), false) // nơi ghi giữ nguyên: không rơi vào worktree
+  })
+
+  test('chạy ở worktree, spec chỉ có ở thư mục chính ⇒ cũng ghi được (đối xứng)', () => {
+    const { main, wt } = repoWithWorktree('wtspec-rev')
+    spec(main, '2026-10-13-chinh')
+    const d = L.ghi(wt, { tom_tat: 'Chọn Redis', pham_vi: '2026-10-13-chinh' })
+    assert.ok(exists(wt, `.claude/so-chot/${d.file}`))
+  })
+
+  test('tên không có ở gốc lẫn mọi worktree ⇒ vẫn báo không hợp lệ, không tạo gì; thư mục tên trùng nhưng là file ⇒ cũng không', () => {
+    const { main, wt } = repoWithWorktree('wtspec-none')
+    spec(wt, '2026-10-13-abc')
+    write(wt, 'docs/specs/la-file', 'không phải thư mục\n')
+    for (const bad of ['2026-10-13-khong-co', 'la-file']) {
+      assert.throws(() => L.ghi(main, { tom_tat: 'x', pham_vi: bad }), /phạm vi.*không hợp lệ/, bad)
+    }
+    assert.equal(exists(main, '.claude'), false)
+  })
+
+  test("tên có '..', dấu phân cách, đường dẫn tuyệt đối ⇒ vẫn từ chối dù worktree có spec", () => {
+    const { main, wt } = repoWithWorktree('wtspec-bad')
+    spec(wt, '2026-10-13-abc')
+    spec(path.dirname(wt), 'x') // thư mục anh em của worktree, không thuộc docs/specs của ai
+    const bads = ['..', '../x', '../../x', '2026-10-13-abc/..', 'chung/../2026-10-13-abc', `../${path.basename(wt)}/docs/specs/2026-10-13-abc`, path.join(wt, 'docs', 'specs', '2026-10-13-abc'), 'a\\b', '.git']
+    for (const bad of bads) assert.throws(() => L.ghi(main, { tom_tat: 'x', pham_vi: bad }), /phạm vi/, bad)
+    assert.equal(exists(main, '.claude'), false)
+  })
+
+  test('không phải repo git ⇒ hành vi cũ: chỉ xét docs/specs của gốc, kể cả khi có repo khác cạnh bên', () => {
+    const { wt } = repoWithWorktree('wtspec-other')
+    spec(wt, '2026-10-13-chi-o-repo-khac')
+    const plain = path.join(TMP, `khong-git-${++seq}`)
+    fs.mkdirSync(plain)
+    spec(plain, '2026-10-13-co')
+    assert.equal(L.ghi(plain, { tom_tat: 'ok', pham_vi: '2026-10-13-co' }).pham_vi, '2026-10-13-co')
+    assert.throws(() => L.ghi(plain, { tom_tat: 'x', pham_vi: '2026-10-13-chi-o-repo-khac' }), /phạm vi/)
+    assert.throws(() => L.ghi(plain, { tom_tat: 'x', pham_vi: '2026-10-13-khong-co' }), /phạm vi/)
+  })
+})
+
 describe('AC10–12 khẩu phần nạp', () => {
   // 2.000 quyết định: 150 chung đang dùng · 300 ⚠️ (chung 100, f2 150, f3 50) · f1: 100 đang dùng + 10 ⚠️ + 30 đã cất · f2: 710 · f3: 700 đã cất.
   function big() {

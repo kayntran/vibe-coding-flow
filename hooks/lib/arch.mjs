@@ -510,7 +510,7 @@ function nearestTsconfig(dir, parts) {
 function depcruiseConfig(dir, parts) {
   const forbidden = [
     { name: 'no-circular', severity: 'error', comment: 'Hai file import vòng tròn nhau. Cách sửa: tách phần dùng chung của chúng ra file thứ ba, rồi cả hai cùng import file đó.', from: {}, to: { circular: true } },
-    { name: 'not-to-unresolvable', severity: 'error', comment: 'Import một file hoặc gói không tìm thấy. Cách sửa: sửa lại đường dẫn import, hoặc cài gói còn thiếu bằng npm i.', from: {}, to: { couldNotResolve: true, pathNot: ['^virtual:', '\\?(raw|url|inline|worker)$'] } },
+    { name: 'not-to-unresolvable', severity: 'error', comment: 'Import một file hoặc gói không tìm thấy. Cách sửa: sửa lại đường dẫn import, hoặc cài gói còn thiếu bằng npm i.', from: {}, to: { couldNotResolve: true, pathNot: ['^virtual:', '^cloudflare:', '^astro:', '^node:', '^bun:', '\\?(raw|url|inline|worker)$'] } },
   ]
   for (const part of parts) {
     const byName = new Map(part.modules.map((m) => [m.name, m]))

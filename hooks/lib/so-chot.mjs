@@ -23,6 +23,7 @@
 // nhỏ hơn mặc định thì mọi khẩu phần co theo tỉ lệ. Trường hợp xấu nhất mặc định ≈ 6.470 ký tự.
 //
 // CLI: node so-chot.mjs <gen|excerpt|ghi|tim|y-tuong|da-xem|huy|close> <projectRoot> [json|-]  → stdout JSON, exit 0; lỗi ⇒ exit 1 + một dòng stderr.
+import { spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -471,10 +472,27 @@ export function suKienYTuong(projectRoot, ma, { lam, bo } = {}, opts = {}) {
 
 // ---------- quét + phân tích ----------
 
+const validSpecName = (name) => typeof name === 'string' && !!name && !name.startsWith('.') && !/[\\/:*?"<>|\0]/.test(name)
+
 function isSpecDir(root, name) {
-  if (typeof name !== 'string' || !name || name.startsWith('.') || /[\\/:*?"<>|\0]/.test(name)) return false
+  if (!validSpecName(name)) return false
   const abs = safePath(root, `${SPECS_REL}/${name}`)
   return !!abs && !!lstatSafe(abs)?.isDirectory()
+}
+
+// Gốc của mọi worktree cùng repo với `root` (git worktree list --porcelain chạy ở root). Lỗi git / không phải repo ⇒ [].
+function worktreeRoots(root) {
+  const r = spawnSync('git', ['-c', 'core.quotepath=off', 'worktree', 'list', '--porcelain'], { cwd: root, encoding: 'utf8', timeout: 5000, windowsHide: true, maxBuffer: 1 << 20 })
+  if (r.error || r.status !== 0) return []
+  return r.stdout.split(/\r?\n/).filter((l) => l.startsWith('worktree ')).map((l) => l.slice('worktree '.length)).filter((p) => p && path.isAbsolute(p))
+}
+
+// Như isSpecDir nhưng thư mục tính năng có ở gốc HOẶC ở docs/specs của bất kỳ worktree nào cùng repo: tính năng vừa tạo trong worktree
+// chưa có ở thư mục chính. Chỉ dùng để kiểm tên phạm vi hợp lệ; nơi ghi file vẫn là `root`. Tên xấu bị loại trước khi chạm git.
+function isSpecDirAnyWorktree(root, name) {
+  if (!validSpecName(name)) return false
+  if (isSpecDir(root, name)) return true
+  return worktreeRoots(root).some((wt) => isSpecDir(wt, name))
 }
 
 // Dòng INDEX kiểu cũ: "- [mã] ngày giờ · ✅ · [phạm vi] tóm tắt → đường dẫn". Kiểu mới: "- [mã](đường dẫn) · ngày · tóm tắt" (xem renderIndex).
@@ -769,7 +787,7 @@ export function ghi(projectRoot, input = {}, opts = {}) {
   const tom_tat = cutWords(oneLine(input.tom_tat), 200)
   if (!tom_tat) throw new Error('thiếu tom_tat')
   const pham_vi = String(input.pham_vi ?? '').trim() || 'chung'
-  if (pham_vi !== 'chung' && !isSpecDir(root, pham_vi)) {
+  if (pham_vi !== 'chung' && !isSpecDirAnyWorktree(root, pham_vi)) {
     throw new Error(`phạm vi "${oneLine(pham_vi, 60)}" không hợp lệ: chỉ nhận "chung" hoặc tên thư mục có thật trong docs/specs`)
   }
   const ai_quyet = oneLine(input.ai_quyet ?? 'ban', 40) || 'ban'

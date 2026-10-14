@@ -511,6 +511,13 @@ describe('gen — dependency-cruiser', () => {
     assert.equal(rule(cfg, 'not-to-unresolvable').to.couldNotResolve, true)
     assert.ok(cfg.forbidden.every((x) => x.severity === 'error' && x.comment.length > 20))
   })
+  test('not-to-unresolvable miễn module ảo của nền tảng (cloudflare:, astro:, node:, bun:, virtual:) và hậu tố ?raw/?url; đường dẫn thường vẫn bị xét', () => {
+    const { cfg } = genWeb(webProject())
+    const skip = [].concat(rule(cfg, 'not-to-unresolvable').to.pathNot).map((p) => new RegExp(p))
+    const exempt = (s) => skip.some((re) => re.test(s))
+    for (const s of ['cloudflare:workers', 'astro:middleware', 'node:fs', 'bun:sqlite', 'virtual:pwa-register', './a.css?raw', './w.js?worker']) assert.equal(exempt(s), true, s)
+    for (const s of ['./thieu.js', '@scope/goi-thieu', 'src/cloudflare:x', 'nodemailer', 'astro']) assert.equal(exempt(s), false, s)
+  })
   test('feature A import feature B bị luật ranh giới bắt; A import shared thì không; comment = lý do + cách sửa', () => {
     const { cfg } = genWeb(webProject())
     const hit = (from, to) => cfg.forbidden.filter((x) => x.from.path && x.to.path && new RegExp(x.from.path).test(from) && new RegExp(x.to.path).test(to) && !(x.to.pathNot && new RegExp(x.to.pathNot).test(to)))

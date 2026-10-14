@@ -18,7 +18,7 @@ Mọi tài liệu của một tính năng nằm trong `docs/specs/<YYYY-MM-DD>-<
    chắc chắn; mơ hồ ⇒ hỏi user. Làm ý tưởng nào ⇒ ghi thêm dòng trỏ về đúng mã đó:
    `node ~/.claude/hooks/lib/so-chot.mjs y-tuong <projectRoot> '{"ma":"y-xxxxxx","lam":"<YYYY-MM-DD>-<slug>"}'`.
 1. Gửi trong MỘT message:
-   - AskUserQuestion: ≤5 câu/vòng, mỗi câu có đáp án khuyến nghị đứng đầu. Hỏi mục tiêu, người dùng, phạm vi,
+   - AskUserQuestion: ≤4 câu/vòng (tool từ chối câu thứ 5), mỗi câu có đáp án khuyến nghị đứng đầu. Hỏi mục tiêu, người dùng, phạm vi,
      ràng buộc, thế nào là "xong".
    - Cỡ M/L: tra kho trước `node ~/.claude/hooks/kho.mjs tim <repo> "<từ khoá>"` — thẻ còn hạn ⇒ dùng lại ("dùng kết
      quả ngày …"), hết hạn ⇒ chỉ tra phần cũ. Chỉ gọi Agent `researcher` KHI CẦN [w99v]: bí ý tưởng/cách làm · không chắc

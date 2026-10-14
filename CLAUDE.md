@@ -1,6 +1,7 @@
 # CLAUDE.md
 
 **Ngôn ngữ: luôn trả lời user bằng tiếng Việt** (cả câu hỏi AskUserQuestion). Code, tên file, lệnh, chữ trên UI giữ nguyên.
+Khi nén ngữ cảnh (compact): viết bản tóm tắt bằng tiếng Việt, ghi rõ luật ngôn ngữ này và các quyết định đã chốt.
 
 ## Cách trao đổi — người đọc là người làm app ít hoặc không code
 

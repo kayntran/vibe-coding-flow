@@ -61,15 +61,39 @@ export const SECRET_PATTERNS = [
 
 // Khớp đã biết là KHÔNG phải secret: khoá ví dụ công khai trong tài liệu AWS (bộ test SigV4), URL mẫu mà mật khẩu chính là chữ "password"
 // (chữ gợi ý trong ô nhập proxy), JWT role=anon (khoá công khai của Supabase, cố ý nằm trong client), khoá Stripe chỉ toàn chữ x (giữ chỗ
-// trong tài liệu), giá trị Cloudflare là chữ giữ chỗ. Chỉ bỏ đúng chuỗi này, không nới mẫu.
+// trong tài liệu), giá trị Cloudflare là chữ giữ chỗ, chuỗi DB cục bộ kiểu user:postgres@127.0.0.1 (host cục bộ VÀ mật khẩu mẫu phổ biến; host thật hoặc mật
+// khẩu khác vẫn bị báo). Chỉ bỏ đúng chuỗi này, không nới mẫu. Hàm nhận (khớp, phần dòng đứng ngay sau khớp) — url-credential cần xem host nằm sau dấu "@".
+// Thận trọng — chỉ miễn khi phần còn lại của URL (tới khoảng trắng ASCII, bỏ nháy/ngoặc/phẩy đóng ở CUỐI) CHỈ gồm ký tự an toàn: không "@" (mật khẩu
+// chứa "@" đẩy host thật ra sau "@" cuối), không "," (danh sách host), không %XX / < > ` / khoảng trắng Unicode (lách bộ cắt); query không có
+// khoá host/user/pass/port/service (libpq, node-postgres lấy giá trị query đè userinfo). Áp cho cả mật khẩu chữ "password". Với chuỗi DB cục
+// bộ, authority (tới / ? #) phải ĐÚNG là host cục bộ (+ cổng) — dấu chấm cuối hay chữ dính thêm đều không miễn.
+const LOCAL_AUTHORITY = /^(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|::1)(?::\d{1,5})?$/i
+const SAMPLE_PASSWORDS = new Set(['postgres', 'password', 'pass', 'test', 'example', 'secret', 'changeme', 'root', 'admin', 'user', 'dev'])
+// URL chỉ được kết thúc ở dấu cách hoặc hết dòng: tab/CR/FF/VT bị WHATWG xoá rồi nối tiếp ⇒ không miễn; sau dấu cách mà phần kế bắt đầu như
+// đoạn nối host/query (. , & ? @ / : =) ⇒ không miễn; dấu phẩy/chấm phẩy đóng ở cuối chỉ được bỏ khi phía sau hết dòng (danh sách host).
+const safeUrlRest = (after) => {
+  const [, token, sep, next] = /^([^ \t\r\n\f\v]*)([ \t\r\n\f\v]?)(.*)$/s.exec(after)
+  if (sep && sep !== ' ') return null
+  if (/^ *[.,&?@/:=]/.test(next)) return null
+  const tail = /["'`)}>,;]*$/.exec(token)[0]
+  if (/[,;]/.test(tail) && next.trim()) return null
+  const rest = token.slice(0, token.length - tail.length)
+  if (!/^[A-Za-z0-9._~:/?&=[\]-]*$/.test(rest) || /[?&][^=&]*(?:host|user|pass|port|service)/i.test(rest)) return null
+  return rest
+}
+const isLocalSampleUrl = (m, rest) =>
+  LOCAL_AUTHORITY.test(rest.split(/[/?#]/, 1)[0]) && SAMPLE_PASSWORDS.has((/:\/\/[^/\s:@]+:([^@\s/]*)@$/.exec(m)?.[1] ?? '').toLowerCase())
 export const KNOWN_FALSE_POSITIVES = [
   ['aws', (m) => m === 'AKIAIOSFODNN7EXAMPLE'],
-  ['url-credential', (m) => /:password@$/i.test(m)],
+  ['url-credential', (m, after = '') => {
+    const rest = safeUrlRest(after)
+    return rest !== null && (/:password@$/i.test(m) || isLocalSampleUrl(m, rest))
+  }],
   ['jwt', (m) => jwtRole(m) === 'anon'],
   ['stripe', (m) => /_live_x+$/i.test(m)],
   ['cloudflare', (m) => /your|example|placeholder|changeme|x{6,}/i.test(m.replace(/^[^:=]*[:=]\s*["']?/, ''))],
 ]
-const isKnownFalsePositive = (name, match) => KNOWN_FALSE_POSITIVES.some(([n, ok]) => n === name && ok(match))
+const isKnownFalsePositive = (name, match, after) => KNOWN_FALSE_POSITIVES.some(([n, ok]) => n === name && ok(match, after))
 
 // Vai trò trong payload của một JWT (đoạn giữa), hoặc null khi không giải mã được / không có role. Không giải mã được ⇒ null ⇒ vẫn bị báo là jwt.
 function jwtRole(token) {
@@ -151,8 +175,8 @@ export function scanLine(text) {
   for (const [name, re] of GLOBAL_PATTERNS) {
     re.lastIndex = 0
     for (let m; (m = re.exec(text)); ) {
-      if (isKnownFalsePositive(name, m[0])) continue
       const end = m.index + m[0].length
+      if (isKnownFalsePositive(name, m[0], text.slice(end))) continue
       if (hits.some((h) => m.index < h.end && h.index < end)) continue // cùng một token đã được mẫu khác báo (sk-ant-… vs openai)
       hits.push({ name: reportName(name, m[0]), index: m.index, end, value: `${m[0].slice(0, 4)}…` })
       break

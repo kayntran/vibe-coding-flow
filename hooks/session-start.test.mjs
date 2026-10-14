@@ -1127,3 +1127,100 @@ describe('nhắc sau phát hành / khám sức khoẻ / sao lưu (release.json, 
     assert.match(line, /Hơn 30 ngày chưa khám/)
   })
 })
+
+// ───────────────────────── nhắc luật ngôn ngữ sau khi nén ngữ cảnh (audit 2026-10-13) ─────────────────────────
+// Bản tóm tắt nén viết tiếng Anh làm phiên trả lời user bằng tiếng Anh: lúc compact/resume hook chép lại đúng dòng "Ngôn ngữ"
+// của ~/.claude/CLAUDE.md (HOME giả trong test) lên đầu additionalContext.
+describe('nhắc luật ngôn ngữ sau khi nén (source compact / resume)', () => {
+  const LANG = '**Ngôn ngữ: luôn trả lời user bằng tiếng Việt** (cả câu hỏi AskUserQuestion). Code, tên file, lệnh, chữ trên UI giữ nguyên.'
+  const RECALL = `Nhắc lại sau khi nén: ${LANG}`
+  const globalMd = (fx, text) => {
+    const f = path.join(fx.home, '.claude', 'CLAUDE.md')
+    fs.mkdirSync(path.dirname(f), { recursive: true })
+    fs.writeFileSync(f, text)
+  }
+  const GLOBAL = `# CLAUDE.md\n\n${LANG}\n\n## Cách trao đổi\nNói như đang mô tả cho người dùng app.\n`
+  const withSource = (fx, source, extra = {}) => run(fx, { ...extra, input: JSON.stringify({ hook_event_name: 'SessionStart', source, cwd: fx.repo }) })
+
+  test('compact + CLAUDE.md toàn cục có dòng Ngôn ngữ ⇒ dòng nhắc nguyên văn nằm ở ĐẦU context', () => {
+    const fx = fixture()
+    globalMd(fx, GLOBAL)
+    assert.equal(withSource(fx, 'compact'), RECALL)
+    progress(fx, 'feat-a', 'Trạng thái: đang làm\nBước tiếp theo: X\n')
+    const ctx = withSource(fx, 'compact')
+    assert.ok(ctx.startsWith(`${RECALL}\n\n${PREFIX}`), ctx.slice(0, 200))
+  })
+
+  test('resume cũng được nhắc', () => {
+    const fx = fixture()
+    globalMd(fx, GLOBAL)
+    assert.equal(withSource(fx, 'resume'), RECALL)
+  })
+
+  test('startup / clear ⇒ KHÔNG thêm gì (CLAUDE.md đã được nạp sẵn)', () => {
+    const fx = fixture()
+    globalMd(fx, GLOBAL)
+    assert.equal(withSource(fx, 'startup'), null)
+    assert.equal(withSource(fx, 'clear'), null)
+    assert.equal(run(fx, { input: JSON.stringify({ hook_event_name: 'SessionStart', cwd: fx.repo }) }), null, 'không có source')
+    progress(fx, 'feat-a', 'Trạng thái: đang làm\n')
+    assert.ok(!withSource(fx, 'startup').includes('Nhắc lại sau khi nén'))
+  })
+
+  test('CLAUDE.md không có dòng Ngôn ngữ, hoặc không có file ⇒ không thêm gì', () => {
+    const fx = fixture()
+    assert.equal(withSource(fx, 'compact'), null, 'không có file')
+    globalMd(fx, '# CLAUDE.md\n\nTrả lời ngắn gọn.\n## Nguyên tắc\nĐơn giản trước.\n')
+    assert.equal(withSource(fx, 'compact'), null)
+    progress(fx, 'feat-a', 'Trạng thái: đang làm\n')
+    assert.ok(!withSource(fx, 'compact').includes('Nhắc lại sau khi nén'))
+  })
+
+  test('dòng không in đậm, CRLF, nhiều dòng chứa "Ngôn ngữ" ⇒ lấy dòng ĐẦU TIÊN, nguyên văn', () => {
+    const fx = fixture()
+    globalMd(fx, '# Luật\r\nNgôn ngữ: trả lời bằng tiếng Việt.\r\nNgôn ngữ code: giữ nguyên.\r\n')
+    assert.equal(withSource(fx, 'compact'), 'Nhắc lại sau khi nén: Ngôn ngữ: trả lời bằng tiếng Việt.')
+  })
+
+  test('dòng nhắc nằm trước cả lời nhắc an toàn (Devin) và sổ tiến độ', () => {
+    const fx = fixture()
+    globalMd(fx, GLOBAL)
+    progress(fx, 'feat-a', 'Trạng thái: đang làm\n')
+    const ctx = run(fx, { input: JSON.stringify({ hook_event_name: 'SessionStart', source: 'compact', cwd: fx.repo, prompt_id: 'p-1' }) })
+    assert.ok(ctx.startsWith(RECALL), ctx.slice(0, 120))
+    assert.ok(ctx.indexOf('Devin') > 0 && ctx.indexOf('Devin') < ctx.indexOf(PREFIX))
+  })
+
+  test('file luật toàn cục là dữ liệu của user nhưng dòng quá dài vẫn bị chặn, không phá trần', () => {
+    const fx = fixture()
+    globalMd(fx, `Ngôn ngữ: ${'x'.repeat(20000)}\n`)
+    const ctx = withSource(fx, 'compact')
+    assert.ok(ctx.startsWith('Nhắc lại sau khi nén: Ngôn ngữ: xxx'))
+    assert.ok(ctx.length < 700, `${ctx.length} ký tự`)
+  })
+
+  test('vượt trần: sổ lớn + luật chung dày + khoá MCP + ký tự ẩn + nhắc MCP + Devin ⇒ tổng ≤ 8.500 và dòng nhắc vẫn đứng đầu, nguyên vẹn', () => {
+    const fx = fixture()
+    globalMd(fx, GLOBAL)
+    progress(fx, 'feat-a', 'Trạng thái: đang làm\n' + 'y'.repeat(6000))
+    for (let i = 0; i < 150; i++) {
+      const d = { ma: newMa(), tom_tat: `Luật chung số ${i} ${'x'.repeat(120)}`, pham_vi: 'chung', trang_thai: 'dang-dung', luc: '2026-01-01 00:00', ai_quyet: 'ban' }
+      const f = path.join(fx.repo, '.claude', 'so-chot', 'chung', `${d.ma}-${slugOf(d.tom_tat)}.md`)
+      fs.mkdirSync(path.dirname(f), { recursive: true })
+      fs.writeFileSync(f, renderDecision(d, { vi_sao: 'lý do', ap_dung: 'cách áp dụng' }))
+    }
+    usageLog(fx, 40)
+    const servers = {}
+    for (let i = 0; i < 30; i++) servers[`srv-${i}`] = { command: 'x', env: { K: GH } }
+    claudeJson(fx, { mcpServers: servers })
+    for (let i = 0; i < 30; i++) put(fx, `.claude/rules/r${i}.md`, `a${ZW}\n`)
+    const input = JSON.stringify({ hook_event_name: 'SessionStart', source: 'compact', cwd: fx.repo, prompt_id: 'p-1' })
+    const ctx = run(fx, { input })
+    assert.ok(ctx.length <= TOTAL_CAP, `${ctx.length} ký tự`)
+    assert.ok(ctx.startsWith(`${RECALL}\n`), ctx.slice(0, 200))
+    assert.ok(ctx.includes('Devin') && ctx.includes('khoá gõ thẳng') && ctx.includes('ký tự ẩn') && ctx.includes(REMINDER) && ctx.includes('Luật chung'))
+    // cùng tình huống nhưng startup ⇒ không có dòng nhắc
+    const startup = run(fx, { input: JSON.stringify({ hook_event_name: 'SessionStart', source: 'startup', cwd: fx.repo, prompt_id: 'p-1' }) })
+    assert.ok(!startup.includes('Nhắc lại sau khi nén'))
+  })
+})

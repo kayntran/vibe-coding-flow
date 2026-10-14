@@ -167,7 +167,7 @@ test('TOML: parser độc lập Python stdlib tomllib đọc toàn bộ bản xu
   assert.ok(!Object.hasOwn(parsed.at(-1), 'model'))
 })
 
-test('Claude hooks: đủ 9 command/event/timeout như bộ hook đang chạy trước v7', () => {
+test('Claude hooks: đủ 10 command/event/timeout (9 của bộ hook trước v7 + nhắc sổ lúc commit)', () => {
   // Bộ hook của install.mjs bản v6 (đã chạy thật). Installer v7 lấy hook từ chính claudeHooks (một nguồn, ADR-0003),
   // nên mốc đối chiếu ghi thẳng ở đây; đổi hook thì sửa cả hai có chủ đích.
   const baseline = [
@@ -179,6 +179,7 @@ test('Claude hooks: đủ 9 command/event/timeout như bộ hook đang chạy tr
     ['SessionStart', 'undefined', 'session-start.mjs', 10],
     ['PostToolUse', '"mcp__.*"', 'mcp-usage.mjs log', 5],
     ['PreToolUse', '"Agent|Task"', 'flow-dispatch.mjs agent', 30],
+    ['PreToolUse', '"Bash"', 'flow-dispatch.mjs commit', 15], // sau audit 2026-10-13: nhắc sổ tiến độ lúc git commit
     ['Stop', 'undefined', 'flow-dispatch.mjs stop', 15],
   ].map(([e, m, s, t]) => [null, e, m, s, String(t)])
   const entries = claudeHooks('/tmp/kit with spaces')
@@ -206,7 +207,7 @@ test('Claude hooks: mọi bí danh Devin vào đúng cổng; tên tool khác kh�
   const entries = claudeHooks('/tmp/kit')
   const match = (tool) => entries.filter(([ev, matcher]) => ev === 'PreToolUse' && new RegExp(matcher).test(tool)).map(([, , h]) => commandParts(h.command))
   for (const name of ['Edit', 'Write', 'NotebookEdit', 'edit', 'write', 'apply_patch', 'notebook_edit']) assert.deepEqual(match(name), ['flow-gate.mjs edit'])
-  for (const name of ['Bash', 'exec']) assert.deepEqual(match(name), ['flow-gate.mjs bash'])
+  for (const name of ['Bash', 'exec']) assert.deepEqual(match(name), ['flow-gate.mjs bash', 'flow-dispatch.mjs commit'])
   for (const name of ['Agent', 'Task', 'run_subagent']) assert.deepEqual(match(name), ['flow-dispatch.mjs agent'])
   for (const name of ['Read', 'execute_query', 'rewrite', 'mcp__server__edit']) assert.deepEqual(match(name), [])
 })
@@ -215,7 +216,7 @@ test('Codex hooks: hooks.json đúng nhóm event/handler và giữ các hook dù
   const out = codexHooksJson('/tmp/kit')
   assert.ok(out.description.includes(banner))
   assert.deepEqual(Object.keys(out.hooks).sort(), ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'SubagentStop', 'SessionStart'].sort())
-  assert.equal(Object.values(out.hooks).flat().length, 9)
+  assert.equal(Object.values(out.hooks).flat().length, 10)
   for (const [event, groups] of Object.entries(out.hooks)) for (const group of groups) {
     assert.equal(group.hooks.length, 1)
     if (['Stop', 'SubagentStop', 'SessionStart', 'UserPromptSubmit'].includes(event)) assert.ok(!Object.hasOwn(group, 'matcher'))
@@ -231,7 +232,7 @@ test('Codex hooks: apply_patch/Bash/spawn_agent đúng cổng, Stop có cả gat
   const { hooks } = codexHooksJson('/tmp/kit')
   const match = (tool) => hooks.PreToolUse.filter((g) => new RegExp(g.matcher).test(tool)).map((g) => commandParts(g.hooks[0].command))
   for (const tool of ['apply_patch', 'Edit', 'Write']) assert.deepEqual(match(tool), ['flow-gate.mjs edit'])
-  assert.deepEqual(match('Bash'), ['flow-gate.mjs bash'])
+  assert.deepEqual(match('Bash'), ['flow-gate.mjs bash', 'flow-dispatch.mjs commit'])
   for (const tool of ['Agent', 'spawn_agent', 'collaborationspawn_agent']) assert.deepEqual(match(tool), ['flow-dispatch.mjs agent'])
   assert.deepEqual(match('mcp__server__spawn_agent'), [])
   assert.deepEqual(hooks.Stop.map((g) => commandParts(g.hooks[0].command)), ['flow-gate.mjs stop', 'flow-dispatch.mjs stop'])

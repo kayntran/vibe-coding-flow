@@ -2,7 +2,7 @@
 // Mỗi test tạo repo tạm trong os.tmpdir (main + worktree `feat`), gọi script qua spawnSync với JSON stdin, rồi tự dọn.
 import { after, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -349,6 +349,97 @@ describe('stop', () => {
     stampBoth(fx)
     assertPass(hook(fx, 'stop', stopIn(fx.wt)))
     assert.ok(!fs.existsSync(path.join(fx.gates, `nudged-${pidOf(fx)}`)))
+  })
+})
+
+// Audit 2026-10-13: Stop đòi dấu ngay lúc AI đang chờ `stamp test` chạy nền ⇒ mỗi lần một lượt thức vô ích.
+describe('stop khi stamp test đang chạy nền (running-test-<pid>.json)', () => {
+  const stopIn = (cwd) => ({ hook_event_name: 'Stop', cwd, stop_hook_active: false, last_assistant_message: 'xong' })
+  const featFx = () => {
+    const fx = fixture()
+    commit(fx.wt, 'feat.go', 'package x\n', 'feat')
+    return fx
+  }
+  const markFile = (fx, pid = pidOf(fx)) => path.join(fx.gates, `running-test-${pid}.json`)
+  const putMark = (fx, over = {}, pid = pidOf(fx)) => {
+    fs.mkdirSync(fx.gates, { recursive: true })
+    fs.writeFileSync(markFile(fx, pid), JSON.stringify({ pid: process.pid, ts: new Date().toISOString(), patchId: pid, ...over }))
+  }
+  const deadPid = () => spawnSync(process.execPath, ['-e', '0']).pid // tiến trình vừa chạy xong ⇒ pid chết
+  const nudgedFiles = (fx) => (fs.existsSync(fx.gates) ? fs.readdirSync(fx.gates).filter((n) => n.startsWith('nudged-')) : [])
+
+  test('đánh dấu còn hạn + tiến trình còn sống ⇒ không chặn, không ghi nudged; gỡ đánh dấu thì chặn như cũ', () => {
+    const fx = featFx()
+    putMark(fx)
+    assertPass(hook(fx, 'stop', stopIn(fx.wt)))
+    assertPass(hook(fx, 'stop', stopIn(fx.wt))) // hỏi lại vẫn qua: lần này không "ăn" mất lượt nhắc
+    assert.deepEqual(nudgedFiles(fx), [])
+    assert.ok(fs.existsSync(markFile(fx)), 'đánh dấu của tiến trình còn sống phải giữ nguyên')
+    fs.rmSync(markFile(fx))
+    assert.match(assertBlock(hook(fx, 'stop', stopIn(fx.wt))), /thiếu: review, qa, test/)
+  })
+
+  test('tiến trình đã chết ⇒ vẫn chặn như cũ và đánh dấu cũ bị xoá', () => {
+    const fx = featFx()
+    putMark(fx, { pid: deadPid() })
+    assert.match(assertBlock(hook(fx, 'stop', stopIn(fx.wt))), /thiếu: review, qa, test/)
+    assert.ok(!fs.existsSync(markFile(fx)))
+  })
+
+  test('quá 2 giờ (dù pid còn sống) ⇒ vẫn chặn và xoá đánh dấu', () => {
+    const fx = featFx()
+    putMark(fx, { ts: new Date(Date.now() - 2 * 60 * 60 * 1000 - 60_000).toISOString() })
+    assertBlock(hook(fx, 'stop', stopIn(fx.wt)))
+    assert.ok(!fs.existsSync(markFile(fx)))
+  })
+
+  test('đánh dấu hỏng (không phải JSON / thiếu pid) ⇒ vẫn chặn và xoá', () => {
+    const fx = featFx()
+    fs.mkdirSync(fx.gates, { recursive: true })
+    fs.writeFileSync(markFile(fx), '{không json')
+    assertBlock(hook(fx, 'stop', stopIn(fx.wt)))
+    assert.ok(!fs.existsSync(markFile(fx)))
+    putMark(fx, { pid: 'abc' })
+    fs.rmSync(path.join(fx.gates, `nudged-${pidOf(fx)}`))
+    assertBlock(hook(fx, 'stop', stopIn(fx.wt)))
+    assert.ok(!fs.existsSync(markFile(fx)))
+  })
+
+  test('đánh dấu của diff khác (patch-id khác) không làm Stop bỏ qua diff này', () => {
+    const fx = featFx()
+    const other = 'a'.repeat(40)
+    putMark(fx, {}, other)
+    assertBlock(hook(fx, 'stop', stopIn(fx.wt)))
+    assert.ok(fs.existsSync(markFile(fx, other)), 'đánh dấu của diff khác còn sống thì không đụng tới')
+  })
+
+  test('chạy thật: stamp test nền đang chạy ⇒ Stop không chặn; xong ⇒ đánh dấu mất, có dấu test, Stop nhắc phần còn thiếu', async () => {
+    const fx = featFx()
+    const go = path.join(fx.root, 'go.txt')
+    const hold = write(fx.root, 'hold.mjs', "import fs from 'node:fs'\nconst t = setInterval(() => { if (fs.existsSync(process.argv[2])) clearInterval(t) }, 50)\nsetTimeout(() => process.exit(9), 30000).unref()\n")
+    const child = spawn(process.execPath, [SCRIPT, 'stamp', 'test', '--', 'node', hold, go], {
+      cwd: fx.wt, env: { ...ENV, FLOW_GATE_LOG: fx.log }, stdio: 'ignore', windowsHide: true,
+    })
+    const closed = new Promise((resolve) => child.on('close', resolve))
+    try {
+      const pid = pidOf(fx)
+      const mark = markFile(fx, pid)
+      const until = Date.now() + 15000
+      while (!fs.existsSync(mark) && Date.now() < until) await new Promise((r) => setTimeout(r, 50))
+      assert.ok(fs.existsSync(mark), 'stamp test phải ghi đánh dấu đang chạy')
+      const m = JSON.parse(fs.readFileSync(mark, 'utf8'))
+      assert.equal(m.pid, child.pid)
+      assert.equal(m.patchId, pid)
+      assert.ok(!Number.isNaN(Date.parse(m.ts)))
+      assertPass(hook(fx, 'stop', stopIn(fx.wt)))
+      fs.writeFileSync(go, 'x')
+      assert.equal(await closed, 0)
+    } finally {
+      child.kill()
+    }
+    assert.ok(!fs.existsSync(markFile(fx)), 'xong rồi phải gỡ đánh dấu')
+    assert.ok(fs.existsSync(path.join(fx.gates, `test-${pidOf(fx)}.json`)))
+    assert.match(assertBlock(hook(fx, 'stop', stopIn(fx.wt))), /thiếu: review, qa\./)
   })
 })
 
@@ -982,6 +1073,20 @@ describe('stamp test (dấu test xanh)', () => {
     const r = stampTest(fx, 'lenh-khong-ton-tai-flow-gate')
     assert.notEqual(r.status, 0)
     assert.ok(!fs.existsSync(stampFile(fx, 'json')))
+  })
+
+  test('đánh dấu đang chạy có mặt suốt lúc lệnh chạy, gỡ sạch khi xong (đạt, hỏng, lệnh không tồn tại)', () => {
+    const fx = featFx()
+    const dir = fx.gates.replace(/\\/g, '/')
+    const leftovers = () => (fs.existsSync(fx.gates) ? fs.readdirSync(fx.gates).filter((f) => f.startsWith('running-test-')) : [])
+    // Lệnh tự kiểm: có running-test-*.json trong gatesDir lúc nó chạy thì thoát theo mã `ok`, không thì 7.
+    const probe = (ok) => `process.exit(require('fs').readdirSync('${dir}').some(function (f) { return f.startsWith('running-test-') }) ? ${ok} : 7)`
+    assert.equal(stampTest(fx, 'node', '-e', probe(0)).status, 0, 'lúc lệnh đạt chạy phải có đánh dấu')
+    assert.deepEqual(leftovers(), [])
+    assert.equal(stampTest(fx, 'node', '-e', probe(3)).status, 3, 'lúc lệnh hỏng chạy phải có đánh dấu')
+    assert.deepEqual(leftovers(), [])
+    assert.notEqual(stampTest(fx, 'lenh-khong-ton-tai-flow-gate').status, 0)
+    assert.deepEqual(leftovers(), [])
   })
 
   test('đã có dấu xanh mà chạy lại ra đỏ ⇒ dấu cũ bị gỡ (lần chạy cuối quyết định)', () => {

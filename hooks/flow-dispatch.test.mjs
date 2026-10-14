@@ -390,14 +390,14 @@ describe('agent: khác / đầu vào hỏng', () => {
 
 // ---------- stop ----------
 
-const OPEN_NOTE = '# Tiến độ\nTrạng thái: đang làm\nPha 2\n'
+const OPEN_NOTE = '# Tiến độ\nTrạng thái: đang làm\nNhánh / worktree: feat/x\nPha 2\n'
 const PROGRESS = 'docs/specs/feat/progress.md'
 
 // Repo có sổ tiến độ đã commit, mtime lùi về quá khứ (sổ cũ hơn mọi commit sau).
 function repoWithProgress(note = OPEN_NOTE) {
   const fx = repoWithPlan()
   commit(fx.repo, PROGRESS, note, 'sổ')
-  git(fx.repo, 'checkout', '-q', '-b', 'feat/x') // nhánh tính năng chưa sổ nào nhận ⇒ rơi về sổ sửa gần nhất (trên main thì không đoán)
+  git(fx.repo, 'checkout', '-q', '-b', 'feat/x') // nhánh tính năng; sổ ghi đúng nhánh này (nhánh có tên mà không sổ nào nhận thì Stop không đoán)
   return { ...fx, progress: path.join(fx.repo, PROGRESS), gates: path.join(fx.repo, '.git', 'flow-gates') }
 }
 
@@ -423,6 +423,7 @@ describe('stop: nhắc cập nhật sổ tiến độ', () => {
 
   test('R8 HEAD đã được nhắc (có marker) ⇒ không quét sổ nữa; chưa có marker mới quét', () => {
     const fx = repoWithProgress()
+    git(fx.repo, 'checkout', '-q', '--detach') // HEAD tách rời ⇒ Stop đoán sổ bằng newestOpenProgress (nơi có dòng log làm bẫy bên dưới)
     ago(fx.progress, 3600)
     commit(fx.repo, 'src/a.txt', 'a2\n', 'đổi a')
     assertBlock(stop(fx, fx.repo)) // ghi marker cho HEAD này
@@ -600,15 +601,24 @@ describe('stop: chọn sổ theo nhánh, cùng sổ với session-start', () => 
     assert.equal(nudgedSheet(fx), sheetRel(A))
   })
 
-  test('sổ kiểu cũ không ghi nhánh, hoặc nhánh chưa sổ nào nhận: cả hai rơi về sổ chưa xong sửa gần nhất', () => {
+  test('nhánh CÓ TÊN mà không sổ nào nhận (sổ kiểu cũ không ghi nhánh, hoặc nhánh khác): session-start vẫn nạp sổ mới nhất để đọc, nhưng Stop KHÔNG đòi ghi sổ của tính năng khác', () => {
     const fx = repoWithSheets([{ name: A, ageSec: 7200 }, { name: B, ageSec: 3600 }])
     git(fx.repo, 'checkout', '-b', 'feat/cu')
     assert.equal(sessionSheets(fx)[0], sheetRel(B))
-    assert.equal(nudgedSheet(fx), sheetRel(B))
+    assert.equal(nudgedSheet(fx), null)
     const fx2 = repoWithSheets([{ name: A, branch: 'feat/a', ageSec: 7200 }, { name: B, branch: 'feat/b', ageSec: 3600 }])
     git(fx2.repo, 'checkout', '-b', 'fix/khac') // không sổ nào ghi nhánh này
     assert.equal(sessionSheets(fx2)[0], sheetRel(B))
-    assert.equal(nudgedSheet(fx2), sheetRel(B))
+    assert.equal(nudgedSheet(fx2), null)
+  })
+
+  test('commit nâng thư viện ở nhánh riêng không bị đòi ghi sổ của tính năng khác (audit 2026-10-13: bị đòi ghi sổ social-dot2)', () => {
+    const fx = repoWithSheets([{ name: '2026-10-01-social-dot2', branch: 'feat/social', ageSec: 7200 }])
+    git(fx.repo, 'checkout', '-b', 'chore/nang-thu-vien')
+    assertPass(stop(fx, fx.repo)) // chưa có commit mới nào sau sổ
+    commit(fx.repo, 'src/a.txt', 'nâng thư viện\n', 'nâng thư viện')
+    assertPass(stop(fx, fx.repo))
+    assert.ok(!fs.existsSync(path.join(fx.repo, '.git', 'flow-gates')), 'không nhắc ⇒ không ghi marker')
   })
 
   test('đang ở nhánh chính (main/master) mà không sổ nào nhận nhánh ⇒ không đoán sổ để nhắc (commit trên main là gộp/sửa vặt, không phải việc của sổ sửa gần nhất); sổ ghi rõ nhánh main thì vẫn nhắc', () => {
@@ -621,14 +631,14 @@ describe('stop: chọn sổ theo nhánh, cùng sổ với session-start', () => 
     assert.equal(nudgedSheet(fx), sheetRel(A))
   })
 
-  test('nhánh không xác định (detached HEAD) ⇒ không đoán theo nhánh: cả hai rơi về sổ sửa gần nhất', () => {
+  test('HEAD tách rời (không có tên nhánh) ⇒ không đoán theo nhánh: cả hai rơi về sổ sửa gần nhất', () => {
     const fx = repoWithSheets([{ name: A, branch: 'feat/a', ageSec: 7200 }, { name: B, branch: 'feat/b', ageSec: 3600 }])
     git(fx.repo, 'checkout', '--detach', 'HEAD')
     assert.equal(sessionSheets(fx)[0], sheetRel(B))
     assert.equal(nudgedSheet(fx), sheetRel(B))
   })
 
-  test('sổ nằm ngoài 50 thư mục mới nhất vẫn được chọn theo nhánh (không giới hạn 50); nhánh khác thì rơi về sổ mới nhất', () => {
+  test('sổ nằm ngoài 50 thư mục mới nhất vẫn được chọn theo nhánh (không giới hạn 50); nhánh khác có tên thì Stop không đoán, HEAD tách rời thì rơi về sổ mới nhất', () => {
     const OLD = '2020-01-01-old'
     const done = Array.from({ length: 55 }, (_, i) => ({ name: `d${String(i).padStart(2, '0')}`, text: 'Trạng thái: xong\n', ageSec: 7200 }))
     const specs = [...done, { name: OLD, branch: 'feat/old', ageSec: 90000 }, { name: 'zz-new', ageSec: 3600 }]
@@ -638,6 +648,9 @@ describe('stop: chọn sổ theo nhánh, cùng sổ với session-start', () => 
     assert.equal(nudgedSheet(fx), sheetRel(OLD))
     git(fx.repo, 'checkout', '-b', 'khac', 'main')
     assert.equal(sessionSheets(fx)[0], sheetRel('zz-new'))
+    assert.equal(nudgedSheet(fx), null)
+    git(fx.repo, 'checkout', '--detach', 'main')
+    assert.equal(sessionSheets(fx)[0], sheetRel('zz-new'))
     assert.equal(nudgedSheet(fx), sheetRel('zz-new'))
   })
 
@@ -646,5 +659,154 @@ describe('stop: chọn sổ theo nhánh, cùng sổ với session-start', () => 
     git(fx.repo, 'checkout', '-b', 'feat/a')
     assert.deepEqual(sessionSheets(fx), [])
     assert.equal(nudgedSheet(fx), null)
+  })
+})
+
+// ---------- commit: nhắc ghi sổ NGAY TRƯỚC `git commit` (PreToolUse Bash), cùng luật với Stop ----------
+
+const commitCmd = (fx, command, cwd, extra = {}) =>
+  run(fx, 'commit', { hook_event_name: 'PreToolUse', cwd: cwd ?? fx.repo, tool_name: 'Bash', tool_input: { command }, ...extra })
+const fwd = (p) => p.replace(/\\/g, '/')
+const NUDGE = (rel) => `Sổ ${rel} chưa cập nhật cho commit này — ghi bước tiếp theo vào sổ (sổ trong git thì git add vào chính commit này) để khỏi tốn thêm một lượt.`
+
+// Chỉ nhắc (additionalContext một dòng), TUYỆT ĐỐI không chặn commit.
+function assertNudge(r, rel = PROGRESS) {
+  assert.equal(r.status, 0, r.stderr)
+  const o = r.json?.hookSpecificOutput
+  assert.ok(o, `đáng lẽ nhắc nhưng stdout: ${JSON.stringify(r.stdout)}`)
+  assert.equal(o.hookEventName, 'PreToolUse')
+  assert.equal(o.permissionDecision, undefined, 'chỉ nhắc, không được chặn/hỏi commit')
+  assert.equal(o.additionalContext, NUDGE(rel))
+  assert.equal(r.json.decision, undefined)
+}
+
+// Repo (nhánh feat/x) có sổ của nhánh đã cũ một giờ và một thay đổi src/a.txt đã staged, chờ commit.
+function repoReadyToCommit() {
+  const fx = repoWithProgress()
+  ago(fx.progress, 3600)
+  write(fx.repo, 'src/a.txt', 'a2\n')
+  git(fx.repo, 'add', 'src/a.txt')
+  return fx
+}
+
+// Sửa sổ (chưa add) rồi lùi mtime về một giờ trước.
+function editSheet(fx, extra = 'Pha 3\n') {
+  write(fx.repo, PROGRESS, `${OPEN_NOTE}${extra}`)
+  ago(fx.progress, 3600)
+}
+
+describe('commit: nhắc ghi sổ trước git commit khi Stop sẽ coi sổ là chưa cập nhật', () => {
+  test('sổ cũ, commit không kèm sổ ⇒ đúng một dòng nhắc kèm đường sổ; không chặn, không ghi marker', () => {
+    const fx = repoReadyToCommit()
+    assertNudge(commitCmd(fx, 'git commit -m "đổi a"'))
+    assert.ok(!fs.existsSync(fx.gates), 'PreToolUse chỉ nhắc, marker là việc của Stop')
+  })
+
+  test('sổ vào chính commit này ⇒ không nhắc: staged · -a · git add trong cùng lệnh · pathspec', () => {
+    const staged = repoReadyToCommit()
+    editSheet(staged)
+    git(staged.repo, 'add', PROGRESS)
+    ago(staged.progress, 3600) // staged rồi mtime vẫn cũ: Stop cũng coi là đã cập nhật khi commit có sổ
+    assertPass(commitCmd(staged, 'git commit -m "đổi a + sổ"'))
+
+    const all = repoReadyToCommit()
+    editSheet(all)
+    assertPass(commitCmd(all, 'git commit -am "đổi a + sổ"'))
+    assertPass(commitCmd(all, 'git commit --all -m x'))
+    assertPass(commitCmd(all, `git commit -m x -- ${PROGRESS} src/a.txt`))
+
+    const added = repoReadyToCommit()
+    editSheet(added)
+    assertPass(commitCmd(added, 'git add -A && git commit -m "đổi a + sổ"'))
+    assertPass(commitCmd(added, 'git add . ; git commit -m x'))
+
+    const control = repoReadyToCommit() // đối chứng: sổ sửa nhưng KHÔNG vào commit
+    editSheet(control)
+    assertNudge(commitCmd(control, 'git commit -m "chỉ đổi a"'))
+  })
+
+  test('sổ mới hơn commit sắp tạo (mtime ở giây SAU, cùng luật giây của Stop) ⇒ không nhắc; cùng giây ⇒ vẫn nhắc', () => {
+    const fx = repoReadyToCommit()
+    const t = new Date(Date.now() + 60000)
+    fs.utimesSync(fx.progress, t, t)
+    assertPass(commitCmd(fx, 'git commit -m x'))
+    const now = new Date()
+    fs.utimesSync(fx.progress, now, now) // sổ ghi cùng giây với commit sắp tạo, commit không kèm sổ ⇒ Stop coi là cũ
+    assertNudge(commitCmd(fx, 'git commit -m x'))
+  })
+
+  test('nhận diện git commit như flow-gate: -C, cd &&, biến môi trường, chuyển hướng, heredoc, --amend, nằm sau && ', () => {
+    const fx = repoReadyToCommit()
+    const repo = fwd(fx.repo)
+    for (const c of [
+      'git commit -m "x"',
+      'git commit -m "a && b; c | d" --no-verify',
+      "git commit -m 'x' 2>&1",
+      'git commit --amend --no-edit',
+      'FOO=1 git commit -m x',
+      'git status && git commit -m x',
+      'git -c user.name=t commit -m x',
+      'git commit -m "$(cat <<\'EOF\'\nmô tả có dấu \' nháy\n\nEOF\n)"',
+    ]) assertNudge(commitCmd(fx, c), PROGRESS)
+    assertNudge(commitCmd(fx, `git -C "${repo}" commit -m x`, fx.root))
+    assertNudge(commitCmd(fx, `cd "${repo}" && git commit -m x`, fx.root))
+    assertNudge(commitCmd(fx, 'git commit -m x', path.join(fx.repo, 'src'))) // chạy từ thư mục con
+  })
+
+  test('lệnh không phải git commit thật ⇒ không in gì', () => {
+    const fx = repoReadyToCommit()
+    for (const c of [
+      'git status', 'git log --oneline', 'git add -A', 'git push', 'git commit --dry-run -m x', 'git commit-tree HEAD^{tree}',
+      'echo "git commit -m x"', '# git commit -m x', 'npm run commit', 'ls src', 'git diff --cached', 'grep -rn "git commit" .',
+    ]) assertPass(commitCmd(fx, c))
+  })
+
+  test('không phải Bash, input hỏng, ngoài repo, cwd không tồn tại ⇒ qua im lặng', () => {
+    const fx = repoReadyToCommit()
+    assertPass(run(fx, 'commit', { cwd: fx.repo, tool_name: 'Write', tool_input: { file_path: 'x', command: 'git commit -m x' } }))
+    assertPass(run(fx, 'commit', { cwd: fx.repo, tool_name: 'Agent', tool_input: { subagent_type: 'coder', prompt: 'git commit -m x' } }))
+    assertPass(run(fx, 'commit', { cwd: fx.repo, tool_name: 'Bash', tool_input: { command: 42 } }))
+    assertPass(run(fx, 'commit', { cwd: fx.repo, tool_name: 'Bash' }))
+    assertPass(run(fx, 'commit', 'không phải json'))
+    assertPass(run(fx, 'commit', ''))
+    assertPass(run(fx, 'commit', 'null'))
+    const outside = tmpRoot('flow-dispatch-out-')
+    write(outside, PROGRESS, OPEN_NOTE)
+    assertPass(commitCmd(fx, 'git commit -m x', outside))
+    assertPass(commitCmd(fx, 'git commit -m x', path.join(fx.root, 'khong-co')))
+  })
+
+  test('cùng cách chọn sổ với Stop: "xong" · không có sổ · nhánh có tên không khớp ⇒ không nhắc; HEAD tách rời ⇒ vẫn đoán sổ mới nhất', () => {
+    const done = repoWithProgress('# T\nTrạng thái: xong\n')
+    ago(done.progress, 3600)
+    write(done.repo, 'src/a.txt', 'a2\n')
+    git(done.repo, 'add', 'src/a.txt')
+    assertPass(commitCmd(done, 'git commit -m x'))
+
+    const none = repoWithPlan()
+    write(none.repo, 'src/a.txt', 'a2\n')
+    git(none.repo, 'add', 'src/a.txt')
+    assertPass(commitCmd(none, 'git commit -m x'))
+
+    const A = '2026-10-01-a'
+    const B = '2026-10-02-b'
+    const fx = repoWithSheets([{ name: A, branch: 'feat/a', ageSec: 7200 }, { name: B, branch: 'feat/b', ageSec: 3600 }])
+    git(fx.repo, 'checkout', '-b', 'chore/nang-thu-vien') // nhánh có tên, không sổ nào nhận ⇒ không đòi sổ của tính năng khác
+    write(fx.repo, 'src/a.txt', 'a2\n')
+    git(fx.repo, 'add', 'src/a.txt')
+    assertPass(commitCmd(fx, 'git commit -m "nâng thư viện"'))
+    git(fx.repo, 'checkout', '-q', '-b', 'feat/a', 'main') // nhánh có sổ ⇒ nhắc đúng sổ của nhánh dù sổ kia mới hơn (thay đổi đã staged đi theo)
+    assertNudge(commitCmd(fx, 'git commit -m x'), sheetRel(A))
+    git(fx.repo, 'checkout', '-q', '-b', 'feat/b', 'main')
+    assertNudge(commitCmd(fx, 'git commit -m x'), sheetRel(B))
+    git(fx.repo, 'checkout', '-q', '--detach', 'HEAD') // không có tên nhánh ⇒ đoán sổ chưa xong sửa gần nhất
+    assertNudge(commitCmd(fx, 'git commit -m x'), sheetRel(B))
+  })
+
+  test('nhánh chính (main) không sổ nào nhận ⇒ không nhắc (commit trên main là gộp/sửa vặt)', () => {
+    const fx = repoWithSheets([{ name: '2026-10-01-a', branch: 'feat/a', ageSec: 7200 }])
+    write(fx.repo, 'src/a.txt', 'a2\n')
+    git(fx.repo, 'add', 'src/a.txt')
+    assertPass(commitCmd(fx, 'git commit -m x'))
   })
 })

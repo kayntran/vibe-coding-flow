@@ -154,6 +154,7 @@ function entries(kitRoot, codex) {
     ['SessionStart', undefined, cmd('session-start.mjs', '', 10)],
     ['PostToolUse', '^mcp__.*', cmd('mcp-usage.mjs', 'log', 5)],
     ['PreToolUse', codex ? '^(Agent|spawn_agent|collaborationspawn_agent)$' : '^(Agent|Task|run_subagent)$', cmd('flow-dispatch.mjs', 'agent', 30)],
+    ['PreToolUse', codex ? '^Bash$' : '^(Bash|exec)$', cmd('flow-dispatch.mjs', 'commit', 15)], // git commit mà sổ tiến độ chưa vào commit ⇒ nhắc một dòng (không chặn)
     ['Stop', undefined, cmd('flow-dispatch.mjs', 'stop', 15)],
   ]
 }
