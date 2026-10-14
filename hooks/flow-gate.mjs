@@ -1,8 +1,9 @@
 // flow-gate: cổng worktree/review/qa/test cho flow captain + worker. Một script, chế độ chọn bằng argv[2].
 //   hook : edit (PreToolUse Edit|Write|NotebookEdit + apply_patch của Codex/Devin) · bash (PreToolUse Bash: chặn git merge thiếu dấu,
 //          git commit/push có secret, commit thêm thư viện lạ, lệnh phá huỷ trên nhánh chính, `apply_patch <<` vào thư mục chính;
-//          hỏi lại khi push nhánh chính — chỉ Claude; Codex/Devin ⇒ deny, user tự chạy lệnh push; git merge mà nhánh đích nới luật — đụng file luật
-//          (kể cả .claude/flow.json, kit/checkers.json) hoặc thêm dòng tắt luật — ⇒ hỏi lại/deny như push, chép repo "chỉ học" ⇒ deny, không so được
+//          KHÔNG hộp hỏi (ask) nào [chốt 2026-10-14: user no code luôn bấm Allow]: push thường lên nhánh chính cho qua; git merge mà nhánh đích nới
+//          luật — đụng file luật (kể cả .claude/flow.json, kit/checkers.json) hoặc thêm dòng tắt luật — ⇒ deny nhắn AI tự gỡ (user thật muốn đổi luật
+//          thì chính user chạy lệnh gộp, AI không có lối tự mở), chép repo "chỉ học" ⇒ deny, không so được
 //          diff base...<đích> ⇒ deny; pull ., cherry-pick, rebase, fetch ., push ., branch -f, update-ref, checkout -B, switch -C đưa nhánh vào main
 //          ⇒ qua đúng cổng như git merge) · stop (Stop) ·
 //          subagent-stop (SubagentStop: receipt + audit phạm vi làn)
@@ -452,12 +453,86 @@ const PUSH_VALUE_FLAGS = new Set(['-o', '--push-option', '--receive-pack', '--ex
 
 // Cờ ép của git push: --force, --force-with-lease[=…], --force-if-includes, hoặc cụm cờ ngắn có f (-f, -fu, -uf; từ `o` trở đi là giá trị của -o).
 const isForceFlag = (t) => t === '--force' || t === '--force-if-includes' || t.startsWith('--force-with-lease') ||
-  (/^-[A-Za-z]+$/.test(t) && /^[^o]*f/.test(t.slice(1)))
+  (/^-[A-Za-z0-9]+$/.test(t) && /^[^o]*f/.test(t.slice(1)))
+
+// Push thường được cho qua [fn9k] nên lệnh push phải ĐỌC CHẮC được: cờ viết tắt (git nhận tiền tố duy nhất: --mirro, --force-with), cờ lạ,
+// -c/GIT_CONFIG_*, cấu hình remote mirror/push riêng, hay sửa cấu hình remote trong cùng lệnh ⇒ deny, nhắn AI viết lại dạng thường.
+const PUSH_LONG_FLAGS = new Set(['--dry-run', '--delete', '--all', '--branches', '--mirror', '--prune', '--no-prune', '--tags', '--no-tags',
+  '--follow-tags', '--no-follow-tags', '--force', '--no-force', '--force-if-includes', '--no-force-if-includes', '--force-with-lease',
+  '--no-force-with-lease', '--repo', '--set-upstream', '--no-set-upstream', '--quiet', '--verbose', '--progress', '--no-progress', '--porcelain',
+  '--verify', '--no-verify', '--atomic', '--no-atomic', '--signed', '--no-signed', '--push-option', '--receive-pack', '--exec',
+  '--recurse-submodules', '--no-recurse-submodules', '--thin', '--no-thin', '--ipv4', '--ipv6'])
+const PUSH_SHORT = /^-[fuqvnd46]*(o.*)?$/ // cụm cờ ngắn git push hiểu; từ `o` trở đi là giá trị của -o
+// Cổng này bắt AI LỠ TAY; AI cố tình nguỵ trang lệnh thì khoá thật là bảo vệ nhánh chính phía máy chủ (GitHub branch protection).
+const pushOdd = (why) => permission('deny',
+  'Lệnh đẩy code viết theo kiểu kit không đọc chắc được nên chưa chạy; AI sẽ viết lại dạng thường rồi đẩy. ' +
+  `Lý do: ${why}. Việc của AI: dùng dạng thường \`git push [-u] <remote> <nhánh>\` gõ thẳng (không biến, không bọc command/env/bash -c, ` +
+  'không -c, không gán biến môi trường), cờ viết ĐỦ chữ, không sửa cấu hình remote/alias trong cùng lệnh. Kit vẫn chặn ép/xoá/mirror nhánh chính dù viết kiểu nào.')
+const SHELL_WRAP = /^(command|env|exec|sudo|nohup|time|nice|xargs|eval|bash|sh|zsh|dash|pwsh|powershell|cmd)(\.exe)?$/i
+
+// Một đoạn lệnh không phải `git …` trần mà vẫn có thể chạy git push (bọc trong command/env/bash -c…), hoặc `git -c alias.*` ⇒ deny; null nếu không.
+function gateWrappedPush(toks) {
+  const gitAt = toks.findIndex((t) => /(^|[\\/])git(\.exe)?$/i.test(t))
+  if (SHELL_WRAP.test(toks[0] ?? '') && toks.some((t) => /(^|[^\w-])push(?![\w-])/.test(t)) && toks.some((t) => /(^|[\\/\s])git(\.exe)?(\s|$)/i.test(t))) {
+    return pushOdd(`git push bọc trong ${showName(toks[0])}`)
+  }
+  if (gitAt >= 0 && toks.slice(gitAt + 1).some((t, k, a) => (t === '-c' && /^alias\./i.test(a[k + 1] ?? '')) || /^-c\s*alias\./i.test(t))) {
+    return pushOdd('git -c alias.* đặt tên tắt cho lệnh git')
+  }
+  const after = gitAt >= 0 ? toks.slice(gitAt + 1) : []
+  if (after.includes('config') && after.some((t) => /^alias\./i.test(t)) && after.some((t) => /(^|[^\w-])push(?![\w-])/.test(t))) {
+    return pushOdd('git config alias.* đặt tên tắt cho git push')
+  }
+  return null
+}
+
+// toks = đoạn lệnh gốc (còn tiền tố biến và cờ toàn cục của git), g = parseGitSub của nó, cfgEdit = cùng lệnh có sửa cấu hình remote/push.
+function gatePushSyntax(toks, g, cfgEdit) {
+  const odd = pushOdd
+  if (cfgEdit) return odd('cùng lệnh có sửa cấu hình remote/push/alias/include (git config …, git remote … --mirror)')
+  if (toks.some((t) => /[$`]/.test(t))) return odd('lệnh có biến shell ($…) hoặc lệnh lồng — chỉ biết giá trị thật lúc chạy')
+  let i = 0
+  if (/^[A-Za-z_]\w*=/.test(toks[0] ?? '')) return odd(`gán biến môi trường ${toks[0].split('=')[0]} trước git (đổi được cấu hình git đọc)`)
+  for (i++; i < toks.length && toks[i] !== 'push'; i++) {
+    if (toks[i] === '-C') { i++; continue }
+    return odd(`cờ toàn cục ${showName(toks[i])} của git (chỉ nhận -C)`)
+  }
+  for (let j = 0; j < g.rest.length; j++) {
+    const t = g.rest[j]
+    if (t === '--') break
+    if (!t.startsWith('-') || t === '-') continue
+    if (t.startsWith('--')) {
+      const name = t.split('=')[0]
+      if (!PUSH_LONG_FLAGS.has(name)) return odd(`cờ ${showName(name)} lạ hoặc viết tắt`)
+      if (!t.includes('=') && PUSH_VALUE_FLAGS.has(name)) j++
+      if (name === '--repo' && !t.includes('=')) j++
+    } else if (!PUSH_SHORT.test(t)) return odd(`cụm cờ ngắn ${showName(t)} lạ`)
+    else if (t.endsWith('o')) j++
+  }
+  const info = repoInfo(g.dir)
+  if (!info) return null
+  const p = parsePushArgs(g.rest)
+  const cur = info.branch && info.branch !== 'HEAD' ? info.branch : null
+  const cfg = (k) => (git(info.dir, ['config', '--get', k]) ?? '').trim()
+  // không ghi remote ⇒ git đẩy tới branch.<nhánh>.pushRemote → remote.pushDefault → branch.<nhánh>.remote → origin
+  const remote = p.repo ?? p.positional[0] ??
+    ((cur ? cfg(`branch.${cur}.pushRemote`) : '') || cfg('remote.pushDefault') || (cur ? cfg(`branch.${cur}.remote`) : '') || 'origin')
+  if (!/^[\w.-]+$/.test(remote)) return null // URL/đường dẫn: không có cấu hình remote.<tên>.*
+  const mirror = cfg(`remote.${remote}.mirror`)
+  if (mirror && !/^(false|no|off|0+)$/i.test(mirror)) { // git coi true/yes/on và mọi số khác 0 là bật; giá trị lạ cũng chặn
+    return odd(`remote ${remote} cài chế độ mirror (ghi đè và xoá mọi nhánh trên máy chủ)`)
+  }
+  const specs = p.repo !== null ? p.positional : p.positional.slice(1)
+  if (specs.length === 0 && !p.all && !p.mirror && !p.tags && (git(info.dir, ['config', '--get-all', `remote.${remote}.push`]) ?? '').trim()) {
+    return odd(`remote ${remote} có cấu hình push riêng (remote.${remote}.push) — ghi rõ nhánh cần đẩy trong lệnh`)
+  }
+  return null
+}
 
 // rest = đối số sau `git push`. Trả { skip, dryRun, del, force, all, mirror, tags, repo, positional }
 // (skip = dry-run hoặc xoá ref: không gửi commit nào; del = --delete/-d: positional sau remote là tên nhánh bị xoá).
 function parsePushArgs(rest) {
-  const p = { skip: false, dryRun: false, del: false, force: false, all: false, mirror: false, tags: false, repo: null, positional: [] }
+  const p = { skip: false, dryRun: false, del: false, force: false, all: false, mirror: false, prune: false, tags: false, repo: null, positional: [] }
   let onlyPositional = false
   for (let j = 0; j < rest.length; j++) {
     const t = rest[j]
@@ -465,8 +540,15 @@ function parsePushArgs(rest) {
     else if (onlyPositional || !t.startsWith('-')) p.positional.push(t)
     else if (t === '--dry-run' || t === '-n') p.skip = p.dryRun = true
     else if (t === '--delete' || t === '-d') p.skip = p.del = true
+    else if (/^-[A-Za-z0-9]{2,}$/.test(t) && /^[^o]*[dn]/.test(t.slice(1))) { // cụm cờ ngắn có d/n (vd -dv, -nf); từ `o` trở đi là giá trị của -o
+      const head = t.slice(1).split('o')[0]
+      if (head.includes('n')) p.skip = p.dryRun = true
+      if (head.includes('d')) p.skip = p.del = true
+      if (head.includes('f')) p.force = true
+    }
     else if (t === '--all' || t === '--branches') p.all = true
     else if (t === '--mirror') p.mirror = true
+    else if (t === '--prune') p.prune = true
     else if (t === '--tags') p.tags = true
     else if (isForceFlag(t)) p.force = true
     else if (t === '--repo') p.repo = rest[++j] ?? null
@@ -605,17 +687,19 @@ function mainPushTargets(info, p) {
   return pushSources(info, p).filter((s) => isMainName(s.name))
 }
 
-// g = parseGitSub của `git push`. Deny khi push ép (cờ ép hoặc refspec +) mà đích là nhánh chính.
+// g = parseGitSub của `git push`. Deny khi push ép (cờ ép, refspec +, --mirror ghi đè/xoá mọi ref, --prune xoá nhánh remote) mà đích là nhánh chính.
 function gateForcePush(g) {
   const info = repoInfo(g.dir)
   if (!info) return null
   const p = parsePushArgs(g.rest)
   if (p.skip) return null // dry-run/xoá ref: không ghi đè gì
-  const hit = mainPushTargets(info, p).find((t) => p.force || t.plus)
+  // --prune kèm refspec đại diện (*) hoặc --all xoá được nhánh chính trên remote kể cả khi máy không có nhánh đó ⇒ coi như đụng nhánh chính
+  const wide = p.prune && (p.all || p.positional.some((s) => s.includes('*')))
+  const hit = wide ? { name: mainBranch(info) } : mainPushTargets(info, p).find((t) => p.force || p.mirror || p.prune || t.plus)
   if (!hit) return null
   return permission('deny',
     'Không ghi đè lịch sử của nhánh chính trên máy chủ được vì không hoàn tác được; AI sẽ đẩy lên một nhánh riêng rồi gộp sau. ' +
-    `Không push ép (--force / --force-with-lease / refspec +) lên nhánh chính ${hit.name}: ghi đè lịch sử trên remote không hoàn tác được. ` +
+    `Không push ép (--force / --force-with-lease / --mirror / --prune / refspec +) lên nhánh chính ${hit.name}: ghi đè hoặc xoá ref trên remote không hoàn tác được. ` +
     'Push nhánh riêng rồi gộp, hoặc để user tự chạy lệnh này.')
 }
 
@@ -634,39 +718,6 @@ function gateDeleteMainPush(g) {
   return permission('deny',
     'Không xoá nhánh chính trên máy chủ được; AI sẽ bỏ lệnh này và để bạn tự chạy nếu thật sự cần. ' +
     `Không xoá nhánh chính ${hit} trên remote (git push --delete / refspec :${hit}). User tự chạy lệnh này nếu thật sự cần.`)
-}
-
-// g = parseGitSub của `git push` (đã qua quét secret). Sắp gửi commit lên nhánh chính: liệt kê tối đa 15 commit chưa có trên remote.
-// host claude ⇒ ask (user bấm duyệt). Codex/Devin không hỗ trợ ask ở PreToolUse (hook lỗi ⇒ tool vẫn chạy) ⇒ deny + in đúng lệnh push để
-// CHÍNH user chạy. Không có tiền tố/biến tự duyệt: thứ gì AI viết được trong lệnh thì AI cũng tự duyệt được.
-function gateAskMainPush(g, host) {
-  const info = repoInfo(g.dir)
-  if (!info) return null
-  const p = parsePushArgs(g.rest)
-  if (p.skip) return null
-  const t = mainPushTargets(info, p)[0]
-  if (!t) return null
-  const sha = revOf(info, t.src)
-  if (!sha) return null
-  const remote = p.repo ?? p.positional[0] ?? ((git(info.dir, ['config', '--get', `branch.${t.name}.remote`]) ?? '').trim() || 'origin')
-  const tracked = revOf(info, `refs/remotes/${remote}/${t.name}`)
-  const range = tracked ? `${tracked}..${sha}` : sha
-  const n = Number((git(info.dir, ['rev-list', '--count', range]) ?? '').trim())
-  if (!(n > 0)) return null // đã đồng bộ (hoặc git lỗi): không có gì để hỏi
-  const list = (git(info.dir, ['log', '--oneline', '--no-decorate', '--no-color', '--no-show-signature', '-n', '15', range]) ?? '').trim()
-  const body = `Sắp push ${n} commit lên ${remote}/${t.name}:\n${list}`
-  if (host === 'claude') return permission('ask', body)
-  // Tên remote/nhánh lấy nguyên văn từ lệnh hoặc cấu hình của AI: in vào dòng "chép rồi dán" thì `origin; calc` chạy thêm lệnh trong terminal của user.
-  // Chỉ in khi toàn ký tự an toàn; không thì không in lệnh, user tự kiểm tên remote rồi tự gõ.
-  if (!SAFE_REF.test(remote) || !SAFE_REF.test(t.name)) {
-    return permission('deny',
-      'Đẩy lên nhánh chính cần chính bạn chạy lệnh nên AI dừng lại; tên nơi nhận có ký tự lạ nên AI không đưa lệnh để chép. ' +
-      `Sắp push ${n} commit lên một remote có tên lạ (không in ra vì dán vào terminal có thể chạy thêm lệnh khác):\n${list}\n` +
-      'AI không tự chạy lệnh này: bạn mở terminal, tự kiểm tên remote (git remote -v) và cấu hình push của nhánh, rồi tự gõ lệnh push với đúng remote và nhánh muốn gửi; xong thì báo AI làm tiếp.')
-  }
-  return permission('deny',
-    'Đẩy lên nhánh chính cần chính bạn chạy lệnh nên AI dừng lại và đưa bạn lệnh để chép. ' +
-    `${body}\nAI không tự chạy lệnh này: user chạy trong thư mục ${info.toplevel.replace(/[\x00-\x1f\x7f]/g, ' ')}, xong thì báo AI làm tiếp:\ngit push ${remote} ${t.name}`)
 }
 
 // Duyệt cờ của lệnh git đơn giản: { short: Set<ký tự cờ ngắn>, long: Set<tên cờ dài không có =giá trị>, pos: [đối số không phải cờ, gồm cả sau `--`] }.
@@ -845,8 +896,8 @@ const GUARD_OPENINGS = {
 }
 
 // Mọi merge target: so base...<target> (không phải base...HEAD). Trả deny khi không kiểm được (fail closed) hoặc chép repo chỉ-học;
-// trả ask (Claude) / deny + lệnh để user tự chạy (Codex/Devin) khi nhánh nới luật hoặc thêm dòng tắt luật; null khi sạch. Deny thắng ask.
-// userCmd = dòng lệnh để user tự chạy (Codex/Devin) khi lệnh gốc không phải `git merge`: chuỗi = in ra, null = không in được (có ký tự lạ), thiếu = `git merge <đích>`.
+// trả deny (mọi host) nhắn AI gỡ phần nới luật khi nhánh nới luật hoặc thêm dòng tắt luật; null khi sạch.
+// userCmd = dòng lệnh để user tự chạy khi user nói rõ muốn đổi luật và lệnh gốc không phải `git merge`: chuỗi = in ra, null = không in được (có ký tự lạ), thiếu = `git merge <đích>`.
 async function mergeGuards(info, base, targets, host, userCmd) {
   const stops = [] // { kind: 'unknown'|'copy'|'missing', msg }
   const loosen = [] // việc nới luật, mỗi mục một câu đời thường
@@ -893,20 +944,18 @@ async function mergeGuards(info, base, targets, host, userCmd) {
   if (loosen.length === 0) return null
   const list = loosen.slice(0, 10).map((s) => `- ${s}`).join('\n') + (loosen.length > 10 ? `\n- …và ${loosen.length - 10} mục nữa` : '')
   const names = targets.map(safeName).join(' ')
-  if (host === 'claude') {
-    return permission('ask',
-      'Nhánh này sửa luật kiểm tra của dự án hoặc tắt kiểm tra ở vài chỗ, cần bạn đồng ý trước khi AI gộp vào nhánh chính. ' +
-      `Gộp ${names} vào ${base} sẽ kèm:\n${list}\nĐồng ý nếu đúng ý bạn; từ chối thì AI sẽ gỡ phần nới luật rồi gộp lại.`)
-  }
-  // Codex/Devin không có ask ở PreToolUse ⇒ deny, user tự chạy lệnh gộp. Tên nhánh in vào dòng lệnh chỉ khi toàn ký tự an toàn (như gateAskMainPush).
+  // Mọi host: deny nhắn AI tự gỡ, không hộp hỏi (user no code luôn bấm Allow) và không lối AI tự mở [chốt 2026-10-14].
+  // User thật muốn nới luật ⇒ chính user chạy lệnh gộp; tên nhánh in vào dòng lệnh chỉ khi toàn ký tự an toàn.
   const printable = userCmd === undefined ? targets.every((t) => SAFE_REF.test(t)) : userCmd !== null
-  const head = 'Nhánh này sửa luật kiểm tra của dự án hoặc tắt kiểm tra ở vài chỗ nên cần chính bạn chạy lệnh gộp; AI dừng lại và ' +
-    `${printable ? 'đưa bạn lệnh để chép' : 'không đưa lệnh vì tên nhánh có ký tự lạ'}. Gộp ${names} vào ${base} sẽ kèm:\n${list}\n`
   const where = info.toplevel.replace(/[\x00-\x1f\x7f]/g, ' ')
-  if (!printable) {
-    return permission('deny', `${head}AI không tự chạy lệnh này: bạn mở terminal trong thư mục ${where}, tự kiểm tên nhánh (git branch -a) rồi tự gõ lệnh gộp đúng nhánh muốn gộp; xong thì báo AI làm tiếp.`)
-  }
-  return permission('deny', `${head}AI không tự chạy lệnh này: user chạy trong thư mục ${where}, xong thì báo AI làm tiếp:\n${userCmd ?? `git merge ${targets.join(' ')}`}`)
+  const byUser = printable
+    ? `chép cho user đúng lệnh này để tự chạy trong thư mục ${where}, xong thì làm tiếp:\n${userCmd ?? `git merge ${targets.join(' ')}`}`
+    : `tên nhánh có ký tự lạ nên không đưa lệnh: hướng dẫn user mở terminal trong thư mục ${where}, kiểm tên nhánh (git branch -a) rồi tự gõ lệnh gộp.`
+  return permission('deny',
+    'Nhánh này nới luật kiểm tra của dự án hoặc tắt kiểm tra ở vài chỗ nên AI chưa gộp; AI sẽ gỡ phần nới luật rồi gộp lại. ' +
+    `Gộp ${names} vào ${base} sẽ kèm:\n${list}\n` +
+    'Việc của AI: gỡ phần nới luật/dòng tắt luật trên nhánh, kiểm lại rồi gộp. Không tự lách. Chỉ khi user nói rõ muốn đổi luật: kể trong chat bằng ' +
+    `lời đời thường (nới gì, người dùng app bị ảnh hưởng gì), rồi ${byUser}`)
 }
 
 // Cổng gộp cho một danh sách đích (nhánh/commit) sắp vào nhánh chính `base`: đủ dấu review/qa/test, rồi chống lách (mergeGuards).
@@ -1437,12 +1486,17 @@ async function hookBash(input) {
   const patch = patchFiles(cmd)
   if (!mentionsPatch && patch.length === 0 && !GIT_WORDS.test(cmd)) return nudge
   let cwd = path.resolve(toNative(n.cwd))
-  let ask = null // ask chỉ được trả khi không đoạn nào khác bị deny (deny thắng ask)
-  let note = null // lời nhắc không chặn (vd thư viện mới chưa kiểm được); trả khi không có deny/ask
+  let note = null // lời nhắc không chặn (vd thư viện mới chưa kiểm được); trả khi không có deny
   let sawAdd = false // đã có `git add` đứng trước trong cùng lệnh: index lúc này chưa phản ánh commit sắp tạo
   let cwdKnown = true // false sau một cd/pushd/popd tới chỗ không tính ra được (biến, ~, -, $(…), cd trần)
   const dirs = [{ cwd, known: true }] // các thư mục lệnh đi qua, để kiểm patch khi apply_patch nằm trong chuỗi (bash -c "…") không biết chạy ở đâu
   let patchCalls = 0 // số lời gọi apply_patch nhận ra được (đã kiểm theo chỗ gọi)
+  // cùng lệnh có sửa cấu hình remote/push (đổi được cách `git push` phía sau chạy) — xem gatePushSyntax
+  const cfgEdit = safely('cfgEdit', () => tokenize(cmd).some((t) => {
+    const c = parseGitSub(t, cwd)
+    return (c?.sub === 'config' && c.rest.some((x) => /^(remote|push|branch|alias|include|includeif)\./i.test(x))) ||
+      (c?.sub === 'remote' && c.rest.some((x) => x.startsWith('--mirror')))
+  })) ?? true
   for (const toks of tokenize(cmd)) {
     if (/^(cd|pushd|popd)$/.test(toks[0] ?? '')) {
       const to = toks[0] === 'popd' ? null : toks[1]
@@ -1459,6 +1513,8 @@ async function hookBash(input) {
       const out = safely('denyDirectEdit', () => denyPatchUse(patch, states, n.host))
       if (out) return out
     }
+    const wrapped = safely('gateWrappedPush', () => gateWrappedPush(toks))
+    if (wrapped) return wrapped
     const g = parseGitSub(toks, cwd)
     if (!g) continue
     let out = null
@@ -1470,19 +1526,17 @@ async function hookBash(input) {
     } else if (g.sub === 'commit') {
       out = safely(`gateSecrets ${g.sub}`, () => gateSecrets(g)) ?? await safelyAsync('gateDeps', () => gateDeps(g, sawAdd))
     } else if (g.sub === 'push') {
-      // `git push . x:main` là đưa nhánh x vào main ngay trong repo này (không có remote nào để hỏi): chỉ cổng gộp quyết định
-      const toHere = safely('isThisRepo', () => { const info = repoInfo(g.dir); const p = parsePushArgs(g.rest); return info !== null && isThisRepo(info, p.repo ?? p.positional[0]) })
+      // push thường lên nhánh chính: cho qua, không hỏi [chốt 2026-10-14]; `git push . x:main` (đưa nhánh vào main trong repo này) qua cổng gộp
       out = safely(`gateSecrets ${g.sub}`, () => gateSecrets(g)) ??
+        safely('gatePushSyntax', () => gatePushSyntax(toks, g, cfgEdit)) ??
         safely('gateForcePush', () => gateForcePush(g)) ??
         safely('gateDeleteMainPush', () => gateDeleteMainPush(g)) ??
-        await gateEntrySafe(g, n.host) ??
-        (toHere ? null : safely('gateAskMainPush', () => gateAskMainPush(g, n.host)))
+        await gateEntrySafe(g, n.host)
     } else if (DESTRUCTIVE_SUBS.has(g.sub)) {
       out = safely(`gateDestructive ${g.sub}`, () => gateDestructive(g))
     }
     if (!out && ENTRY_SUBS.has(g.sub)) out = await gateEntrySafe(g, n.host)
-    if (out?.hookSpecificOutput?.permissionDecision === 'ask') ask ??= out
-    else if (out && !out.hookSpecificOutput?.permissionDecision) note ??= out // chỉ nhắc (additionalContext): không cắt ngang các cổng sau
+    if (out && !out.hookSpecificOutput?.permissionDecision) note ??= out // chỉ nhắc (additionalContext): không cắt ngang các cổng sau
     else if (out) return out
   }
   // Có nội dung patch mà số lời gọi nhận ra được ít hơn số khối patch (gồm trường hợp không nhận ra lời gọi nào: biến, alias, find -exec…) ⇒ không biết patch
@@ -1493,16 +1547,6 @@ async function hookBash(input) {
   if (patch.length > 0 && patchCalls < Math.max(1, patchBlocks)) {
     const out = safely('denyDirectEdit', () => denyPatchUse(patch, dirs, n.host))
     if (out) return out
-  }
-  if (ask) { // ask thắng note nhưng không được làm rơi lời nhắc: kèm additionalContext cho AI, và một dòng trong hộp hỏi để user thấy
-    const extra = [note, nudge].filter(Boolean).map((x) => x.hookSpecificOutput.additionalContext)
-    if (extra.length === 0) return ask
-    const o = ask.hookSpecificOutput
-    return { hookSpecificOutput: {
-      ...o,
-      permissionDecisionReason: note ? `${o.permissionDecisionReason}\nLưu ý: lệnh này còn lưu thư viện mới chưa kiểm được độ an toàn (mạng lỗi hoặc quá giờ).` : o.permissionDecisionReason,
-      additionalContext: extra.join('\n'),
-    } }
   }
   if (note && nudge) { // hai lời nhắc: gộp thành một đầu ra
     return { hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: `${note.hookSpecificOutput.additionalContext}\n${nudge.hookSpecificOutput.additionalContext}` } }
