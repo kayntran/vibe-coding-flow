@@ -207,7 +207,7 @@ test('Claude hooks: mọi bí danh Devin vào đúng cổng; tên tool khác kh�
   const entries = claudeHooks('/tmp/kit')
   const match = (tool) => entries.filter(([ev, matcher]) => ev === 'PreToolUse' && new RegExp(matcher).test(tool)).map(([, , h]) => commandParts(h.command))
   for (const name of ['Edit', 'Write', 'NotebookEdit', 'edit', 'write', 'apply_patch', 'notebook_edit']) assert.deepEqual(match(name), ['flow-gate.mjs edit'])
-  for (const name of ['Bash', 'exec']) assert.deepEqual(match(name), ['flow-gate.mjs bash', 'flow-dispatch.mjs commit'])
+  for (const name of ['Bash', 'PowerShell', 'exec']) assert.deepEqual(match(name), ['flow-gate.mjs bash', 'flow-dispatch.mjs commit'])
   for (const name of ['Agent', 'Task', 'run_subagent']) assert.deepEqual(match(name), ['flow-dispatch.mjs agent'])
   for (const name of ['Read', 'execute_query', 'rewrite', 'mcp__server__edit']) assert.deepEqual(match(name), [])
 })

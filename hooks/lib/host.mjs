@@ -5,7 +5,7 @@
 // (PostToolUse thật thấy `collaborationspawn_agent`) · Devin: exec, edit, write, apply_patch, notebook_edit, run_subagent.
 // So khớp không phân biệt hoa thường: cổng thà bắt dư hơn để lọt.
 const TOOL_KIND = new Map([
-  ['bash', 'bash'], ['exec', 'bash'],
+  ['bash', 'bash'], ['exec', 'bash'], ['powershell', 'bash'], // PowerShell: tool lệnh của Claude Code trên Windows
   ['edit', 'edit'], ['write', 'edit'], ['multiedit', 'edit'], ['notebookedit', 'edit'], ['notebook_edit', 'edit'], ['apply_patch', 'edit'],
   ['agent', 'agent'], ['task', 'agent'], ['spawn_agent', 'agent'], ['collaborationspawn_agent', 'agent'], ['run_subagent', 'agent'],
 ])

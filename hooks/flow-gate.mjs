@@ -2,8 +2,8 @@
 //   hook : edit (PreToolUse Edit|Write|NotebookEdit + apply_patch của Codex/Devin) · bash (PreToolUse Bash: chặn git merge thiếu dấu,
 //          git commit/push có secret, commit thêm thư viện lạ, lệnh phá huỷ trên nhánh chính, `apply_patch <<` vào thư mục chính;
 //          KHÔNG hộp hỏi (ask) nào [chốt 2026-10-14: user no code luôn bấm Allow]: push thường lên nhánh chính cho qua; git merge mà nhánh đích nới
-//          luật — đụng file luật (kể cả .claude/flow.json, kit/checkers.json) hoặc thêm dòng tắt luật — ⇒ deny nhắn AI tự gỡ (user thật muốn đổi luật
-//          thì chính user chạy lệnh gộp, AI không có lối tự mở), chép repo "chỉ học" ⇒ deny, không so được
+//          luật — đụng file luật (kể cả .claude/flow.json, kit/checkers.json) hoặc thêm dòng tắt luật ngoài file máy sinh — ⇒ deny nhắn AI tự gỡ
+//          (không lối AI tự mở, không đẩy lệnh terminal sang user [chốt 2026-10-15]), chép repo "chỉ học" ⇒ deny, không so được
 //          diff base...<đích> ⇒ deny; pull ., cherry-pick, rebase, fetch ., push ., branch -f, update-ref, checkout -B, switch -C đưa nhánh vào main
 //          ⇒ qua đúng cổng như git merge) · stop (Stop) ·
 //          subagent-stop (SubagentStop: receipt + audit phạm vi làn)
@@ -662,11 +662,11 @@ function gateSecrets(g) {
   }
   if (truncated) {
     if (lines.size === 0) {
-      reason.push(`Phần ${where} quá lớn nên chưa kiểm hết được có lộ mật khẩu hay khoá bí mật không; AI sẽ dừng lại và nhờ bạn tự chạy lệnh.`)
+      reason.push(`Phần ${where} quá lớn nên chưa kiểm hết được có lộ mật khẩu hay khoá bí mật không; AI sẽ chia nhỏ phần thay đổi rồi lưu lại.`)
     }
     reason.push(
       `Diff quá lớn để quét hết (vượt ${SCAN_LIMIT / 1048576} MB, chỉ quét phần đầu) nên không coi là sạch. ` +
-      `User tự chạy lệnh ${verb} nếu chắc không có secret.`,
+      `Chia thành các lần ${verb} nhỏ hơn để quét được hết; không đưa lệnh terminal cho user chạy.`,
     )
   }
   return permission('deny', reason.join(' '))
@@ -700,7 +700,7 @@ function gateForcePush(g) {
   return permission('deny',
     'Không ghi đè lịch sử của nhánh chính trên máy chủ được vì không hoàn tác được; AI sẽ đẩy lên một nhánh riêng rồi gộp sau. ' +
     `Không push ép (--force / --force-with-lease / --mirror / --prune / refspec +) lên nhánh chính ${hit.name}: ghi đè hoặc xoá ref trên remote không hoàn tác được. ` +
-    'Push nhánh riêng rồi gộp, hoặc để user tự chạy lệnh này.')
+    'Push nhánh riêng rồi gộp; không đưa lệnh terminal cho user chạy.')
 }
 
 // g = parseGitSub của `git push`. Deny khi xoá nhánh chính trên remote: --delete/-d main|master, hoặc refspec rỗng nguồn `:main` / `:refs/heads/main`.
@@ -716,8 +716,8 @@ function gateDeleteMainPush(g) {
     .find(isMainName)
   if (!hit) return null
   return permission('deny',
-    'Không xoá nhánh chính trên máy chủ được; AI sẽ bỏ lệnh này và để bạn tự chạy nếu thật sự cần. ' +
-    `Không xoá nhánh chính ${hit} trên remote (git push --delete / refspec :${hit}). User tự chạy lệnh này nếu thật sự cần.`)
+    'Không xoá nhánh chính trên máy chủ được; AI sẽ bỏ lệnh này và làm cách khác.' + ' ' +
+    `Không xoá nhánh chính ${hit} trên remote (git push --delete / refspec :${hit}). Thật sự cần ⇒ kể user bằng lời đời thường, không đưa lệnh terminal cho user chạy.`)
 }
 
 // Duyệt cờ của lệnh git đơn giản: { short: Set<ký tự cờ ngắn>, long: Set<tên cờ dài không có =giá trị>, pos: [đối số không phải cờ, gồm cả sau `--`] }.
@@ -746,7 +746,7 @@ function gateDestructive(g) {
   const here = `thư mục chính của ${info.toplevel} (nhánh ${info.branch ?? '?'})`
   const wipe = (what) =>
     'Lệnh này sẽ xoá các thay đổi chưa lưu ở bản chính của dự án nên đã dừng lại; AI sẽ làm việc trong một bản sao riêng thay vào đó. ' +
-    `${what} ở ${here} sẽ xoá thay đổi chưa commit. Làm trong worktree, hoặc để user tự chạy lệnh này.`
+    `${what} ở ${here} sẽ xoá thay đổi chưa commit. Làm trong worktree; không đưa lệnh terminal cho user chạy.`
   switch (g.sub) {
     case 'reset':
       if (f.long.has('hard') && !info.linked && isMainName(info.branch)) return permission('deny', wipe('git reset --hard'))
@@ -756,16 +756,16 @@ function gateDestructive(g) {
       const main = f.pos.map((n) => n.replace(/^refs\/heads\//, '')).find(isMainName)
       if (del && main) {
         return permission('deny',
-          'Không xoá nhánh chính được; AI sẽ bỏ lệnh này và để bạn tự chạy nếu thật sự cần. ' +
-          `Không xoá nhánh chính ${main} bằng git branch -D / -d -f. User tự chạy lệnh này nếu thật sự cần.`)
+          'Không xoá nhánh chính được; AI sẽ bỏ lệnh này và làm cách khác.' + ' ' +
+          `Không xoá nhánh chính ${main} bằng git branch -D / -d -f. Thật sự cần ⇒ kể user bằng lời đời thường, không đưa lệnh terminal cho user chạy.`)
       }
       if (flag('m', 'move') || f.short.has('M')) {
         // `-m <x> <đích>` hoặc `-m <đích>` (đổi tên nhánh hiện tại); đích là nhánh chính khác nguồn ⇒ đè nhánh chính
         const [from, to] = f.pos.length >= 2 ? f.pos : [info.branch, f.pos[0]]
         if (isMainName(to) && from !== to) {
           return permission('deny',
-            'Không đè lên nhánh chính được; AI sẽ đặt tên khác cho nhánh, hoặc để bạn tự chạy nếu thật sự cần. ' +
-            `Không đè nhánh chính ${to} bằng git branch -m / -M. User tự chạy lệnh này nếu thật sự cần.`)
+            'Không đè lên nhánh chính được; AI sẽ đặt tên khác cho nhánh. ' +
+            `Không đè nhánh chính ${to} bằng git branch -m / -M. Thật sự cần ⇒ kể user bằng lời đời thường, không đưa lệnh terminal cho user chạy.`)
         }
       }
       return null
@@ -813,6 +813,23 @@ function suppressionOf(text) {
   if (!m) return null
   const reason = text.slice(m.index + m[0].length).replace(/\*\/.*$/, '')
   return (reason.match(/[\p{L}\p{N}]/gu) ?? []).length >= 3 ? null : '@ts-expect-error không kèm lý do'
+}
+
+// File do công cụ sinh ra (không ai sửa tay): theo đường dẫn quen của bộ sinh code, hoặc đầu file có dấu "tự sinh, đừng sửa".
+// Dòng tắt luật trong đó là của bộ sinh, không phải AI lách luật ⇒ không tính. Wails ghi dấu bằng tiếng Wales ("Cynhyrchwyd…").
+const GENERATED_PATH = /(^|\/)(wailsjs|__generated__|generated|node_modules|vendor)\/|\.(gen|generated|pb)\.[cm]?[jt]sx?$|(_gen|\.pb|_templ|zz_generated[^/]*)\.go$/i
+// Dấu phải là một dòng comment ở 5 dòng đầu, đúng câu của bộ sinh (không bắt "do not edit" lẫn trong câu thường của file viết tay).
+// Cả dòng phải đúng câu bộ sinh (neo cuối dòng) — "This file was automatically generated years ago; edit it…" là file tay (review Grok).
+const GENERATED_MARK = new RegExp('^\\s*(?:\\/\\/|#|\\/\\*+|\\*|<!--|--)\\s*(?:' + [
+  'Code generated\\b[^\\n]{0,80}\\bDO NOT EDIT\\.?', // Go, sqlc, protoc… — sau DO NOT EDIT chỉ còn dấu chấm rồi hết dòng
+  '@generated',
+  'This file (?:is|was) (?:auto-?generated|automatically generated)(?: by [\\w@/-]+(?: [\\w@/-]+){0,3})?\\.?(?:\\s*DO NOT EDIT\\.?)?',
+  'Cynhyrchwyd y ffeil hon yn awtomatig\\. PEIDIWCH Â MODIWL', // Wails
+].join('|') + ')\\s*(?:\\*\\/|-->)?\\s*$', 'm')
+function isGeneratedFile(info, sha, file) {
+  if (GENERATED_PATH.test(file)) return true
+  const head = git(info.dir, ['cat-file', '-p', `${sha}:${file}`])
+  return head !== null && GENERATED_MARK.test(head.split('\n', 5).join('\n'))
 }
 
 // Các dòng THÊM tắt luật trong patch `-U0`: [{ file, line, what }]. Đếm dòng theo số dòng ghi ở đầu mỗi hunk nên dòng thêm bắt đầu
@@ -897,8 +914,7 @@ const GUARD_OPENINGS = {
 
 // Mọi merge target: so base...<target> (không phải base...HEAD). Trả deny khi không kiểm được (fail closed) hoặc chép repo chỉ-học;
 // trả deny (mọi host) nhắn AI gỡ phần nới luật khi nhánh nới luật hoặc thêm dòng tắt luật; null khi sạch.
-// userCmd = dòng lệnh để user tự chạy khi user nói rõ muốn đổi luật và lệnh gốc không phải `git merge`: chuỗi = in ra, null = không in được (có ký tự lạ), thiếu = `git merge <đích>`.
-async function mergeGuards(info, base, targets, host, userCmd) {
+async function mergeGuards(info, base, targets) {
   const stops = [] // { kind: 'unknown'|'copy'|'missing', msg }
   const loosen = [] // việc nới luật, mỗi mục một câu đời thường
   const multi = targets.length > 1
@@ -917,7 +933,10 @@ async function mergeGuards(info, base, targets, host, userCmd) {
       const limits = st === 'M' && file === 'docs/arch.json' && mergeBase ? limitChanges(info.dir, mergeBase, sha) : []
       loosen.push(`${CHANGE_VERBS[st] ?? 'đổi'} file ${label} (${file})${limits.length ? `: ${limits.join('; ')}` : ''}${at}`)
     }
-    for (const s of addedSuppressions(diff.patch)) loosen.push(`thêm dòng tắt luật ở ${s.file}:${s.line} (${s.what})${at}`)
+    for (const s of addedSuppressions(diff.patch)) {
+      if (isGeneratedFile(info, sha, s.file)) continue // máy sinh (Wails bindings, protobuf…): AI không gỡ được, không phải lách luật
+      loosen.push(`thêm dòng tắt luật ở ${s.file}:${s.line} (${s.what})${at}`)
+    }
     // chép repo chỉ-học: chỉ khi dự án có thẻ chi-hoc (chiHocMatches trả ngay khi không có thẻ); lỗi bất ngờ ⇒ chặn nếu dự án có docs/research
     let hoc
     try {
@@ -944,34 +963,29 @@ async function mergeGuards(info, base, targets, host, userCmd) {
   if (loosen.length === 0) return null
   const list = loosen.slice(0, 10).map((s) => `- ${s}`).join('\n') + (loosen.length > 10 ? `\n- …và ${loosen.length - 10} mục nữa` : '')
   const names = targets.map(safeName).join(' ')
-  // Mọi host: deny nhắn AI tự gỡ, không hộp hỏi (user no code luôn bấm Allow) và không lối AI tự mở [chốt 2026-10-14].
-  // User thật muốn nới luật ⇒ chính user chạy lệnh gộp; tên nhánh in vào dòng lệnh chỉ khi toàn ký tự an toàn.
-  const printable = userCmd === undefined ? targets.every((t) => SAFE_REF.test(t)) : userCmd !== null
-  const where = info.toplevel.replace(/[\x00-\x1f\x7f]/g, ' ')
-  const byUser = printable
-    ? `chép cho user đúng lệnh này để tự chạy trong thư mục ${where}, xong thì làm tiếp:\n${userCmd ?? `git merge ${targets.join(' ')}`}`
-    : `tên nhánh có ký tự lạ nên không đưa lệnh: hướng dẫn user mở terminal trong thư mục ${where}, kiểm tên nhánh (git branch -a) rồi tự gõ lệnh gộp.`
+  // Mọi host: deny nhắn AI tự gỡ — không hộp hỏi, không lối AI tự mở [fn9k], và KHÔNG đẩy lệnh terminal sang user (user no code) [chốt 2026-10-15].
   return permission('deny',
     'Nhánh này nới luật kiểm tra của dự án hoặc tắt kiểm tra ở vài chỗ nên AI chưa gộp; AI sẽ gỡ phần nới luật rồi gộp lại. ' +
     `Gộp ${names} vào ${base} sẽ kèm:\n${list}\n` +
-    'Việc của AI: gỡ phần nới luật/dòng tắt luật trên nhánh, kiểm lại rồi gộp. Không tự lách. Chỉ khi user nói rõ muốn đổi luật: kể trong chat bằng ' +
-    `lời đời thường (nới gì, người dùng app bị ảnh hưởng gì), rồi ${byUser}`)
+    'Việc của AI: gỡ phần nới luật/dòng tắt luật trên nhánh, kiểm lại rồi gộp. Không tự lách, KHÔNG đưa lệnh terminal cho user tự chạy (user không code). ' +
+    'File do máy sinh (Wails wailsjs/, có dấu "DO NOT EDIT"…) đã được bỏ qua sẵn; nếu chỗ bị nêu thật sự không gỡ được hoặc user nói rõ muốn đổi luật ' +
+    '⇒ kể user một câu đời thường (chỗ nào, vì sao kit chặn) rồi dừng việc gộp, chờ sửa kit.')
 }
 
 // Cổng gộp cho một danh sách đích (nhánh/commit) sắp vào nhánh chính `base`: đủ dấu review/qa/test, rồi chống lách (mergeGuards).
 // Dùng chung cho `git merge` và mọi đường khác đưa commit vào nhánh chính (entrants).
-async function gateTargets(info, base, targets, host, userCmd) {
+async function gateTargets(info, base, targets, host) {
   const lacking = (await Promise.all(targets.map(async (target) => ({ target, st: await tryGateState(info, base, target) }))))
     .filter(({ st }) => st && st.missing.length > 0)
   if (lacking.length === 0) {
     // Mọi dấu đủ: xét tiếp chống lách. Lỗi bất ngờ ⇒ chặn (cổng này là chỗ AI có thể lách luật, không cho qua âm thầm).
     try {
-      return await mergeGuards(info, base, targets, host, userCmd)
+      return await mergeGuards(info, base, targets)
     } catch (e) {
       log(`mergeGuards: ${e?.stack ?? e}`)
       return permission('deny',
         'Chưa kiểm được nhánh sắp gộp có nới luật của dự án hay không nên AI dừng lại, chưa gộp; AI sẽ báo bạn lỗi này thay vì tự gộp. ' +
-        `Bước kiểm luật bị lỗi: ${showName(e?.message ?? e)}. Xem flow-gate.log; user tự chạy lệnh gộp nếu đã tự kiểm.`)
+        `Bước kiểm luật bị lỗi: ${showName(e?.message ?? e)}. Xem flow-gate.log, sửa nguyên nhân rồi gộp lại; không đưa lệnh terminal cho user chạy.`)
     }
   }
   const detail = lacking
@@ -1010,7 +1024,6 @@ const CHERRY_VALUE_FLAGS = new Set(['-m', '-X', '--mainline', '--strategy-option
 const REBASE_VALUE_FLAGS = new Set(['-s', '-X', '-x', '-C', '--strategy', '--strategy-option', '--exec', '--onto', '--empty'])
 const SWITCH_VALUE_FLAGS = new Set(['-b', '-B', '-c', '-C', '--create', '--force-create', '--orphan', '--conflict'])
 const ENTRY_SUBS = new Set(['pull', 'cherry-pick', 'rebase', 'fetch', 'branch', 'checkout', 'switch', 'update-ref'])
-const SAFE_TOKEN = /^[A-Za-z0-9._/:+@^~=,-]+$/ // token an toàn để in vào dòng lệnh user chép (không dấu cách, nháy, ; | & $ ` ( ) < >)
 
 // rest → { pos: đối số không phải cờ (gồm cả sau `--`), vals: Map cờ → giá trị }. Cờ dài trong valueFlags lấy token kế hoặc dạng --cờ=giá-trị;
 // cụm cờ ngắn (-fB, -fBmain, -qC main) duyệt từng ký tự như git: gặp cờ nhận giá trị thì phần dính liền sau nó (hoặc token kế nếu hết cụm) là giá trị.
@@ -1064,13 +1077,11 @@ function isThisRepo(info, repo, viaName = true) {
 }
 
 // g = parseGitSub. Trả null (lệnh này không đưa commit nhánh khác vào nhánh chính), { unknown: lý do } (không quy ra được đích) hoặc
-// { targets, cmd } (cmd = dòng lệnh gốc để user chép khi host không có ask; null nếu có ký tự lạ).
+// { targets }.
 function entrants(g, info, base) {
   const onMain = info.branch === base
   const rest = g.rest
-  const cmdParts = [g.sub, ...rest]
-  const cmd = cmdParts.every((t) => SAFE_TOKEN.test(t)) ? `git ${cmdParts.join(' ')}` : null
-  const into = (targets) => (targets.length ? { targets, cmd } : null)
+  const into = (targets) => (targets.length ? { targets } : null)
   const cfg = (k) => (info.branch ? (git(info.dir, ['config', '--get', `branch.${info.branch}.${k}`]) ?? '').trim() : '')
   // Lấy srcs từ repo: repo `.` ⇒ ref cục bộ, kiểm được ngay. Remote khác ⇒ chỉ nhánh chính của remote là bình thường (đồng bộ); nhánh khác chưa tải về nên chưa biết nội dung.
   const fromRepo = (repo, srcs, verb) => {
@@ -1089,8 +1100,8 @@ function entrants(g, info, base) {
   const viaRefspecs = (repo, specs, verb, mergesHere) => {
     const toMain = specs.filter((s) => headName(refDst(s)) === base)
     if (toMain.some((s) => !refSrc(s))) {
-      return { deny: `Không xoá hay đặt lại nhánh chính bằng lệnh có nguồn bỏ trống được; AI sẽ bỏ lệnh này và để bạn tự chạy nếu thật sự cần. ` +
-        `${verb} với đích ${base} mà nguồn để trống (:${base}) xoá hoặc đặt lại nhánh chính theo HEAD. User tự chạy lệnh này nếu thật sự cần.` }
+      return { deny: `Không xoá hay đặt lại nhánh chính bằng lệnh có nguồn bỏ trống được; AI sẽ bỏ lệnh này và làm cách khác. ` +
+        `${verb} với đích ${base} mà nguồn để trống (:${base}) xoá hoặc đặt lại nhánh chính theo HEAD. Thật sự cần ⇒ kể user bằng lời đời thường, không đưa lệnh terminal cho user chạy.` }
     }
     return fromRepo(repo, (mergesHere ? specs : toMain).map(refSrc), verb)
   }
@@ -1164,7 +1175,7 @@ async function gateEntry(g, host) {
   if (!e) return null
   if (e.deny) return permission('deny', e.deny)
   if (e.unknown) return permission('deny', `${GUARD_OPENINGS.unknown}\n- ${e.unknown}`)
-  return gateTargets(info, base, e.targets, host, e.cmd)
+  return gateTargets(info, base, e.targets, host)
 }
 
 // Lỗi bất ngờ ở bước phân tích lệnh (không phải ở bước kiểm dấu, đã tự chặn trong gateTargets) ⇒ ghi log rồi cho qua như các cổng git khác.
@@ -1293,7 +1304,7 @@ async function gateDeps(g, sawAdd) {
     return permission('deny',
       'Thư viện mới vừa thêm có dấu hiệu không an toàn nên chưa lưu; AI sẽ bỏ hoặc thay thư viện đó rồi lưu lại. ' +
       `Thư viện mới trong phần sắp commit có vấn đề: ${shown}. Kiểm lại tên có đúng không (AI hay bịa hoặc gõ nhầm tên), chọn bản đủ tuổi và không có lỗ hổng ` +
-      '(kiểm lại bằng node ~/.claude/hooks/deps-check.mjs --vet npm:<tên>). Đã chắc chắn thì user tự chạy lệnh commit.' +
+      '(kiểm lại bằng node ~/.claude/hooks/deps-check.mjs --vet npm:<tên>); không đưa lệnh terminal cho user chạy.' +
       (bad.some((r) => r.source)
         ? ' Thư viện nguồn git/URL mà user đã duyệt thì ghi từng mục "tên@nguồn" (nguồn y hệt trong package.json) vào "trustedDepSources" trong .claude/flow.json, ' +
           `rồi git add .claude/flow.json bằng một lệnh riêng trước lệnh commit — chỉ bản sắp commit mới được tính (diff hiện ra khi review). Mục cần ghi: ${
@@ -1468,9 +1479,12 @@ function deletesDir(toks, depth = 0) {
   return false
 }
 const DIR_DELETE_DENY = permission('deny',
-  'Xoá cả một thư mục cần bạn đồng ý nên AI không tự chạy; AI sẽ tạo thư mục mới để làm tiếp thay vì xoá. ' +
-  'Lệnh xoá đệ quy (rm -r/-rf, Remove-Item -Recurse, rmdir /s) làm bộ lọc an toàn bật hộp hỏi user. Cần chỗ trống để chạy test/build ⇒ tạo thư mục ' +
-  'mới (tên khác, vd thêm hậu tố thời gian) trong scratchpad hoặc thư mục tạm. Thật sự phải xoá ⇒ hỏi user trong chat và đưa lệnh để user tự chạy.')
+  'Xoá hẳn cả một thư mục thì không lấy lại được nên AI không chạy lệnh này; AI sẽ dọn bằng cách an toàn thay thế. ' +
+  'Lệnh xoá đệ quy (rm -r/-rf, Remove-Item -Recurse, rmdir /s) bị chặn. Dọn worktree (bản sao trong .claude/worktrees) ⇒ ' +
+  '`git -c core.longpaths=true worktree remove --force "<đường dẫn>"` rồi `git worktree prune`. Cần chỗ trống để chạy test/build ⇒ tạo thư mục ' +
+  'mới (tên khác, vd thêm hậu tố thời gian) trong scratchpad hoặc thư mục tạm. Thật sự phải bỏ thư mục khác ⇒ chuyển vào Thùng rác (lấy lại được) bằng PowerShell ' +
+  '`Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory("<đường dẫn>", "OnlyErrorDialogs", "SendToRecycleBin")`. ' +
+  'Không bật hộp hỏi, không đưa lệnh terminal cho user chạy.')
 
 async function hookBash(input) {
   const n = normalize(input, process.env)

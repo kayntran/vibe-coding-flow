@@ -84,6 +84,14 @@ test('normalize Claude: Bash → bash + command', () => {
   assert.deepEqual(r, { host: 'claude', event: 'PreToolUse', tool: 'bash', command: 'git status', files: [], cwd: '/proj' })
 })
 
+test('normalize Claude: PowerShell (Windows) → bash + command (review Grok: nhắc sổ lúc commit qua PowerShell)', () => {
+  const r = normalize({
+    session_id: 's1', transcript_path: '/t.jsonl', cwd: '/proj', permission_mode: 'default',
+    hook_event_name: 'PreToolUse', tool_name: 'PowerShell', tool_input: { command: 'git commit -m x' },
+  })
+  assert.deepEqual(r, { host: 'claude', event: 'PreToolUse', tool: 'bash', command: 'git commit -m x', files: [], cwd: '/proj' })
+})
+
 // Claude Code (2026-10) gửi kèm prompt_id ở mọi hook — trùng tên trường của Devin; transcript_path (Devin không gửi) là dấu Claude.
 test('normalize Claude: payload thật có prompt_id + transcript_path + scratchpad_dir → vẫn là claude (kể cả env DEVIN_PROJECT_DIR khi Devin làm vỏ)', () => {
   const claude = {
