@@ -32,8 +32,9 @@ Chỉ chạy khi user đã gật trong chat. Nhánh chính tên `master`/khác �
    bài học cũ ⇒ `solutions.mjs gap <projectRoot> <dang_loi>`; lặp lần 2 mà chưa có máy kiểm ⇒ đề xuất theo thang nó in
    (luật có sẵn → luật cấm tuỳ biến → ast-grep → test → hook → lời dặn) và hỏi user một câu. Báo user MỘT dòng ("ghi
    1 bài học: …"). Hằng tháng `solutions.mjs ra-soat` — bài học không còn đúng với code thì sửa hoặc bỏ.
-4c. **Điểm lưu (sau gộp):** `node ~/.claude/hooks/luu.mjs tao <projectRoot> "<việc vừa xong, bằng lời user>"` — chỉ trên
+4c. **Điểm lưu (sau gộp):** `node ~/.claude/hooks/luu.mjs tao <projectRoot> "<việc vừa xong, bằng lời user>" --chi-moc` — chỉ trên
    máy (tag `luu/…`, không đẩy lên mạng); để user nói "quay về lúc …" sau này. Không báo riêng, gộp vào câu báo kết quả.
+   **Luôn `--chi-moc`:** thiếu nó, file dở của phiên khác ở thư mục chính bị gom thành commit trên nhánh chính (đã dính 2 lần).
 5. **Trước khi push:** `git log --oneline origin/main..main`. Ngoài commit của mình còn commit khác chưa push (của phiên
    khác/việc cũ) ⇒ liệt kê cho user, hỏi có push kèm không — push là đẩy tất cả. Rồi `git push origin main` (nếu có
    remote) → `git worktree remove <path> && git branch -d <branch>` → `node ~/.claude/hooks/wt-env.mjs release <path>`.

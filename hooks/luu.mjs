@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // luu: CLI điểm lưu của dự án (chỉ trên máy, không đẩy lên mạng). Thư viện: lib/luu.mjs. Spec: docs/specs/2026-10-12-flow-v7-dot3 (AC-16).
 //   bat  <thư mục>                         chưa có git ⇒ git init + .gitignore + commit đầu + điểm lưu "Bắt đầu"; đã có git ⇒ không làm gì
-//   tao  <thư mục> "<tên đời thường>"      điểm lưu tại vị trí hiện tại; còn file đang sửa dở ⇒ lưu chúng thành commit mới rồi gắn điểm (quét khoá, trừ dữ liệu); không còn gì dở và đã có điểm ở đây ⇒ không tạo trùng
+//   tao  <thư mục> "<tên đời thường>" [--chi-moc]  điểm lưu tại vị trí hiện tại; còn file đang sửa dở ⇒ lưu chúng thành commit mới rồi gắn điểm (quét khoá, trừ dữ liệu); không còn gì dở và đã có điểm ở đây ⇒ không tạo trùng
+//                                          --chi-moc: chỉ gắn điểm vào commit hiện tại, file dở để yên (sau khi gộp, thư mục chính có việc dở của phiên khác)
 //   ds   <thư mục> [--json]                danh sách điểm lưu, mới nhất trước
 //   tim  <thư mục> "<câu>" [--json]        điểm lưu khớp câu (không dấu, không phân biệt hoa thường), xếp hạng
 //   xem  <thư mục> <điểm> [--json]         những gì sẽ bị gỡ nếu quay về điểm đó
@@ -17,7 +18,7 @@ import { LuuError, bat, ds, quay, tao, tim, xem } from './lib/luu.mjs'
 
 const USAGE = `dùng: luu.mjs <lệnh> <thư mục dự án> [...]
   bat  <dir>                      bật điểm lưu (git init nếu chưa có) + điểm "Bắt đầu"
-  tao  <dir> "<tên>"              tạo điểm lưu tại vị trí hiện tại
+  tao  <dir> "<tên>" [--chi-moc]  tạo điểm lưu tại vị trí hiện tại (--chi-moc: không lưu file đang sửa dở)
   ds   <dir> [--json]             danh sách điểm lưu
   tim  <dir> "<câu>" [--json]     tìm điểm lưu theo lời
   xem  <dir> <điểm> [--json]      những gì sẽ bị gỡ nếu quay về điểm đó
@@ -31,7 +32,7 @@ const clean = (s, max = 1000) => String(s ?? '').replace(/[​-‏‪-‮⁠-⁤
 const usage = (msg) => new LuuError(`${msg}\n${USAGE}`, { exit: 2 })
 
 function parse(argv) {
-  const o = { json: false, doiLuat: false, khongKiem: false, viecDo: undefined, help: false, pos: [] }
+  const o = { json: false, doiLuat: false, khongKiem: false, chiMoc: false, viecDo: undefined, help: false, pos: [] }
   let rest = false
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
@@ -40,6 +41,7 @@ function parse(argv) {
     else if (a === '--json') o.json = true
     else if (a === '--doi-luat') o.doiLuat = true
     else if (a === '--khong-kiem') o.khongKiem = true
+    else if (a === '--chi-moc') o.chiMoc = true
     else if (a === '-h' || a === '--help') o.help = true
     else if (a === '--viec-do' || a.startsWith('--viec-do=')) {
       const v = a === '--viec-do' ? argv[++i] : a.slice('--viec-do='.length)
@@ -62,10 +64,11 @@ function cmdBat(dir) {
   return [`Đã bật điểm lưu${r.initialized ? ' (tạo git mới)' : ''}: điểm "Bắt đầu" (${r.tag}).`]
 }
 
-function cmdTao(dir, name) {
-  const r = tao(dir, name, { now: nowOf() })
-  if (!r.created) return [`Chỗ này đã là điểm lưu "${r.name}" (${r.tag}) nên không tạo thêm.`]
-  return [`Đã lưu điểm "${r.name}" (${r.tag}, commit ${r.commit.slice(0, 7)})${r.files?.length ? `, gồm ${r.files.length} file đang sửa dở` : ''}.`]
+function cmdTao(dir, name, chiMoc) {
+  const r = tao(dir, name, { now: nowOf(), chiMoc })
+  const skipped = r.skipped?.length ? ` Bỏ qua ${r.skipped.length} file đang sửa dở (không lưu).` : ''
+  if (!r.created) return [`Chỗ này đã là điểm lưu "${r.name}" (${r.tag}) nên không tạo thêm.${skipped}`]
+  return [`Đã lưu điểm "${r.name}" (${r.tag}, commit ${r.commit.slice(0, 7)})${r.files?.length ? `, gồm ${r.files.length} file đang sửa dở` : ''}.${skipped}`]
 }
 
 function cmdDs(dir, json) {
@@ -133,7 +136,7 @@ function dispatch(o) {
   if (!dir) throw usage(`${clean(cmd, 40)}: thiếu thư mục dự án`)
   switch (cmd) {
     case 'bat': if (arg) throw usage('bat chỉ nhận thư mục'); return cmdBat(dir)
-    case 'tao': if (!arg) throw usage('tao cần tên điểm lưu'); return cmdTao(dir, [arg, ...extra].join(' '))
+    case 'tao': if (!arg) throw usage('tao cần tên điểm lưu'); return cmdTao(dir, [arg, ...extra].join(' '), o.chiMoc)
     case 'ds': if (arg) throw usage('ds chỉ nhận thư mục'); return cmdDs(dir, o.json)
     case 'tim': if (!arg) throw usage('tim cần câu để tìm'); return cmdTim(dir, [arg, ...extra].join(' '), o.json)
     case 'xem': if (!arg || extra.length) throw usage('xem cần đúng một điểm lưu'); return cmdXem(dir, arg, o.json)

@@ -3,7 +3,7 @@
 //
 // Hàm xuất (đều nhận thư mục dự án làm đối số đầu):
 //   bat(dir, { now })                  → { created, initialized, nested, root, tag?, commit? }   git init nếu chưa có + .gitignore + commit đầu + điểm "Bắt đầu"
-//   tao(dir, name, { now })            → { created, tag, name, commit, files? }                 còn thay đổi chưa commit ⇒ lưu chúng thành commit mới (files) rồi gắn điểm; không còn gì dở và HEAD đã có điểm ⇒ trả điểm cũ (created=false)
+//   tao(dir, name, { now, chiMoc })    → { created, tag, name, commit, files?, skipped? }       còn thay đổi chưa commit ⇒ lưu chúng thành commit mới (files) rồi gắn điểm; không còn gì dở và HEAD đã có điểm ⇒ trả điểm cũ (created=false); chiMoc ⇒ chỉ gắn điểm vào HEAD, file dở để yên (skipped)
 //   ds(dir)                            → [{ tag, name, time, iso, commit, since }]              mới nhất trước; since = số việc kể từ điểm đó
 //   tim(dir, query, { limit })         → [{ ...điểm, score, matched }]                          khớp không dấu trên tên + tiêu đề commit giữa các điểm; tên khớp nguyên văn đứng đầu, cụm từ liền nặng hơn khớp rời
 //   xem(dir, tag)                      → { target, after, commits, commitCount, dirty, worktrees, unmerged, changes, ruleFiles, keptData, blocker }
@@ -314,12 +314,18 @@ function makePoint(repo, commit, name, now) {
 
 // Còn thay đổi chưa commit ⇒ lưu chúng thành commit mới (cùng đường với "lưu tạm" của quay: quét khoá, trừ dữ liệu) rồi gắn điểm ở đó; `files` = các file đã lưu.
 // Không còn gì dở và HEAD đã là điểm lưu ⇒ trả điểm cũ (created=false). Nếu không, tạo điểm ở HEAD.
-export function tao(dir, name, { now = new Date() } = {}) {
+// chiMoc: chỉ gắn điểm vào HEAD, file dở để yên (skipped) — dùng sau khi gộp, lúc thư mục chính có việc dở của phiên khác.
+export function tao(dir, name, { now = new Date(), chiMoc = false } = {}) {
   const label = cleanName(name)
   const repo = needRepo(dir)
   needHead(repo)
   const ex = excludeSpecs(dataGlobs(repo.root))
   const files = unsavedFiles(repo, ex)
+  if (chiMoc) {
+    const old = pointAt(repo, headOf(repo))
+    if (old) return { created: false, ...old, skipped: files }
+    return { created: true, ...makePoint(repo, headOf(repo), label, now), skipped: files }
+  }
   if (files.length) {
     guardGitIdle(repo, 'lưu thay đổi')
     const saved = stageScanCommit(repo, ex, label)

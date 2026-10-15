@@ -249,6 +249,48 @@ describe('tao', () => {
     assert.equal(tagsOf(root).length, 3)
   })
 
+  // Sau khi gộp, thư mục chính còn việc dở của phiên KHÁC: tao thường gom chúng thành commit trên nhánh chính
+  // (đã dính 14/10 và 15/10 ở 1Scout, 23 file). chiMoc = chỉ gắn điểm vào HEAD, không lưu, không đụng file dở.
+  describe('chiMoc (gắn điểm, bỏ qua việc dở)', () => {
+    test('có file dở ⇒ điểm nằm trên HEAD, không commit mới, file dở + chỉ mục giữ nguyên', () => {
+      const { root, p3 } = scenario()
+      g(root, 'commit', '-q', '--allow-empty', '-m', 'việc vừa gộp') // HEAD mới, chưa có điểm
+      wr(root, 'README.md', 'phiên khác đang sửa\n'); wr(root, 'moi.txt', 'mới\n'); g(root, 'add', 'moi.txt')
+      const head = g(root, 'rev-parse', 'HEAD')
+      const status = g(root, 'status', '--porcelain')
+      const r = lu.tao(root, 'Sau gộp', { now: at(45), chiMoc: true })
+      assert.equal(r.created, true)
+      assert.notEqual(r.tag, p3.tag)
+      assert.equal(g(root, 'rev-parse', `${r.tag}^{commit}`), head, 'điểm gắn đúng commit vừa gộp')
+      assert.equal(g(root, 'rev-parse', 'HEAD'), head, 'không có commit mới')
+      assert.deepEqual([...r.skipped].sort(), ['README.md', 'moi.txt'])
+      assert.equal(g(root, 'status', '--porcelain'), status, 'file dở và bản đã stage giữ nguyên')
+      assert.equal(rd(root, 'README.md'), 'phiên khác đang sửa\n')
+    })
+
+    test('HEAD đã có điểm ⇒ không tạo trùng dù còn file dở', () => {
+      const { root, p3 } = scenario()
+      wr(root, 'README.md', 'dở\n')
+      const r = lu.tao(root, 'Tên khác', { now: at(46), chiMoc: true })
+      assert.equal(r.created, false)
+      assert.equal(r.tag, p3.tag)
+      assert.equal(tagsOf(root).length, 3)
+      assert.equal(rd(root, 'README.md'), 'dở\n')
+    })
+
+    test('CLI --chi-moc: báo số file dở đã bỏ qua, không commit', () => {
+      const { root } = scenario()
+      g(root, 'commit', '-q', '--allow-empty', '-m', 'việc vừa gộp')
+      wr(root, 'README.md', 'dở\n')
+      const head = g(root, 'rev-parse', 'HEAD')
+      const r = cliLuu('tao', root, 'Sau gộp', '--chi-moc')
+      assert.equal(r.status, 0, r.stderr)
+      assert.match(r.stdout, /bỏ qua 1 file đang sửa dở/i)
+      assert.equal(g(root, 'rev-parse', 'HEAD'), head)
+      assert.equal(g(root, 'status', '--porcelain'), 'M README.md')
+    })
+  })
+
   describe('còn thay đổi chưa commit', () => {
     test('HEAD đã có điểm mà đĩa có sửa + file mới + file xoá ⇒ lưu thành commit mới rồi gắn điểm (không báo "đã là điểm lưu")', () => {
       const { root, p3 } = scenario()
