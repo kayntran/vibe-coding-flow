@@ -6,6 +6,6 @@
   "ignore": ["wailsjs/**", "src/shared/safe-log.ts"],
   "ignoreDependencies": [
     "jscpd", // chạy bằng lệnh của máy kiểm (flow-check), không import trong code
-    "dependency-cruiser" // cấu hình .dependency-cruiser.cjs nằm ở thư mục gốc của app (ngoài frontend/), knip chạy ở frontend/ không thấy
+    "dependency-cruiser" // cấu hình .dependency-cruiser.mjs nằm ở thư mục gốc của app (ngoài frontend/), knip chạy ở frontend/ không thấy
   ]
 }

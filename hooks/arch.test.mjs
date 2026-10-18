@@ -136,16 +136,25 @@ describe('arch.json hỏng', () => {
 })
 
 describe('gen', () => {
-  test('web: ghi .dependency-cruiser.cjs, in khối ESLint; chạy lại cho cùng kết quả', () => {
+  test('web: ghi .dependency-cruiser.mjs, in khối ESLint; chạy lại cho cùng kết quả', () => {
     const dir = webRepo()
     cli(['init', '--dir', dir])
     const r = cli(['gen', '--dir', dir])
     assert.equal(r.status, 0, r.stderr)
-    assert.match(r.stdout, /Đã ghi \.dependency-cruiser\.cjs/)
+    assert.match(r.stdout, /Đã ghi \.dependency-cruiser\.mjs/)
     assert.match(r.stdout, /max-lines-per-function/)
-    const first = read(dir, '.dependency-cruiser.cjs')
+    const first = read(dir, '.dependency-cruiser.mjs')
     assert.equal(cli(['gen', '--dir', dir]).status, 0)
-    assert.equal(read(dir, '.dependency-cruiser.cjs'), first)
+    assert.equal(read(dir, '.dependency-cruiser.mjs'), first)
+  })
+  test('web: .dependency-cruiser.cjs cũ do kit sinh ⇒ gen báo đã xoá và thay bằng .mjs', () => {
+    const dir = webRepo()
+    cli(['init', '--dir', dir])
+    put(dir, '.dependency-cruiser.cjs', '// Sinh bởi: node ~/.claude/hooks/arch.mjs gen (từ docs/arch.json) — sửa docs/arch.json rồi chạy lại, đừng sửa tay file này.\nmodule.exports = {}\n')
+    const r = cli(['gen', '--dir', dir])
+    assert.equal(r.status, 0, r.stderr)
+    assert.match(r.stdout, /Đã xoá \.dependency-cruiser\.cjs \(bản cũ do kit sinh, nay thay bằng \.dependency-cruiser\.mjs\)/)
+    assert.equal(has(dir, '.dependency-cruiser.cjs'), false)
   })
   test('Go: .golangci.yml có sẵn không bị ghi đè, khối cần ghép được in ra', () => {
     const dir = tmp()
@@ -167,7 +176,7 @@ describe('gen', () => {
     const r = cli(['gen', '--dir', dir])
     assert.equal(r.status, 1)
     assert.match(r.stderr, /docs\/arch\.json/)
-    assert.equal(has(dir, '.dependency-cruiser.cjs'), false)
+    assert.equal(has(dir, '.dependency-cruiser.mjs'), false)
   })
 })
 

@@ -1038,7 +1038,14 @@ test('depcruise: chạy ở gốc dự án với đúng đối số của arch.m
   const miss = await first(noCfg, 'depcruise', { exec })
   assert.equal(calls.length, 0, 'chưa có cấu hình thì không chạy')
   assert.equal(miss.status, 'fail')
+  assert.match(miss.message, /\.dependency-cruiser\.mjs/)
   assert.match(miss.fix, /arch\.mjs gen/)
+
+  // bản kit mới sinh .dependency-cruiser.mjs: đối số trỏ vào nó (có cả .cjs cũ thì .mjs thắng)
+  const mjs = project(webProject({ '.dependency-cruiser.mjs': 'export default {}\n', '.dependency-cruiser.cjs': 'module.exports = {}\n' }))
+  calls.length = 0
+  assert.equal((await first(mjs, 'depcruise', { exec })).status, 'pass')
+  assert.deepEqual(calls[0].args.slice(0, 2), ['--config', '.dependency-cruiser.mjs'])
 
   const noTool = await first(dir, 'depcruise', { which: whichNone })
   assert.equal(noTool.status, 'missing')

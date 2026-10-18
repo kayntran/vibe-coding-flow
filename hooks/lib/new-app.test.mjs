@@ -831,7 +831,7 @@ describe('create — web (repo git do lệnh tạo lập sẵn, như shadcn)', (
     const added = new Set(calls.find(isAdd).args.slice(2).map((p) => p.replace(/@[^@/]+$/, '')))
     for (const need of ['@shadcn/lint', 'knip', 'jscpd', 'size-limit', '@size-limit/file', 'dependency-cruiser', '@playwright/test', '@axe-core/playwright']) assert.ok(added.has(need) || have.has(need), need)
     assert.ok(!added.has('@size-limit/preset-app'), 'preset-app kéo puppeteer có lỗ hổng chưa vá')
-    for (const f of ['knip.jsonc', '.size-limit.json', 'osv-scanner.toml', 'eslint.config.js', 'vite.config.ts', '.dependency-cruiser.cjs']) assert.ok(has(dir, f), f)
+    for (const f of ['knip.jsonc', '.size-limit.json', 'osv-scanner.toml', 'eslint.config.js', 'vite.config.ts', '.dependency-cruiser.mjs']) assert.ok(has(dir, f), f)
     assert.match(read(dir, 'eslint.config.js'), /@shadcn\/lint/, 'bật plugin shadcn trong ESLint')
     assert.match(read(dir, '.size-limit.json'), /dist\/assets\/\*\.js/)
     assert.match(read(dir, 'osv-scanner.toml'), /ignoreUntil = \d{4}-\d{2}-\d{2}/, 'miễn lỗ hổng chưa có bản vá phải có hạn')
@@ -1092,7 +1092,7 @@ describe('create — extension (WXT)', () => {
     assert.ok(cfg.includes('port: Number(process.env.PORT) || 5173'), 'cổng chạy thử đọc từ PORT')
     assert.match(read(dir, 'tsconfig.json'), /"@\/\*": \["\.\/src\/\*"\]/)
     assert.match(read(dir, 'pnpm-workspace.yaml'), /^overrides:\n {2}shell-quote: \^1\.11\.0$/m)
-    for (const f of ['eslint.config.js', 'knip.jsonc', '.size-limit.json', 'osv-scanner.toml', '.dependency-cruiser.cjs']) assert.ok(has(dir, f), f)
+    for (const f of ['eslint.config.js', 'knip.jsonc', '.size-limit.json', 'osv-scanner.toml', '.dependency-cruiser.mjs']) assert.ok(has(dir, f), f)
     assert.match(read(dir, '.size-limit.json'), /dist\/chunks\/\*\.js/)
     assert.match(read(dir, 'knip.jsonc'), /src\/entrypoints/)
     assert.match(read(dir, 'osv-scanner.toml'), /ignoreUntil = \d{4}-\d{2}-\d{2}/)
@@ -1111,7 +1111,7 @@ describe('create — extension (WXT)', () => {
     assert.deepEqual(Object.keys(mods).sort(), ['src/entrypoints', 'src/features/home'])
     assert.deepEqual(mods['src/entrypoints'].mayDependOn, ['features/home'])
     assert.ok(arch.parts[0].modules.every((m) => !/^\(điền/.test(m.desc)), 'mô tả đã điền hết')
-    assert.match(read(dir, '.dependency-cruiser.cjs'), /features\/home/)
+    assert.match(read(dir, '.dependency-cruiser.mjs'), /features\/home/)
   })
 
   test('màn đầu trống: popup chỉ hiện tên extension; mẫu cũ (trang đã lưu, activeTab) đã bỏ', () => {
@@ -1263,7 +1263,7 @@ describe('create — an toàn', () => {
     assert.equal(e.exit, 1)
     assert.match(e.message, /pnpm run build/)
     assert.match(e.message, /App đã tạo ở /)
-    assert.ok(has(parent, 'app-c/AI_RULES.md') && has(parent, 'app-c/.dependency-cruiser.cjs'))
+    assert.ok(has(parent, 'app-c/AI_RULES.md') && has(parent, 'app-c/.dependency-cruiser.mjs'))
     assert.equal(g(path.join(parent, 'app-c'), 'tag', '--list', 'luu/*').includes('tao-app'), false, 'chưa lưu điểm "Tạo app" khi dựng lỗi')
   })
 

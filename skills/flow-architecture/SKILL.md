@@ -34,8 +34,10 @@ Sửa `docs/arch.json` + codemap trong ARCHITECTURE.md cùng lúc (`arch.mjs syn
 rồi `gen`. Thêm module mới là bình thường; NỚI luật thì không (dưới đây).
 
 ## Nới luật = hỏi user
-Đổi `limits` lên, bỏ/nới `forbidden`, thêm `mayDependOn` ngược hướng, sửa file mốc, thêm comment tắt luật
-(`eslint-disable`, `@ts-ignore`, `//nolint`…) ⇒ hook chặn gộp tới khi user gật [j21n]. Trước đó tự hỏi: sửa code cho
+Cổng gộp tự phân biệt: thêm module/luật cấm, hạ trần, file sinh lại bằng `gen` khớp `arch.json`, thêm luật ESLint mức
+`error`, gỡ khối miễn ⇒ cho qua. Đổi `limits` lên, bỏ/nới `forbidden`, bỏ module, thêm `mayDependOn` ngược hướng, sửa tay
+file sinh, sửa file mốc, thêm miễn/ignores/tắt luật ESLint, thêm comment tắt luật (`eslint-disable`, `@ts-ignore`,
+`//nolint`…) ⇒ hook chặn gộp tới khi user gật [j21n]. Trước đó tự hỏi: sửa code cho
 đúng luật có được không? Được ⇒ sửa code. Thật sự cần nới ⇒ hỏi user một câu đời thường ("cho phép file này dài 600
 dòng vì đây là bảng dữ liệu sinh tự động?"), ghi sổ chốt.
 
@@ -44,5 +46,7 @@ arch-sync (tài liệu ↔ luật ↔ thư mục) · arch-size (trần cỡ file
 go-arch-lint + depguard/funlen/gocyclo (Go) · oasdiff (có OpenAPI: đổi API gây vỡ client) · squawk (migration Postgres
 nguy hiểm). Thiếu công cụ ⇒ `flow check` báo THIẾU + lệnh cài; hỏi user trước khi cài. Web/extension: cài
 dependency-cruiser TRONG dự án cùng typescript (`pnpm add -D dependency-cruiser typescript`) — bản cài cả máy không đọc
-được TypeScript của dự án; cần Node 22, 24 LTS hoặc ≥26. `gen` in thêm khối `ignores` cho `.dependency-cruiser.cjs` để
-ghép vào `eslint.config.*` (không tự ghi đè).
+được TypeScript của dự án; cần Node 22, 24 LTS hoặc ≥26. `gen` sinh `.dependency-cruiser.mjs` (ESM, không `require`):
+ESLint của dự án đọc sạch, KHÔNG cần miễn luật hay `ignores` nào cho nó. Dự án còn `.dependency-cruiser.cjs` cũ do kit
+sinh: chạy lại `arch.mjs gen` (tự thay bằng `.mjs`, xoá `.cjs`), rồi gỡ khối miễn đã thêm cho nó trong `eslint.config.*`
+(vd `files: ['**/*.cjs']` tắt `@typescript-eslint/no-require-imports`, hoặc `ignores: ['.dependency-cruiser.cjs']`).

@@ -660,7 +660,7 @@ export function create({ type, name, parent = '.', pm: wantPm, io: rawIo } = {})
   const arch = archInit(target, { stack: template.stack })
   fillArch(target, template)
   for (const n of arch.notes) notes.push(n)
-  // Sinh cấu hình công cụ kiểm kiến trúc (.dependency-cruiser.cjs, .go-arch-lint.yml…) để máy kiểm chạy được ngay, không phải gõ thêm lệnh.
+  // Sinh cấu hình công cụ kiểm kiến trúc (.dependency-cruiser.mjs, .go-arch-lint.yml…) để máy kiểm chạy được ngay, không phải gõ thêm lệnh.
   try { archGen(target) } catch (e) {
     throw new NewAppError(`Chưa sinh được cấu hình kiểm kiến trúc: ${tidy(e.message).slice(0, 300)}. App đã tạo ở ${target}; chạy: node ~/.claude/hooks/arch.mjs gen --dir "${target}"`)
   }

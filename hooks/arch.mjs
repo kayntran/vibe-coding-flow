@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // arch: CLI kiến trúc máy đọc (docs/arch.json → cấu hình công cụ có sẵn). Thư viện: lib/arch.mjs. Skill: skills/flow-architecture.
 //   init [--stack web|go|extension|wails] [--dir D]   tạo docs/arch.json + docs/ARCHITECTURE.md (có sẵn thì giữ nguyên, báo một dòng; dự án có sẵn thì suy module từ thư mục)
-//   gen [--dir D]        sinh .dependency-cruiser.cjs, .go-arch-lint.yml, .golangci.yml (không ghi đè file có sẵn), in khối ESLint/golangci cần ghép
+//   gen [--dir D]        sinh .dependency-cruiser.mjs, .go-arch-lint.yml, .golangci.yml (không ghi đè file viết tay; .dependency-cruiser.cjs cũ do kit sinh ⇒ thay bằng .mjs), in khối ESLint/golangci cần ghép
 //   baseline [--dir D]   chốt vi phạm cũ làm mốc → docs/arch-baseline.json (+ known-violations của depcruise, eslint-suppressions.json)
 //   sync [--dir D]       arch.json ↔ thư mục thật ↔ Codemap trong ARCHITECTURE.md
 //   size [--dir D] [--changed a,b]   trần dòng của file (chỉ xét file trong --changed nếu có)
 // exit 0 = ổn · 1 = có vấn đề / công cụ THIẾU / arch.json dùng không được · 2 = dùng sai lệnh. Lời báo là tiếng Việt kèm lời dặn sửa.
 import path from 'node:path'
-import { DEPCRUISE_WHERE, baseline, gen, init, loadArch, sizeCheck, syncCheck } from './lib/arch.mjs'
+import { DEPCRUISE_FILE, DEPCRUISE_WHERE, baseline, gen, init, loadArch, sizeCheck, syncCheck } from './lib/arch.mjs'
 
 const USAGE = 'dùng: arch.mjs <init [--stack web|go|extension|wails]|gen|baseline|sync|size [--changed a,b]> [--dir <thư mục dự án>]'
 const MAX_SHOWN = 20
@@ -41,7 +41,7 @@ function run(argv) {
     if (r.written.length) out.push('Bước tiếp: soát lại docs/arch.json và docs/ARCHITECTURE.md cho đúng dự án, rồi chạy: node ~/.claude/hooks/arch.mjs gen')
   } else if (cmd === 'gen') {
     const r = gen(dir)
-    out.push(...r.written.map((f) => `Đã ghi ${f}`), ...r.kept.map((k) => k.why), ...r.notes)
+    out.push(...r.written.map((f) => `Đã ghi ${f}`), ...r.removed.map((f) => `Đã xoá ${f} (bản cũ do kit sinh, nay thay bằng ${DEPCRUISE_FILE})`), ...r.kept.map((k) => k.why), ...r.notes)
     for (const b of r.blocks) out.push('', `--- ${b.title} ---`, b.text.trimEnd())
     out.push('', 'Bước tiếp: node ~/.claude/hooks/flow-check.mjs --dir <dự án> (dự án có sẵn: chạy arch.mjs baseline trước).')
   } else if (cmd === 'baseline') {

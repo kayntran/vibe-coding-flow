@@ -33,7 +33,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { extensionPermProblems, headerProblems } from './lib/app-safety.mjs'
-import { DEPCRUISE_PKGS, DEPCRUISE_WHERE, goArchLintRuns, depcruiseArgs, loadArch, loadBaseline, newGoArchViolations, nodeEngineMessage, nodeEngineProblem, sizeCheck, syncCheck, usesTypeScript } from './lib/arch.mjs'
+import { DEPCRUISE_PKGS, DEPCRUISE_WHERE, goArchLintRuns, depcruiseArgs, depcruiseConfigFile, loadArch, loadBaseline, newGoArchViolations, nodeEngineMessage, nodeEngineProblem, sizeCheck, syncCheck, usesTypeScript } from './lib/arch.mjs'
 import { runCommand } from './lib/clis.mjs'
 import { scanLogs } from './lib/log-scan.mjs'
 import { BUILD_DIRS, extensionBuilds, scanDir, scanText } from './lib/secrets.mjs'
@@ -715,13 +715,15 @@ export const PLANNERS = {
     return { ...lint(path.join(dir, build), { args: [...args, '--source-dir', build], cwd: dir }), toolDirs: [dir] }
   },
 
-  // depcruise --config .dependency-cruiser.cjs [--ignore-known <mốc>] --output-type err-long -- <root…>, chạy ở gốc dự án (đối số do arch.mjs dựng từ docs/arch.json; root đứng sau `--`).
+  // depcruise --config .dependency-cruiser.mjs (dự án còn .cjs cũ: .cjs) [--ignore-known <mốc>] --output-type err-long -- <root…>, chạy ở gốc dự án
+  // (đối số do arch.mjs dựng từ docs/arch.json; root đứng sau `--`).
   depcruise: ({ dir, checker, ctx }) => {
     const { arch, errors } = loadArch(dir)
     if (!arch) return planBroken(errors, checker, ctx)
     const plan = depcruiseArgs(dir, { ignoreKnown: loadBaseline(dir) !== null })
     if (!plan) return { skip: 'docs/arch.json không có phần web hay tiện ích trình duyệt', quiet: true }
-    if (!isFile(path.join(dir, '.dependency-cruiser.cjs'))) return { fail: { message: 'Chưa có .dependency-cruiser.cjs (cấu hình sinh từ docs/arch.json)', fix: GEN_FIX } }
+    const cfg = depcruiseConfigFile(dir)
+    if (!isFile(path.join(dir, cfg))) return { fail: { message: `Chưa có ${cfg} (cấu hình sinh từ docs/arch.json)`, fix: GEN_FIX } }
     const rt = roots(dir)
     return { runs: [{ args: plan.args, cwd: plan.cwd, judge: judgeDepcruise(checker, { ts: usesTypeScript(dir) }) }], toolDirs: [...new Set([rt.web, rt.extension].filter(Boolean))], install: `npm i -D ${DEPCRUISE_PKGS} (${DEPCRUISE_WHERE})` }
   },

@@ -20,7 +20,7 @@ test('CLAUDE.md có đủ cụm bắt buộc', () => {
   for (const must of [
     'tiếng Việt', '## Cách trao đổi', '## Phong cách UI', '## Nguyên tắc', '**Định tuyến**',
     'flow-spec', 'flow-impact', 'flow-qa', 'flow-review', 'flow-merge', 'flow-team', 'flow-worktree', 'flow-architecture',
-    'flow-production', 'flow-maintain', 'flow-scale',
+    'flow-production', 'flow-maintain', 'flow-scale', 'flow-sessions',
     'sổ chốt', 'models.mjs', 'cli-check.mjs', 'updates.mjs', 'bản xem', 'không lách',
   ]) assert.ok(text.includes(must), `thiếu "${must}"`)
 })

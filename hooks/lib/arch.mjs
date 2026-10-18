@@ -9,7 +9,11 @@
 //   - forbidden.from/to là glob (* một cấp, ** nhiều cấp, {a,b}); to có thể là gói ngoài (web: node_modules/<gói>/**; go: đường dẫn import).
 //
 // Hàm xuất cho flow-check (làn B) và cổng gộp (làn C):
-//   loadArch(dir) → { arch|null, errors[] }              syncCheck(dir) → { ok, problems:[{file,msg,fix}], notes[] }
+//   loadArch(dir) → { arch|null, errors[] }  ·  parseArch(chữ) → như loadArch nhưng nhận nội dung file (cổng gộp đọc từ git)
+//   archLoosening(chữ cũ|null, chữ mới) → string[]  (mỗi chỗ NỚI luật một câu; rỗng = chỉ siết hoặc không đổi luật)
+//   genFiles(dir) → { files, legacy, blocks, notes }  (nội dung gen sẽ ghi, chưa ghi gì; legacy = bản .cjs kit cũ từng sinh)  ·  GEN_MARK (dấu "Sinh bởi" ở dòng đầu file kit sinh)
+//   depcruiseConfigFile(dir) → '.dependency-cruiser.mjs' | '.dependency-cruiser.cjs' (bản cũ / viết tay còn dùng)
+//   syncCheck(dir) → { ok, problems:[{file,msg,fix}], notes[] }
 //   sizeCheck(dir, { changedOnly?: string[] }) → { ok, problems }
 //   ruleFiles(dir) → string[]  (file luật thực có)         isRuleFile(rel) → boolean  (soi tên file trong diff, kể cả file chưa tồn tại)
 //   depcruiseArgs(dir, { ignoreKnown?, outputType? }) → { cwd, args }|null   (option trước rồi `--` rồi các root; outputType mặc định err-long; ignoreKnown = bỏ vi phạm cũ đã chốt)
@@ -18,7 +22,7 @@
 //   goArchLintRuns(dir) → [{ part, file, exists, cwd, args }]     newGoArchViolations(dir, output) → string[]  (vi phạm go-arch-lint không có trong mốc)
 //   loadBaseline(dir) → { base, size, depcruise, go:{newFromRev, archLint}|null, eslint }|null   (golangci: --new-from-rev=<go.newFromRev>)
 //   nodeEngineProblem(text) → { version }|null · nodeEngineMessage(version) → câu đời thường   (công cụ từ chối chạy vì Node ngoài "engines" ⇒ THIẾU, không phải KHÔNG ĐẠT)
-// Hàm cho CLI: init(dir,{stack}) · gen(dir) · baseline(dir,{run}). Công cụ ngoài chạy qua `run(cmd, args, {cwd, timeoutMs})` →
+// Hàm cho CLI: init(dir,{stack}) · gen(dir) → { written, kept, removed, blocks, notes } · baseline(dir,{run}). Công cụ ngoài chạy qua `run(cmd, args, {cwd, timeoutMs})` →
 //   { status, stdout, stderr, error:{code,message}|null } — mặc định defaultRun; test tiêm bản giả. Thiếu công cụ ⇒ error.code 'ENOENT'.
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -29,10 +33,14 @@ import { detect, matches, roots as stackRoots } from './stack.mjs'
 export const ARCH_FILE = 'docs/arch.json'
 export const BASELINE_FILE = 'docs/arch-baseline.json'
 export const KNOWN_FILE = '.dependency-cruiser-known-violations.json'
+export const DEPCRUISE_FILE = '.dependency-cruiser.mjs'
+export const LEGACY_DEPCRUISE_FILE = '.dependency-cruiser.cjs' // kit trước 2026-10-18 sinh bản này (dùng require), dự án viết tay cũng hay đặt tên này
 const KIT_ARCH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'kit', 'arch')
 const DEFAULT_LIMITS = { fileLines: 400, fnLines: 60, complexity: 15 }
+const LIMIT_WORDS = { fileLines: 'cỡ file', fnLines: 'cỡ hàm', complexity: 'độ phức tạp' }
 const PART_STACKS = ['web', 'go', 'extension']
-const MARK = 'Sinh bởi: node ~/.claude/hooks/arch.mjs gen (từ docs/arch.json) — sửa docs/arch.json rồi chạy lại, đừng sửa tay file này.'
+export const GEN_MARK = 'Sinh bởi: node ~/.claude/hooks/arch.mjs gen'
+const MARK = `${GEN_MARK} (từ docs/arch.json) — sửa docs/arch.json rồi chạy lại, đừng sửa tay file này.`
 const PLACEHOLDER = '(điền: làm gì; KHÔNG làm gì)'
 // Gói cài cho máy kiểm ranh giới web — MỘT chỗ duy nhất cho mọi lời dặn cài (arch.mjs baseline, flow-check). typescript phải dưới 7: dependency-cruiser 18 khai báo hỗ trợ
 // ">=2.0.0 <7.0.0" (src/meta.cjs của nó), `typescript` không ghim sẽ kéo bản 7 mà depcruise không đọc được. Lệnh in ra bằng dấu ^ vẫn chạy trong cmd.exe (^ bị bỏ, còn @18 và @6).
@@ -177,14 +185,53 @@ function checkPart(raw, i, seen, errors) {
 export function loadArch(dir) {
   const text = readText(path.join(dir, ARCH_FILE))
   if (text === null) return { arch: null, errors: [`Chưa có ${ARCH_FILE}. Chạy: node ~/.claude/hooks/arch.mjs init --stack web|go|extension|wails --dir <thư mục dự án>`] }
+  return parseArch(text)
+}
+
+export function parseArch(text) {
   let raw
-  try { raw = JSON.parse(text) } catch { return { arch: null, errors: [`${ARCH_FILE} không đọc được (sai cú pháp JSON: thiếu dấu phẩy, ngoặc hoặc nháy). Sửa lại cho đúng.`] } }
+  try { raw = JSON.parse(String(text).replace(BOM, '')) } catch { return { arch: null, errors: [`${ARCH_FILE} không đọc được (sai cú pháp JSON: thiếu dấu phẩy, ngoặc hoặc nháy). Sửa lại cho đúng.`] } }
   const errors = []
   if (!raw || typeof raw !== 'object' || raw.version !== 1) errors.push(`${ARCH_FILE}: "version" phải là 1`)
   if (!Array.isArray(raw?.parts) || !raw.parts.length) errors.push(`${ARCH_FILE}: thiếu "parts" (ít nhất một phần: web, go hoặc extension)`)
   const seen = new Set()
   const parts = (Array.isArray(raw?.parts) ? raw.parts : []).map((p, i) => checkPart(p, i, seen, errors))
   return errors.length ? { arch: null, errors } : { arch: { ...raw, parts }, errors: [] }
+}
+
+// Module mà m KHÔNG được import theo luật sinh ra (depcruise, go-arch-lint): mọi module khác trừ chính nó, mayDependOn và shared.
+function bannedTargets(part, m) {
+  const byName = new Map(part.modules.map((x) => [x.name, x]))
+  const ok = new Set([m.path, ...m.mayDependOn.map((n) => byName.get(n).path), ...part.shared])
+  return part.modules.filter((x) => !ok.has(x.path))
+}
+
+// So hai bản docs/arch.json (chữ; before null = file mới) theo LUẬT chúng sinh ra: mỗi chỗ nới một câu đời thường, rỗng = chỉ siết hoặc không đổi luật.
+// Siết: thêm phần/module/luật cấm, hạ trần, bớt mayDependOn — module mới chưa từng bị luật nào giữ nên mayDependOn của nó không nới gì.
+// Nới: bỏ phần/module/luật cấm, đổi root/stack của phần, nâng trần (kể cả bỏ trần về mặc định cao hơn), mayDependOn/shared làm mất một cặp "không được import",
+// bản mới không dùng được. Luật cấm so theo from/to (reason/fix/desc chỉ là lời, đổi tự do).
+export function archLoosening(before, after) {
+  const now = parseArch(after ?? '')
+  if (!now.arch) return [`bản mới của ${ARCH_FILE} không dùng được (${oneLine(now.errors[0], 120)})`]
+  if (before === null) return []
+  const was = parseArch(before)
+  if (!was.arch) return [`bản cũ của ${ARCH_FILE} không đọc được nên không so được`]
+  const out = []
+  for (const p of was.arch.parts) {
+    const q = now.arch.parts.find((x) => x.name === p.name)
+    if (!q) { out.push(`bỏ phần "${p.name}"`); continue }
+    if (q.stack !== p.stack || q.root !== p.root) { out.push(`đổi loại hoặc thư mục gốc của phần "${p.name}" (${p.stack} ${p.root} → ${q.stack} ${q.root})`); continue }
+    for (const [k, word] of Object.entries(LIMIT_WORDS)) if (q.limits[k] > p.limits[k]) out.push(`nới trần ${word} (${k} của phần ${p.name}: từ ${p.limits[k]} thành ${q.limits[k]})`)
+    const at = new Map(q.modules.map((m) => [m.path, m]))
+    for (const m of p.modules) {
+      if (!at.has(m.path)) { out.push(`bỏ module "${m.name}" (${m.path})`); continue }
+      const still = new Set(bannedTargets(q, at.get(m.path)).map((x) => x.path))
+      for (const x of bannedTargets(p, m)) if (at.has(x.path) && !still.has(x.path)) out.push(`cho module "${m.name}" import "${x.name}" (${m.path} → ${x.path})`)
+    }
+    const kept = new Set(q.forbidden.map((f) => `${f.from}\0${f.to}`))
+    for (const f of p.forbidden) if (!kept.has(`${f.from}\0${f.to}`)) out.push(`bỏ hoặc sửa luật cấm ${f.from} → ${f.to}`)
+  }
+  return out
 }
 
 export function loadBaseline(dir) {
@@ -486,13 +533,16 @@ export function init(dir, { stack } = {}) {
 
 // --- gen: sinh cấu hình công cụ ----------------------------------------------------------------------------------------------------------
 
-function genWrite(dir, rel, text, res, mark) {
+const kitMade = (text) => text !== null && text.split('\n', 1)[0].includes(GEN_MARK) // chỉ dòng đầu, như cổng gộp (lib/rule-change.mjs)
+const keptWhy = (rel) => `${rel} đã có và không phải do kit sinh — giữ nguyên (muốn dùng luật của kit: xoá file rồi chạy lại gen).`
+
+function genWrite(dir, rel, text, res) {
   const old = readText(path.join(dir, rel))
-  if (old !== null && !old.includes('Sinh bởi: node ~/.claude/hooks/arch.mjs gen')) {
-    res.kept.push({ file: rel, why: `${rel} đã có và không phải do kit sinh — giữ nguyên (muốn dùng luật của kit: xoá file rồi chạy lại gen).` })
+  if (old !== null && !kitMade(old)) {
+    res.kept.push({ file: rel, why: keptWhy(rel) })
     return false
   }
-  writeText(dir, rel, `${mark} ${MARK}\n${text}`)
+  writeText(dir, rel, text)
   res.written.push(rel)
   return true
 }
@@ -513,11 +563,9 @@ function depcruiseConfig(dir, parts) {
     { name: 'not-to-unresolvable', severity: 'error', comment: 'Import một file hoặc gói không tìm thấy. Cách sửa: sửa lại đường dẫn import, hoặc cài gói còn thiếu bằng npm i.', from: {}, to: { couldNotResolve: true, pathNot: ['^virtual:', '^cloudflare:', '^astro:', '^node:', '^bun:', '\\?(raw|url|inline|worker)$'] } },
   ]
   for (const part of parts) {
-    const byName = new Map(part.modules.map((m) => [m.name, m]))
     const sharedMods = part.modules.filter((m) => part.shared.includes(m.path))
     for (const m of part.modules) {
-      const okPaths = new Set([m.path, ...m.mayDependOn.map((n) => byName.get(n).path), ...part.shared])
-      const others = part.modules.filter((x) => !okPaths.has(x.path))
+      const others = bannedTargets(part, m)
       if (!others.length) continue
       const allowed = [...new Set([...m.mayDependOn, ...sharedMods.map((x) => x.name)])].filter((n) => n !== m.name)
       forbidden.push({
@@ -542,14 +590,28 @@ function depcruiseConfig(dir, parts) {
   return { forbidden, options }
 }
 
-// Mã JS của cấu hình depcruise. tsConfig.fileName dựng từ __dirname (thư mục chứa file cấu hình = gốc dự án) thành đường dẫn tuyệt đối LÚC CHẠY: lệnh chạy ở gốc dự án mà tsconfig
+// Mã JS của cấu hình depcruise. tsConfig.fileName dựng từ thư mục chứa file cấu hình (= gốc dự án) thành đường dẫn tuyệt đối LÚC CHẠY: lệnh chạy ở gốc dự án mà tsconfig
 // nằm trong thư mục của phần (Wails: frontend/tsconfig.json) thì đường dẫn tương đối làm depcruise cài riêng trong frontend/ báo TS18003 "No inputs were found"; đường dẫn tuyệt đối thì đúng,
-// mà file commit lên git vẫn không dính đường dẫn của máy nào.
-function depcruiseSource(cfg) {
+// mà file commit lên git vẫn không dính đường dẫn của máy nào. tsPath(chuỗi JSON của đường dẫn tương đối) → biểu thức JS.
+function depcruiseObject(cfg, tsPath) {
   const ts = cfg.options.tsConfig?.fileName
   if (!ts) return JSON.stringify(cfg, null, 2)
   const marked = { ...cfg, options: { ...cfg.options, tsConfig: { fileName: '__TSCONFIG__' } } }
-  return JSON.stringify(marked, null, 2).replace('"__TSCONFIG__"', () => `require('node:path').join(__dirname, ${JSON.stringify(ts)})`)
+  return JSON.stringify(marked, null, 2).replace('"__TSCONFIG__"', () => tsPath(JSON.stringify(ts)))
+}
+const DEPCRUISE_TYPE = "/** @type {import('dependency-cruiser').IConfiguration} */"
+// ESM, không require()/module/__dirname: ESLint của dự án (sourceType module, typescript-eslint no-require-imports, no-undef) đọc sạch, không cần miễn luật hay ignores.
+// import.meta.dirname cần Node ≥ 20.11 — depcruise 18 vốn chỉ chạy trên Node 22 trở lên. Không có tsconfig thì không import gì (tránh no-unused-vars).
+function depcruiseModule(cfg) {
+  const ts = Boolean(cfg.options.tsConfig?.fileName)
+  return `${ts ? "import path from 'node:path'\n\n" : ''}${DEPCRUISE_TYPE}\nexport default ${depcruiseObject(cfg, (s) => `path.join(import.meta.dirname, ${s})`)}\n`
+}
+// Bản .cjs kit cũ sinh (trước 2026-10-18). Chỉ để cổng gộp nhận ra file cũ vẫn khớp docs/arch.json; gen không ghi bản này nữa.
+const depcruiseLegacy = (cfg) => `${DEPCRUISE_TYPE}\nmodule.exports = ${depcruiseObject(cfg, (s) => `require('node:path').join(__dirname, ${s})`)}\n`
+
+// File cấu hình depcruise dự án đang dùng: .mjs (kit bây giờ sinh) thắng; chỉ còn .cjs (bản kit cũ chưa gen lại, hoặc viết tay) thì dùng .cjs; chưa có gì ⇒ tên .mjs.
+export function depcruiseConfigFile(dir) {
+  return !isFile(path.join(dir, DEPCRUISE_FILE)) && isFile(path.join(dir, LEGACY_DEPCRUISE_FILE)) ? LEGACY_DEPCRUISE_FILE : DEPCRUISE_FILE
 }
 
 const yq = (s) => JSON.stringify(s)
@@ -628,42 +690,61 @@ function golangciYaml(dir, parts, notes) {
 // Chuỗi JS nháy đơn (root đọc từ docs/arch.json không được phá được chuỗi của khối cấu hình mà AI sẽ ghép vào dự án).
 const sq = (s) => `'${s.replace(/[\\']/g, '\\$&')}'`
 
-// `ignores` đầu tiên: .dependency-cruiser.cjs do kit sinh dùng `module.exports` nên cấu hình ESLint của dự án (sourceType module) báo 'module' is not defined (no-undef);
-// file đó do máy sinh, không phải code của dự án. (`/* global module */` không dùng được: cấu hình commonjs mặc định lại báo no-redeclare.)
+// Không cần `ignores` cho file depcruise: bản kit sinh là ESM, ESLint đọc sạch.
 function eslintBlock(parts) {
-  const cfg = ['  { ignores: [\'.dependency-cruiser.cjs\'] },', ...parts.map((p) => `  {
+  const cfg = parts.map((p) => `  {
     files: [${sq(`${p.root}/**/*.{ts,tsx,js,jsx,mjs,cjs}`)}],
     ignores: ['**/*.test.*', '**/*.spec.*', '**/*.d.ts'],
     rules: {
       'max-lines-per-function': ['error', { max: ${p.limits.fnLines}, skipBlankLines: true, skipComments: true }],
       complexity: ['error', ${p.limits.complexity}],
     },
-  },`)].join('\n')
+  },`).join('\n')
   return `// Ghép các mục này vào mảng export của eslint.config.* (kit không ghi đè file có sẵn).\n// Dự án có sẵn: sau khi ghép, chạy arch.mjs baseline để chốt hàm dài/phức tạp cũ (eslint --suppress-rule, cần ESLint >= 9.24).\n${cfg}\n`
 }
 
-export function gen(dir) {
+// Nội dung mọi file gen sẽ ghi (đã kèm dòng dấu "Sinh bởi"), chưa ghi gì: { files: [{ rel, text, body }], legacy: [{ rel, text }], blocks, notes }.
+// Chỉ đọc docs/arch.json, tsconfig.json của các phần web, go.mod và thư mục Go — cổng gộp dựng lại đúng chừng đó từ git rồi so với file của nhánh.
+export function genFiles(dir) {
   const { arch, errors } = loadArch(dir)
   if (!arch) throw new Error(`${ARCH_FILE} chưa dùng được: ${errors.join(' · ')}`)
-  const res = { written: [], kept: [], blocks: [], notes: [] }
+  const res = { files: [], legacy: [], blocks: [], notes: [] }
+  const add = (list, rel, mark, body) => list.push({ rel, body, text: `${mark} ${MARK}\n${body}` })
   const web = webParts(arch)
   if (web.length) {
-    const body = `/** @type {import('dependency-cruiser').IConfiguration} */\nmodule.exports = ${depcruiseSource(depcruiseConfig(dir, web))}\n`
-    genWrite(dir, '.dependency-cruiser.cjs', body, res, '//')
+    const cfg = depcruiseConfig(dir, web)
+    add(res.files, DEPCRUISE_FILE, '//', depcruiseModule(cfg))
+    add(res.legacy, LEGACY_DEPCRUISE_FILE, '//', depcruiseLegacy(cfg))
     res.blocks.push({ title: 'ESLint (ghép vào eslint.config.*)', text: eslintBlock(web) })
   }
   const go = goParts(arch)
   go.forEach((part, i) => {
     if (!part.modules.length) { res.notes.push(`Phần ${part.name}: chưa có miền nào nên chưa sinh ${archLintFile(i, part)} (thêm miền vào docs/arch.json rồi chạy lại gen).`); return }
-    genWrite(dir, archLintFile(i, part), goArchLintYaml(dir, part), res, '#')
+    add(res.files, archLintFile(i, part), '#', goArchLintYaml(dir, part))
   })
-  if (go.length) {
-    const text = golangciYaml(dir, go, res.notes)
-    const existing = ['.golangci.yml', '.golangci.yaml', '.golangci.toml', '.golangci.json'].find((n) => isFile(path.join(dir, n)))
-    if (existing && !(existing === '.golangci.yml' && readText(path.join(dir, existing)).includes('Sinh bởi: node ~/.claude/hooks/arch.mjs gen'))) {
-      res.kept.push({ file: existing, why: `${existing} đã có — kit không ghi đè; ghép khối bên dưới vào file này.` })
-      res.blocks.push({ title: `golangci-lint (ghép vào ${existing})`, text })
-    } else genWrite(dir, '.golangci.yml', text, res, '#')
+  if (go.length) add(res.files, '.golangci.yml', '#', golangciYaml(dir, go, res.notes))
+  return res
+}
+
+export function gen(dir) {
+  const plan = genFiles(dir)
+  const res = { written: [], kept: [], removed: [], blocks: plan.blocks, notes: plan.notes }
+  for (const f of plan.files) {
+    if (f.rel === '.golangci.yml') {
+      const existing = ['.golangci.yml', '.golangci.yaml', '.golangci.toml', '.golangci.json'].find((n) => isFile(path.join(dir, n)))
+      if (existing && !(existing === '.golangci.yml' && kitMade(readText(path.join(dir, existing))))) {
+        res.kept.push({ file: existing, why: `${existing} đã có — kit không ghi đè; ghép khối bên dưới vào file này.` })
+        res.blocks.push({ title: `golangci-lint (ghép vào ${existing})`, text: f.body })
+        continue
+      }
+    }
+    // .cjs có sẵn: bản kit cũ ⇒ thay bằng .mjs rồi xoá; viết tay ⇒ dự án đang dùng nó, giữ nguyên và không sinh .mjs (hai cấu hình thì không biết cái nào chạy).
+    const legacy = f.rel === DEPCRUISE_FILE ? readText(path.join(dir, LEGACY_DEPCRUISE_FILE)) : null
+    if (legacy !== null && !kitMade(legacy)) { res.kept.push({ file: LEGACY_DEPCRUISE_FILE, why: `${keptWhy(LEGACY_DEPCRUISE_FILE)} Chưa sinh ${DEPCRUISE_FILE}.` }); continue }
+    if (genWrite(dir, f.rel, f.text, res) && legacy !== null) {
+      fs.rmSync(path.join(dir, LEGACY_DEPCRUISE_FILE))
+      res.removed.push(LEGACY_DEPCRUISE_FILE)
+    }
   }
   return res
 }
@@ -682,7 +763,7 @@ const needArch = (dir) => {
 export function depcruiseArgs(dir, { ignoreKnown = false, outputType = 'err-long' } = {}) {
   const web = webParts(needArch(dir))
   if (!web.length) return null
-  const args = ['--config', '.dependency-cruiser.cjs']
+  const args = ['--config', depcruiseConfigFile(dir)]
   const known = loadBaseline(dir)?.depcruise
   if (ignoreKnown && typeof known === 'string' && nonEmpty(known) && !pathProblem(normRel(known)) && isFile(path.join(dir, known))) args.push('--ignore-known', normRel(known))
   args.push('--output-type', outputType, '--', ...web.map((p) => p.root))
@@ -768,7 +849,7 @@ export function baseline(dir, { run = defaultRun } = {}) {
   let depcruise = null
   const web = webParts(arch)
   if (web.length) {
-    if (!isFile(path.join(dir, '.dependency-cruiser.cjs'))) notes.push('Chưa có .dependency-cruiser.cjs — chạy arch.mjs gen trước rồi chạy lại baseline.')
+    if (!isFile(path.join(dir, depcruiseConfigFile(dir)))) notes.push(`Chưa có ${DEPCRUISE_FILE} — chạy arch.mjs gen trước rồi chạy lại baseline.`)
     else {
       const r = run('depcruise', depcruiseArgs(dir, { outputType: 'baseline' }).args, { cwd: dir, timeoutMs: 300_000, from: [...new Set(web.map((p) => packageDir(dir, p)))] })
       const engine = r.error ? null : nodeEngineProblem(`${r.stdout}\n${r.stderr}`)

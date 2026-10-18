@@ -2,7 +2,8 @@
 //   hook : edit (PreToolUse Edit|Write|NotebookEdit + apply_patch của Codex/Devin) · bash (PreToolUse Bash: chặn git merge thiếu dấu,
 //          git commit/push có secret, commit thêm thư viện lạ, lệnh phá huỷ trên nhánh chính, `apply_patch <<` vào thư mục chính;
 //          KHÔNG hộp hỏi (ask) nào [chốt 2026-10-14: user no code luôn bấm Allow]: push thường lên nhánh chính cho qua; git merge mà nhánh đích nới
-//          luật — đụng file luật (kể cả .claude/flow.json, kit/checkers.json) hoặc thêm dòng tắt luật ngoài file máy sinh — ⇒ deny nhắn AI tự gỡ
+//          luật — đổi file luật (kể cả .claude/flow.json, kit/checkers.json) theo hướng nới hoặc không chắc là siết (lib/rule-change.mjs: thêm module/luật
+//          vào docs/arch.json, hạ trần, file kit sinh lại khớp arch.json, thêm luật ESLint mức error ⇒ qua), hoặc thêm dòng tắt luật ngoài file máy sinh — ⇒ deny nhắn AI tự gỡ
 //          (không lối AI tự mở, không đẩy lệnh terminal sang user [chốt 2026-10-15]), chép repo "chỉ học" ⇒ deny, không so được
 //          diff base...<đích> ⇒ deny; pull ., cherry-pick, rebase, fetch ., push ., branch -f, update-ref, checkout -B, switch -C đưa nhánh vào main
 //          ⇒ qua đúng cổng như git merge) · stop (Stop) ·
@@ -787,7 +788,7 @@ function gateDestructive(g) {
 
 // File luật = isRuleFile của lib/rule-files.mjs (MỘT nguồn, dùng chung với luu.mjs quay): luật kiến trúc/lint của lib/arch.mjs + kit/rules/** + kit/checkers.json (bảng checker của kit)
 // + .claude/flow.json (miễn test, uiPattern, trustedDepSources, prodRefs: sửa nó là đổi cổng gộp/thư viện/khoá thật) + .claude/ui.json, docs/ui-baseline.json, .claude/luu.json.
-// Nhãn đời thường cho từng loại.
+// File luật đổi thì lib/rule-change.mjs chấm siết hay nới (chỉ đọc chữ từ git, không chạy code của nhánh); chỉ phần nới / không chắc mới vào lời chặn. Nhãn đời thường cho từng loại.
 const RULE_LABELS = [
   [/^\.claude\/flow\.json$/, 'cấu hình cổng của dự án'], [/^kit\/checkers\.json$/, 'danh sách checker của kit'],
   [/^\.claude\/ui\.json$/, 'luật kiểm giao diện'], [/^docs\/ui-baseline\.json$/, 'danh sách lỗi giao diện cũ được bỏ qua'], [/^\.claude\/luu\.json$/, 'cấu hình điểm lưu (đường dẫn dữ liệu)'],
@@ -797,7 +798,6 @@ const RULE_LABELS = [
   [/(^|\/)biome\.jsonc?$/, 'luật Biome'], [/(^|\/)sgconfig\.ya?ml$/, 'luật ast-grep'], [/^kit\/rules\//, 'luật của kit'],
 ]
 const CHANGE_VERBS = { A: 'thêm', M: 'sửa', D: 'xoá', T: 'đổi kiểu' }
-const LIMIT_WORDS = { fileLines: 'cỡ file', fnLines: 'cỡ hàm', complexity: 'độ phức tạp' }
 // Dòng tắt luật. Tài liệu (.md/.mdx/.txt) chỉ nhắc tới chúng, không tắt được gì nên không tính.
 const SUPPRESS = [
   [/\beslint-disable/, 'eslint-disable'], [/@ts-ignore\b/, '@ts-ignore'], [/\/\/\s*nolint\b/, '//nolint'],
@@ -879,26 +879,6 @@ function mergeDiff(info, base, sha) {
   return { changes, patch }
 }
 
-// Trần (limits.*) từng phần của docs/arch.json ở hai bản (before/after = commit): câu "nới/siết trần …" cho mỗi trần đổi giá trị. Lỗi đọc ⇒ rỗng.
-function limitChanges(dir, before, after) {
-  const pick = (rev) => {
-    const out = new Map()
-    try {
-      const parts = JSON.parse(git(dir, ['show', `${rev}:docs/arch.json`]) ?? '').parts
-      for (const [i, p] of (Array.isArray(parts) ? parts : []).entries()) for (const [k, v] of Object.entries(p?.limits ?? {})) out.set(`${p?.name ?? i}\0${k}`, v)
-    } catch {}
-    return out
-  }
-  const was = pick(before)
-  const changes = []
-  for (const [key, now] of pick(after)) {
-    if (!was.has(key) || was.get(key) === now) continue
-    const [part, k] = key.split('\0')
-    changes.push(`${now > was.get(key) ? 'nới' : 'siết'} trần ${LIMIT_WORDS[k] ?? k} (${k} của phần ${part}: từ ${was.get(key)} thành ${now})`)
-  }
-  return changes
-}
-
 const showName = (s) => String(s).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, 80)
 
 // Có thể có thẻ chi-hoc không (docs/research ở thư mục làm việc hoặc trong cây của sha)? git lỗi ⇒ coi như có.
@@ -920,6 +900,7 @@ async function mergeGuards(info, base, targets) {
   const multi = targets.length > 1
   const safeName = (t) => (SAFE_REF.test(t) ? t : '(tên có ký tự lạ)')
   const { isRuleFile } = await import('./lib/rule-files.mjs')
+  const { looseRuleChanges } = await import('./lib/rule-change.mjs')
   for (const target of targets) {
     const at = multi ? ` (nhánh ${safeName(target)})` : ''
     const sha = revOf(info, target)
@@ -927,11 +908,19 @@ async function mergeGuards(info, base, targets) {
     const diff = mergeDiff(info, base, sha)
     if (!diff) { stops.push({ kind: 'unknown', msg: `không tính được thay đổi ${base}...${showName(target)} (git diff lỗi, quá lớn, hoặc nhánh không chung lịch sử với ${base})` }); continue }
     const mergeBase = (git(info.dir, ['merge-base', base, sha]) ?? '').trim()
+    // File luật đổi theo hướng siết (thêm module/luật, hạ trần, file sinh lại khớp arch.json, thêm luật ESLint mức error…) thì không tính; không chắc ⇒ tính là nới.
+    const revs = { base: /^[0-9a-f]{40,64}$/.test(mergeBase) ? mergeBase : null, head: sha }
+    const loose = looseRuleChanges({
+      changes: diff.changes.filter(({ file }) => isRuleFile(file)),
+      read: (side, rel) => (revs[side] ? git(info.dir, ['cat-file', '-p', `${revs[side]}:${rel}`]) : null),
+      list: (side, dirs) => (revs[side] ? git(info.dir, ['-c', 'core.quotepath=off', 'ls-tree', '-r', '--name-only', '-z', revs[side], '--', ...dirs])?.split('\0').filter(Boolean) ?? null : null),
+      log,
+    })
     for (const { st, file } of diff.changes) {
-      if (!isRuleFile(file)) continue
+      if (!loose.has(file)) continue
       const label = RULE_LABELS.find(([re]) => re.test(file))?.[1] ?? 'luật'
-      const limits = st === 'M' && file === 'docs/arch.json' && mergeBase ? limitChanges(info.dir, mergeBase, sha) : []
-      loosen.push(`${CHANGE_VERBS[st] ?? 'đổi'} file ${label} (${file})${limits.length ? `: ${limits.join('; ')}` : ''}${at}`)
+      const why = loose.get(file)
+      loosen.push(`${CHANGE_VERBS[st] ?? 'đổi'} file ${label} (${file})${why ? `: ${why}` : ''}${at}`)
     }
     for (const s of addedSuppressions(diff.patch)) {
       if (isGeneratedFile(info, sha, s.file)) continue // máy sinh (Wails bindings, protobuf…): AI không gỡ được, không phải lách luật
@@ -968,6 +957,8 @@ async function mergeGuards(info, base, targets) {
     'Nhánh này nới luật kiểm tra của dự án hoặc tắt kiểm tra ở vài chỗ nên AI chưa gộp; AI sẽ gỡ phần nới luật rồi gộp lại. ' +
     `Gộp ${names} vào ${base} sẽ kèm:\n${list}\n` +
     'Việc của AI: gỡ phần nới luật/dòng tắt luật trên nhánh, kiểm lại rồi gộp. Không tự lách, KHÔNG đưa lệnh terminal cho user tự chạy (user không code). ' +
+    'Đổi luật theo hướng siết đã được cho qua sẵn: thêm module/luật cấm vào docs/arch.json, hạ trần, file sinh lại bằng arch.mjs gen khớp docs/arch.json, ' +
+    'thêm import gói + luật ESLint mức "error" không tuỳ chọn, gỡ khối miễn/tắt luật. ' +
     'File do máy sinh (Wails wailsjs/, có dấu "DO NOT EDIT"…) đã được bỏ qua sẵn; nếu chỗ bị nêu thật sự không gỡ được hoặc user nói rõ muốn đổi luật ' +
     '⇒ kể user một câu đời thường (chỗ nào, vì sao kit chặn) rồi dừng việc gộp, chờ sửa kit.')
 }

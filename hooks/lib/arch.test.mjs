@@ -4,13 +4,15 @@
 // test thật của chúng — không có thì skip kèm lý do.
 import { after, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createRequire } from 'node:module'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import * as A from './arch.mjs'
 
-const require = createRequire(import.meta.url)
+// Nạp .dependency-cruiser.mjs vừa sinh như depcruise nạp (import ESM); mỗi lần một URL riêng vì import() nhớ module theo URL.
+let loads = 0
+const loadDepcruise = async (dir) => (await import(`${pathToFileURL(path.join(dir, '.dependency-cruiser.mjs')).href}?lan=${loads++}`)).default
 // Tắt bảo trì tự động của git (Mac: commit tách `git maintenance run --auto --detach` chạy nền ⇒ dọn thư mục tạm gặp ENOTEMPTY); xem flow-dispatch.test.mjs.
 Object.assign(process.env, { GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'maintenance.auto', GIT_CONFIG_VALUE_0: 'false', GIT_CONFIG_KEY_1: 'gc.auto', GIT_CONFIG_VALUE_1: '0' })
 const roots = []
@@ -377,6 +379,45 @@ describe('sizeCheck', () => {
   })
 })
 
+describe('archLoosening — so hai bản docs/arch.json: siết thì rỗng, nới thì mỗi chỗ một câu', () => {
+  const J = (parts) => JSON.stringify({ version: 1, parts })
+  const base = J([webPart()])
+  const loose = (after, before = base) => A.archLoosening(before, after)
+  test('siết hoặc chỉ đổi lời ⇒ rỗng: thêm module, thêm luật cấm, thêm phần, hạ trần, bớt mayDependOn, đổi desc/reason/fix; file mới hợp lệ', () => {
+    const p = webPart()
+    assert.deepEqual(loose(base), [])
+    assert.deepEqual(loose(J([webPart({ modules: [...p.modules, { name: 'features/c', path: 'src/features/c', desc: 'C', mayDependOn: ['shared'] }] })])), [])
+    assert.deepEqual(loose(J([webPart({ forbidden: [...p.forbidden, { from: 'src/shared/**', to: 'src/features/**', reason: 'r', fix: 'f' }] })])), [])
+    assert.deepEqual(loose(J([webPart(), goPart()])), [])
+    assert.deepEqual(loose(J([webPart({ limits: { fileLines: 300, fnLines: 40, complexity: 10 } })])), [])
+    assert.deepEqual(loose(J([webPart({ modules: p.modules.map((m) => ({ ...m, mayDependOn: [] })) })])), [])
+    assert.deepEqual(loose(J([webPart({ modules: p.modules.map((m) => ({ ...m, desc: 'mới' })), forbidden: p.forbidden.map((f) => ({ ...f, reason: 'khác', fix: 'khác' })) })])), [])
+    assert.deepEqual(A.archLoosening(null, base), [])
+  })
+  test('module mới được mayDependOn module cũ ⇒ vẫn là siết (trước đó thư mục mới chưa bị luật nào giữ)', () => {
+    const one = J([webPart({ modules: [{ name: 'shared', path: 'src/shared', mayDependOn: [] }] })])
+    const more = J([webPart({ modules: [{ name: 'shared', path: 'src/shared', mayDependOn: ['lib'] }, { name: 'lib', path: 'src/lib', mayDependOn: [] }] })])
+    assert.deepEqual(A.archLoosening(one, more), [])
+  })
+  test('nới ⇒ nêu đúng chỗ: nâng trần (kể cả bỏ trần về mặc định cao hơn), bỏ module, cho import thêm, thêm shared, bỏ/sửa luật cấm, bỏ phần, đổi root', () => {
+    const p = webPart()
+    assert.match(loose(J([webPart({ limits: { ...LIMITS, fileLines: 600 } })])).join('\n'), /nới trần cỡ file \(fileLines của phần web: từ 400 thành 600\)/)
+    assert.match(A.archLoosening(J([webPart({ limits: { fileLines: 300 } })]), J([webPart({ limits: {} })])).join('\n'), /nới trần cỡ file.*300.*400/)
+    assert.match(loose(J([webPart({ modules: p.modules.filter((m) => m.name !== 'features/b') })])).join('\n'), /bỏ module "features\/b" \(src\/features\/b\)/)
+    assert.match(loose(J([webPart({ modules: p.modules.map((m) => (m.name === 'features/a' ? { ...m, mayDependOn: ['shared', 'features/b'] } : m)) })])).join('\n'), /cho module "features\/a" import "features\/b"/)
+    assert.match(loose(J([webPart({ shared: ['src/shared', 'src/features/b'] })])).join('\n'), /cho module "features\/a" import "features\/b"/)
+    assert.match(loose(J([webPart({ forbidden: [] })])).join('\n'), /bỏ hoặc sửa luật cấm src\/features\/\*\/model\/\*\* → src\/features\/\*\/ui\/\*\*/)
+    assert.match(loose(J([webPart({ forbidden: [{ ...p.forbidden[0], to: 'src/features/*/uix/**' }] })])).join('\n'), /bỏ hoặc sửa luật cấm/)
+    assert.match(loose(J([goPart()])).join('\n'), /bỏ phần "web"/)
+    assert.match(loose(J([webPart({ root: 'app', modules: [], shared: [], forbidden: [] })])).join('\n'), /đổi loại hoặc thư mục gốc của phần "web"/)
+  })
+  test('bản mới hỏng / không hợp lệ ⇒ nới (không so được thì không cho qua); bản cũ hỏng ⇒ nới', () => {
+    assert.match(loose('{ hỏng').join(''), /docs\/arch\.json.*không dùng được/)
+    assert.match(loose(J([{ name: 'web', stack: 'cobol', root: 'src' }])).join(''), /không dùng được/)
+    assert.match(A.archLoosening('{ hỏng', base).join(''), /bản cũ.*không đọc được/)
+  })
+})
+
 describe('ruleFiles / isRuleFile', () => {
   test('liệt kê file luật thực có (kể cả trong thư mục web của Wails), không liệt kê file không có', () => {
     const dir = tmp()
@@ -390,7 +431,7 @@ describe('ruleFiles / isRuleFile', () => {
     assert.ok(!got.includes('.golangci.toml'))
   })
   test('isRuleFile nhận cả file chưa tồn tại (để cổng gộp soi diff)', () => {
-    for (const f of ['docs/arch.json', 'docs/arch-baseline.json', '.dependency-cruiser.cjs', '.dependency-cruiser-known-violations.json', '.go-arch-lint.yml', '.golangci.yaml', 'eslint.config.ts', '.eslintrc.cjs', 'eslint-suppressions.json', 'biome.json', 'sgconfig.yml', 'frontend/eslint.config.js']) assert.ok(A.isRuleFile(f), f)
+    for (const f of ['docs/arch.json', 'docs/arch-baseline.json', '.dependency-cruiser.cjs', '.dependency-cruiser.mjs', '.dependency-cruiser-known-violations.json', '.go-arch-lint.yml', '.golangci.yaml', 'eslint.config.ts', '.eslintrc.cjs', 'eslint-suppressions.json', 'biome.json', 'sgconfig.yml', 'frontend/eslint.config.js']) assert.ok(A.isRuleFile(f), f)
     for (const f of ['src/app.ts', 'docs/ARCHITECTURE.md', 'package.json', 'src/eslint.config.notes.txt.bak']) assert.ok(!A.isRuleFile(f), f)
   })
 })
@@ -502,24 +543,24 @@ describe('init', () => {
 })
 
 describe('gen — dependency-cruiser', () => {
-  const genWeb = (dir) => { const r = A.gen(dir); return { r, cfg: require(path.join(dir, '.dependency-cruiser.cjs')) } }
+  const genWeb = async (dir) => { const r = A.gen(dir); return { r, cfg: await loadDepcruise(dir) } }
   const rule = (cfg, name) => cfg.forbidden.find((x) => x.name === name)
-  test('có no-circular, not-to-unresolvable; mỗi luật có comment', () => {
-    const { r, cfg } = genWeb(webProject())
-    assert.ok(r.written.includes('.dependency-cruiser.cjs'))
+  test('có no-circular, not-to-unresolvable; mỗi luật có comment', async () => {
+    const { r, cfg } = await genWeb(webProject())
+    assert.ok(r.written.includes('.dependency-cruiser.mjs'))
     assert.equal(rule(cfg, 'no-circular').to.circular, true)
     assert.equal(rule(cfg, 'not-to-unresolvable').to.couldNotResolve, true)
     assert.ok(cfg.forbidden.every((x) => x.severity === 'error' && x.comment.length > 20))
   })
-  test('not-to-unresolvable miễn module ảo của nền tảng (cloudflare:, astro:, node:, bun:, virtual:) và hậu tố ?raw/?url; đường dẫn thường vẫn bị xét', () => {
-    const { cfg } = genWeb(webProject())
+  test('not-to-unresolvable miễn module ảo của nền tảng (cloudflare:, astro:, node:, bun:, virtual:) và hậu tố ?raw/?url; đường dẫn thường vẫn bị xét', async () => {
+    const { cfg } = await genWeb(webProject())
     const skip = [].concat(rule(cfg, 'not-to-unresolvable').to.pathNot).map((p) => new RegExp(p))
     const exempt = (s) => skip.some((re) => re.test(s))
     for (const s of ['cloudflare:workers', 'astro:middleware', 'node:fs', 'bun:sqlite', 'virtual:pwa-register', './a.css?raw', './w.js?worker']) assert.equal(exempt(s), true, s)
     for (const s of ['./thieu.js', '@scope/goi-thieu', 'src/cloudflare:x', 'nodemailer', 'astro']) assert.equal(exempt(s), false, s)
   })
-  test('feature A import feature B bị luật ranh giới bắt; A import shared thì không; comment = lý do + cách sửa', () => {
-    const { cfg } = genWeb(webProject())
+  test('feature A import feature B bị luật ranh giới bắt; A import shared thì không; comment = lý do + cách sửa', async () => {
+    const { cfg } = await genWeb(webProject())
     const hit = (from, to) => cfg.forbidden.filter((x) => x.from.path && x.to.path && new RegExp(x.from.path).test(from) && new RegExp(x.to.path).test(to) && !(x.to.pathNot && new RegExp(x.to.pathNot).test(to)))
     const ab = hit('src/features/a/ui/A.ts', 'src/features/b/ui/B.ts')
     assert.equal(ab.length, 1)
@@ -531,8 +572,8 @@ describe('gen — dependency-cruiser', () => {
     assert.equal(hit('src/shared/util.ts', 'src/features/a/ui/A.ts').length, 1)
     assert.equal(hit('src/main.ts', 'src/features/a/ui/A.ts').length, 0)
   })
-  test('forbidden trong arch.json thành luật depcruise: comment gồm reason + fix, glob thành regex', () => {
-    const { cfg } = genWeb(webProject())
+  test('forbidden trong arch.json thành luật depcruise: comment gồm reason + fix, glob thành regex', async () => {
+    const { cfg } = await genWeb(webProject())
     const r = cfg.forbidden.find((x) => /model không biết giao diện/.test(x.comment))
     assert.ok(r)
     assert.match(r.comment, /Đưa phần dùng chung sang shared/)
@@ -540,59 +581,108 @@ describe('gen — dependency-cruiser', () => {
     assert.ok(!new RegExp(r.from.path).test('src/features/a/ui/m.ts'))
     assert.ok(new RegExp(r.to.path).test('src/features/b/ui/B.ts'))
   })
-  test('luật cấm gói ngoài (node_modules/…) không neo đầu để khớp đường dẫn pnpm', () => {
+  test('luật cấm gói ngoài (node_modules/…) không neo đầu để khớp đường dẫn pnpm', async () => {
     const dir = webProject({ forbidden: [{ from: 'src/features/*/ui/**', to: 'node_modules/@supabase/**', reason: 'ui không gọi Supabase', fix: 'Gọi qua api của tính năng' }] })
-    const { cfg } = genWeb(dir)
+    const { cfg } = await genWeb(dir)
     const r = cfg.forbidden.find((x) => /ui không gọi Supabase/.test(x.comment))
     assert.ok(new RegExp(r.to.path).test('node_modules/.pnpm/@supabase+x@1/node_modules/@supabase/x/index.js'))
   })
-  test('nhiều phần web (web + extension / Wails): mỗi phần một bộ luật theo root của nó', () => {
+  test('nhiều phần web (web + extension / Wails): mỗi phần một bộ luật theo root của nó', async () => {
     const dir = tmp()
     writeArch(dir, [
       webPart({ root: 'frontend/src', modules: [{ name: 'features/a', path: 'frontend/src/features/a', mayDependOn: [] }, { name: 'features/b', path: 'frontend/src/features/b', mayDependOn: [] }], shared: [], forbidden: [] }),
       { name: 'ext', stack: 'extension', root: 'ext/src', modules: [{ name: 'content', path: 'ext/src/content', mayDependOn: [] }, { name: 'background', path: 'ext/src/background', mayDependOn: [] }], shared: [], forbidden: [], limits: { ...LIMITS } },
     ])
-    const { cfg } = genWeb(dir)
+    const { cfg } = await genWeb(dir)
     const reFrom = (n) => cfg.forbidden.filter((x) => x.from.path).map((x) => new RegExp(x.from.path)).some((re) => re.test(n))
     assert.ok(reFrom('frontend/src/features/a/x.ts') && reFrom('ext/src/content/x.ts'))
     assert.ok(!reFrom('src/features/a/x.ts'))
     const args = A.depcruiseArgs(dir).args
     assert.deepEqual(args.slice(args.indexOf('--')), ['--', 'frontend/src', 'ext/src'], 'option trước, `--`, rồi các root')
   })
-  test('tsConfig.fileName tính từ vị trí file cấu hình lúc chạy (không phụ thuộc cwd, file commit lên git không dính đường dẫn máy): tsconfig.json trong thư mục của phần (Wails: frontend/) và ở gốc dự án đều ra đường dẫn tuyệt đối đúng', () => {
+  test('tsConfig.fileName tính từ vị trí file cấu hình lúc chạy (không phụ thuộc cwd, file commit lên git không dính đường dẫn máy): tsconfig.json trong thư mục của phần (Wails: frontend/) và ở gốc dự án đều ra đường dẫn tuyệt đối đúng', async () => {
     const wails = tmp()
     put(wails, 'frontend/package.json', '{}')
     put(wails, 'frontend/tsconfig.json', '{"include":["src"]}')
     put(wails, 'frontend/src/shared/u.ts', 'export const u = 1\n')
     writeArch(wails, [webPart({ root: 'frontend/src', modules: [{ name: 'shared', path: 'frontend/src/shared', mayDependOn: [] }], shared: ['frontend/src/shared'], forbidden: [] })])
-    const { cfg } = genWeb(wails)
+    const { cfg } = await genWeb(wails)
     assert.ok(path.isAbsolute(cfg.options.tsConfig.fileName), cfg.options.tsConfig.fileName)
     assert.equal(path.resolve(cfg.options.tsConfig.fileName), path.join(wails, 'frontend', 'tsconfig.json'))
-    const text = read(wails, '.dependency-cruiser.cjs')
-    assert.ok(text.includes('__dirname'), 'đường dẫn dựng từ __dirname')
+    const text = read(wails, '.dependency-cruiser.mjs')
+    assert.ok(text.includes('import.meta.dirname'), 'đường dẫn dựng từ import.meta.dirname')
     assert.ok(!text.includes(wails) && !text.includes(wails.replace(/\\/g, '/')), 'không ghi đường dẫn của máy vào file')
     const flat = webProject()
     put(flat, 'tsconfig.json', '{}')
-    assert.equal(path.resolve(genWeb(flat).cfg.options.tsConfig.fileName), path.join(flat, 'tsconfig.json'))
-    assert.equal(genWeb(webProject()).cfg.options.tsConfig, undefined, 'không có tsconfig ⇒ không đặt')
+    assert.equal(path.resolve((await genWeb(flat)).cfg.options.tsConfig.fileName), path.join(flat, 'tsconfig.json'))
+    assert.equal((await genWeb(webProject())).cfg.options.tsConfig, undefined, 'không có tsconfig ⇒ không đặt')
+  })
+  test('cấu hình sinh ra là ESM, không có require()/module.exports/__dirname (ESLint của dự án không cần miễn luật nào); không có tsconfig thì không import gì', () => {
+    const dir = webProject()
+    put(dir, 'tsconfig.json', '{}')
+    A.gen(dir)
+    const text = read(dir, '.dependency-cruiser.mjs')
+    assert.match(text, /^\/\/ Sinh bởi: node ~\/\.claude\/hooks\/arch\.mjs gen/)
+    assert.match(text, /^import path from 'node:path'$/m)
+    assert.match(text, /^export default \{$/m)
+    for (const bad of ['require(', 'module.exports', '__dirname']) assert.ok(!text.includes(bad), bad)
+    const bare = webProject()
+    A.gen(bare)
+    assert.doesNotMatch(read(bare, '.dependency-cruiser.mjs'), /^import /m, 'không có tsconfig ⇒ không import path (tránh import thừa)')
+  })
+  test('genFiles: nội dung y như gen ghi, chưa ghi gì; legacy = đúng bản .cjs kit cũ sinh (module.exports + require) để cổng gộp nhận ra file cũ', () => {
+    const dir = webProject()
+    put(dir, 'tsconfig.json', '{}')
+    const plan = A.genFiles(dir)
+    assert.equal(has(dir, '.dependency-cruiser.mjs'), false)
+    assert.deepEqual(plan.files.map((f) => f.rel), ['.dependency-cruiser.mjs'])
+    const [legacy] = plan.legacy
+    assert.equal(legacy.rel, '.dependency-cruiser.cjs')
+    assert.match(legacy.text, /^\/\/ Sinh bởi: .*\n\/\*\* @type \{import\('dependency-cruiser'\)\.IConfiguration\} \*\/\nmodule\.exports = \{\n/)
+    assert.ok(legacy.text.includes('"fileName": require(\'node:path\').join(__dirname, "tsconfig.json")'), legacy.text.slice(-200))
+    A.gen(dir)
+    assert.equal(read(dir, '.dependency-cruiser.mjs'), plan.files[0].text)
+  })
+  test('dự án còn .dependency-cruiser.cjs cũ do kit sinh ⇒ gen thay bằng .mjs và xoá .cjs; .cjs viết tay ⇒ giữ nguyên, không sinh .mjs', () => {
+    const dir = webProject()
+    put(dir, '.dependency-cruiser.cjs', A.genFiles(dir).legacy[0].text)
+    const r = A.gen(dir)
+    assert.deepEqual(r.removed, ['.dependency-cruiser.cjs'])
+    assert.equal(has(dir, '.dependency-cruiser.cjs'), false)
+    assert.ok(has(dir, '.dependency-cruiser.mjs'))
+    assert.deepEqual(A.depcruiseArgs(dir).args.slice(0, 2), ['--config', '.dependency-cruiser.mjs'])
+    const hand = webProject()
+    put(hand, '.dependency-cruiser.cjs', 'module.exports = { forbidden: [] }\n')
+    const r2 = A.gen(hand)
+    assert.equal(read(hand, '.dependency-cruiser.cjs'), 'module.exports = { forbidden: [] }\n')
+    assert.equal(has(hand, '.dependency-cruiser.mjs'), false)
+    assert.ok(r2.kept.some((k) => k.file === '.dependency-cruiser.cjs' && /không phải do kit sinh/.test(k.why)))
+    assert.deepEqual(A.depcruiseArgs(hand).args.slice(0, 2), ['--config', '.dependency-cruiser.cjs'], 'cấu hình viết tay vẫn được dùng')
+    // dấu "Sinh bởi" chỉ tính ở dòng đầu (như cổng gộp): file viết tay nhắc tới nó trong ghi chú vẫn là viết tay, không bị xoá
+    const quoted = webProject()
+    const note = `module.exports = { forbidden: [] }\n// tách khỏi bản "${A.GEN_MARK}" vì cần luật riêng\n`
+    put(quoted, '.dependency-cruiser.cjs', note)
+    A.gen(quoted)
+    assert.equal(read(quoted, '.dependency-cruiser.cjs'), note)
+    assert.equal(has(quoted, '.dependency-cruiser.mjs'), false)
   })
   test('gen lặp lại cho cùng kết quả; file có sẵn không phải do kit sinh thì giữ nguyên', () => {
     const dir = webProject()
     A.gen(dir)
-    const first = read(dir, '.dependency-cruiser.cjs')
+    const first = read(dir, '.dependency-cruiser.mjs')
     const r2 = A.gen(dir)
-    assert.equal(read(dir, '.dependency-cruiser.cjs'), first)
-    assert.ok(r2.written.includes('.dependency-cruiser.cjs'))
-    put(dir, '.dependency-cruiser.cjs', 'module.exports = { forbidden: [] }\n')
+    assert.equal(read(dir, '.dependency-cruiser.mjs'), first)
+    assert.ok(r2.written.includes('.dependency-cruiser.mjs'))
+    put(dir, '.dependency-cruiser.mjs', 'export default { forbidden: [] }\n')
     const r3 = A.gen(dir)
-    assert.equal(read(dir, '.dependency-cruiser.cjs'), 'module.exports = { forbidden: [] }\n')
-    assert.ok(r3.kept.some((k) => k.file === '.dependency-cruiser.cjs' && /không phải do kit sinh/.test(k.why)))
+    assert.equal(read(dir, '.dependency-cruiser.mjs'), 'export default { forbidden: [] }\n')
+    assert.ok(r3.kept.some((k) => k.file === '.dependency-cruiser.mjs' && /không phải do kit sinh/.test(k.why)))
   })
   test('arch.json hỏng ⇒ gen ném lỗi nêu rõ, không ghi gì', () => {
     const dir = tmp()
     put(dir, 'docs/arch.json', '{')
     assert.throws(() => A.gen(dir), /docs\/arch\.json/)
-    assert.equal(has(dir, '.dependency-cruiser.cjs'), false)
+    assert.equal(has(dir, '.dependency-cruiser.mjs'), false)
   })
   test('mọi regex sinh ra qua được kiểm "an toàn" của dependency-cruiser: không có nhóm lặp chứa phép lặp (`(?:.*/)?`, `(?:/.*)?$` bị depcruise từ chối và DỪNG HẲN); khớp đúng như trước', () => {
     const quantifiedGroupWithQuantifier = /\((?:\?:)?[^()]*[*+][^()]*\)[*+?{]/
@@ -769,10 +859,11 @@ describe('gen — go-arch-lint, golangci, eslint', () => {
     const y = miniYaml(read(dir, '.go-arch-lint.yml'))
     assert.deepEqual(y.components.billing.in, ['billing', 'billing/domain', 'billing/domain/money', 'billing/**'])
   })
-  test('khối ESLint in ra có `ignores` cho .dependency-cruiser.cjs (file kit sinh dùng module.exports); root lạ không phá được chuỗi trong khối; workdir của go-arch-lint được nháy khi cần', () => {
+  test('khối ESLint in ra không còn `ignores` nào (file kit sinh là ESM, ESLint đọc sạch); root lạ không phá được chuỗi trong khối; workdir của go-arch-lint được nháy khi cần', () => {
     const dir = webProject()
     const block = A.gen(dir).blocks.find((b) => /ESLint/.test(b.title)).text
-    assert.match(block, /\{ ignores: \['\.dependency-cruiser\.cjs'\] \},/)
+    assert.doesNotMatch(block, /ignores: \['\.dependency-cruiser/)
+    assert.match(block, /'max-lines-per-function': \['error', \{ max: 60/)
     const odd = tmp()
     const root = "it's #b"
     put(odd, `${root}/x/a.ts`, 'export const a = 1\n')
@@ -786,17 +877,18 @@ describe('gen — go-arch-lint, golangci, eslint', () => {
     A.gen(go)
     assert.match(read(go, '.go-arch-lint.yml'), /^workdir: "my pkg"$/m)
   })
-  test('ESLint THẬT: cấu hình dự án bắt no-undef (sourceType module) ⇒ .dependency-cruiser.cjs làm đỏ (không có ignores); ghép khối do gen in ra ⇒ xanh', { skip: have('eslint') ? false : 'máy không có eslint — bỏ qua test thật' }, () => {
+  test('ESLint THẬT: cấu hình dự án bắt no-undef (sourceType module) ⇒ .dependency-cruiser.mjs do gen sinh vẫn xanh mà không miễn/ignores gì; bản .cjs cũ (require) thì đỏ', { skip: have('eslint') ? false : 'máy không có eslint — bỏ qua test thật' }, () => {
     const dir = webProject()
-    const block = A.gen(dir).blocks.find((b) => /ESLint/.test(b.title)).text
-    const base = "{ files: ['**/*.{js,cjs}'], languageOptions: { sourceType: 'module' }, rules: { 'no-undef': 'error' } },"
+    put(dir, 'tsconfig.json', '{}')
+    A.gen(dir)
+    const base = "{ files: ['**/*.{js,mjs,cjs}'], languageOptions: { sourceType: 'module' }, rules: { 'no-undef': 'error', 'no-unused-vars': 'error' } },"
     put(dir, 'eslint.config.mjs', `export default [\n  ${base}\n]\n`)
-    const before = A.defaultRun('eslint', ['--', '.'], { cwd: dir, timeoutMs: 120000 })
-    assert.notEqual(before.status, 0, 'không có ignores thì phải đỏ — nếu xanh thì test này không chứng minh gì')
-    assert.match(before.stdout, /'module' is not defined/)
-    put(dir, 'eslint.config.mjs', `export default [\n  ${base}\n${block}]\n`)
-    const after = A.defaultRun('eslint', ['--', '.'], { cwd: dir, timeoutMs: 120000 })
-    assert.equal(after.status, 0, after.stdout + after.stderr)
+    const now = A.defaultRun('eslint', ['--', '.dependency-cruiser.mjs'], { cwd: dir, timeoutMs: 120000 })
+    assert.equal(now.status, 0, now.stdout + now.stderr)
+    put(dir, '.dependency-cruiser.cjs', A.genFiles(dir).legacy[0].text)
+    const old = A.defaultRun('eslint', ['--', '.dependency-cruiser.cjs'], { cwd: dir, timeoutMs: 120000 })
+    assert.notEqual(old.status, 0, 'bản cũ phải đỏ — nếu xanh thì test này không chứng minh gì')
+    assert.match(old.stdout, /'module' is not defined/)
   })
   const galReal = { skip: have('go-arch-lint') && have('go') ? false : 'máy không có go-arch-lint (go install github.com/fe3dback/go-arch-lint@latest) — bỏ qua test thật' }
   const galRun = (dir) => {
@@ -958,7 +1050,7 @@ describe('baseline', () => {
     assert.deepEqual(r.missing, [])
     assert.deepEqual(r.data, data)
     const dc = run.calls.find((c) => c.cmd === 'depcruise')
-    assert.deepEqual(dc.args, ['--config', '.dependency-cruiser.cjs', '--output-type', 'baseline', '--', 'src'])
+    assert.deepEqual(dc.args, ['--config', '.dependency-cruiser.mjs', '--output-type', 'baseline', '--', 'src'])
     const es = run.calls.find((c) => c.cmd === 'eslint')
     assert.ok(es.args.includes('--suppress-rule'))
     assert.ok(es.args.includes('max-lines-per-function') && es.args.includes('complexity'))
@@ -986,7 +1078,7 @@ describe('baseline', () => {
     assert.equal(r.data.eslint, false)
     assert.deepEqual(r.missing, [])
   })
-  test('chưa gen (thiếu .dependency-cruiser.cjs) ⇒ ghi chú chạy gen trước, depcruise null', () => {
+  test('chưa gen (thiếu .dependency-cruiser.mjs) ⇒ ghi chú chạy gen trước, depcruise null', () => {
     const dir = webProject()
     const r = A.baseline(dir, { run: fakeRun({ ...rev('abc'), depcruise: () => ({ stdout: '[]' }) }) })
     assert.equal(r.data.depcruise, null)
@@ -1039,7 +1131,7 @@ describe('baseline', () => {
     assert.ok(!run2.calls.find((c) => c.cmd === 'depcruise').args.includes('--ignore-known'))
     assert.equal(A.depcruiseArgs(dir).args.includes('--ignore-known'), false)
     const strict = A.depcruiseArgs(dir, { ignoreKnown: true }).args
-    assert.deepEqual(strict.slice(0, strict.indexOf('--')), ['--config', '.dependency-cruiser.cjs', '--ignore-known', '.dependency-cruiser-known-violations.json', '--output-type', 'err-long'])
+    assert.deepEqual(strict.slice(0, strict.indexOf('--')), ['--config', '.dependency-cruiser.mjs', '--ignore-known', '.dependency-cruiser-known-violations.json', '--output-type', 'err-long'])
     assert.deepEqual(strict.slice(-2), ['--', 'src'])
     fs.rmSync(path.join(dir, '.dependency-cruiser-known-violations.json'))
     assert.equal(A.depcruiseArgs(dir, { ignoreKnown: true }).args.includes('--ignore-known'), false)
@@ -1078,10 +1170,10 @@ describe('baseline', () => {
     put(dir, '-k.json', '[]')
     put(dir, 'k.json', '[]')
     const withKnown = (v) => { put(dir, 'docs/arch-baseline.json', JSON.stringify({ base: 'a', size: {}, depcruise: v, go: null, eslint: false })); return A.depcruiseArgs(dir, { ignoreKnown: true }).args }
-    assert.deepEqual(withKnown('k.json').slice(0, 4), ['--config', '.dependency-cruiser.cjs', '--ignore-known', 'k.json'])
+    assert.deepEqual(withKnown('k.json').slice(0, 4), ['--config', '.dependency-cruiser.mjs', '--ignore-known', 'k.json'])
     for (const bad of ['-k.json', '../k.json', path.join(dir, 'k.json'), 'k.json\nx']) assert.equal(withKnown(bad).includes('--ignore-known'), false, JSON.stringify(bad))
     const args = A.depcruiseArgs(dir, { outputType: 'baseline' }).args
-    assert.deepEqual(args, ['--config', '.dependency-cruiser.cjs', '--output-type', 'baseline', '--', 'src'])
+    assert.deepEqual(args, ['--config', '.dependency-cruiser.mjs', '--output-type', 'baseline', '--', 'src'])
   })
   test('init tiện ích trình duyệt: background / content / popup chỉ được dùng shared (không import nhau), shared không phụ thuộc ai; web vẫn như cũ', () => {
     const dir = tmp()

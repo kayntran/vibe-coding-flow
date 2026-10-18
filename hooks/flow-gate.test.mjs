@@ -7,6 +7,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import * as A from './lib/arch.mjs'
 import * as K from './lib/kho.mjs'
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'flow-gate.mjs')
@@ -2666,12 +2667,99 @@ describe('đợt 2: cổng gộp chống lách (file luật, dòng tắt luật,
     assert.match(assertDeny(claudeSh(mv, mv.main, MERGE)), /xoá.*eslint\.config\.js/)
   })
 
-  test('nới trần cỡ file trong docs/arch.json ⇒ lý do nêu trần cũ và mới; siết thì nói siết (vẫn chặn)', () => {
+  test('nới trần cỡ file trong docs/arch.json ⇒ chặn, lý do nêu trần cũ và mới; hạ trần là siết ⇒ qua', () => {
     const arch = (n) => JSON.stringify({ version: 1, parts: [{ name: 'web', stack: 'web', root: 'src', limits: { fileLines: n, fnLines: 60 } }] }, null, 2) + '\n'
     const loose = ruleFx({ main: { 'docs/arch.json': arch(400) }, feat: { 'docs/arch.json': arch(600) } })
     assert.match(assertDeny(claudeSh(loose, loose.main, MERGE)), /nới trần cỡ file.*400.*600/)
     const tight = ruleFx({ main: { 'docs/arch.json': arch(400) }, feat: { 'docs/arch.json': arch(300) } })
-    assert.match(assertDeny(claudeSh(tight, tight.main, MERGE)), /siết trần cỡ file.*400.*300/)
+    assertPass(claudeSh(tight, tight.main, MERGE))
+  })
+
+  // Cổng phân biệt SIẾT (qua) với NỚI (chặn) khi nhánh đổi file luật; không chắc ⇒ chặn (lib/rule-change.mjs).
+  const MODS = [{ name: 'shared', path: 'src/shared', mayDependOn: [] }, { name: 'features/a', path: 'src/features/a', mayDependOn: ['shared'] }]
+  const MOD_B = { name: 'features/b', path: 'src/features/b', mayDependOn: ['shared'] }
+  const FORBID = { from: 'src/shared/**', to: 'src/features/**', reason: 'shared không biết tính năng', fix: 'Chuyển code vào tính năng' }
+  const archOf = (modules, o = {}) => `${JSON.stringify({ version: 1, parts: [{ name: 'web', stack: 'web', root: 'src', modules, shared: ['src/shared'], forbidden: [FORBID], ...o }] }, null, 2)}\n`
+  // File kit sinh từ arch.json (đúng như arch.mjs gen): { đường dẫn: chữ }; legacy = bản .cjs kit cũ từng sinh (dùng require).
+  const generated = (archText, { legacy = false } = {}) => {
+    const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'flow-gate-gen-')))
+    roots.push(d)
+    write(d, 'docs/arch.json', archText)
+    write(d, 'tsconfig.json', '{}\n')
+    const r = A.genFiles(d)
+    return Object.fromEntries((legacy ? r.legacy : r.files).map((f) => [f.rel, f.text]))
+  }
+
+  test('thêm module vào docs/arch.json ⇒ qua (siết); bỏ module, cho module import thêm, bỏ luật cấm, arch.json hỏng ⇒ chặn nêu đúng chỗ', () => {
+    const add = ruleFx({ main: { 'docs/arch.json': archOf(MODS) }, feat: { 'docs/arch.json': archOf([...MODS, MOD_B]) } })
+    assertPass(claudeSh(add, add.main, MERGE))
+    const drop = ruleFx({ main: { 'docs/arch.json': archOf([...MODS, MOD_B]) }, feat: { 'docs/arch.json': archOf(MODS) } })
+    assert.match(assertDeny(claudeSh(drop, drop.main, MERGE)), /bỏ module "features\/b"/)
+    const widen = ruleFx({ main: { 'docs/arch.json': archOf([...MODS, MOD_B]) }, feat: { 'docs/arch.json': archOf([...MODS, { ...MOD_B, mayDependOn: ['shared', 'features/a'] }]) } })
+    assert.match(assertDeny(claudeSh(widen, widen.main, MERGE)), /cho module "features\/b" import "features\/a"/)
+    const unforbid = ruleFx({ main: { 'docs/arch.json': archOf(MODS) }, feat: { 'docs/arch.json': archOf(MODS, { forbidden: [] }) } })
+    assert.match(assertDeny(claudeSh(unforbid, unforbid.main, MERGE)), /bỏ hoặc sửa luật cấm src\/shared\/\*\* → src\/features\/\*\*/)
+    const broken = ruleFx({ main: { 'docs/arch.json': archOf(MODS) }, feat: { 'docs/arch.json': '{ hỏng\n' } })
+    assert.match(assertDeny(claudeSh(broken, broken.main, MERGE)), /docs\/arch\.json.*không dùng được/)
+  })
+
+  test('.dependency-cruiser.mjs sinh lại khớp docs/arch.json ⇒ qua; sửa tay lệch arch.json (vẫn giữ dòng "Sinh bởi") ⇒ chặn', () => {
+    const before = archOf(MODS)
+    const after = archOf([...MODS, MOD_B])
+    const main = { 'docs/arch.json': before, 'tsconfig.json': '{}\n', ...generated(before) }
+    const ok = ruleFx({ main, feat: { 'docs/arch.json': after, ...generated(after) } })
+    assertPass(claudeSh(ok, ok.main, MERGE))
+    const hand = generated(after)['.dependency-cruiser.mjs'].replace(/"name": "arch-web-features-b"/, '"name": "da-sua-tay"')
+    const edited = ruleFx({ main, feat: { 'docs/arch.json': after, '.dependency-cruiser.mjs': hand } })
+    assert.match(assertDeny(claudeSh(edited, edited.main, MERGE)), /\.dependency-cruiser\.mjs.*khác bản kit sinh lại từ docs\/arch\.json/)
+  })
+
+  test('.dependency-cruiser.cjs bản cũ do kit sinh (dùng require) khớp arch.json ⇒ qua; chuyển sang .mjs (xoá .cjs) ⇒ qua; xoá .cjs mà không có .mjs thay ⇒ chặn', () => {
+    const before = archOf(MODS)
+    const after = archOf([...MODS, MOD_B])
+    const main = { 'docs/arch.json': before, 'tsconfig.json': '{}\n', ...generated(before, { legacy: true }) }
+    const old = ruleFx({ main, feat: { 'docs/arch.json': after, ...generated(after, { legacy: true }) } })
+    assertPass(claudeSh(old, old.main, MERGE))
+    const moved = ruleFx({ main, feat: { 'docs/arch.json': after, '.dependency-cruiser.cjs': null, ...generated(after) } })
+    assertPass(claudeSh(moved, moved.main, MERGE))
+    const gone = ruleFx({ main, feat: { 'docs/arch.json': after, '.dependency-cruiser.cjs': null } })
+    assert.match(assertDeny(claudeSh(gone, gone.main, MERGE)), /xoá file luật import giữa các module \(\.dependency-cruiser\.cjs\)/)
+  })
+
+  // Giống eslint.config.js của dự án thật (withlove-day): thêm luật shadcn mức error là siết; khối miễn cho *.cjs (languageOptions + tắt luật) là nới.
+  const ESLINT = (extra = '') => [
+    "import js from '@eslint/js'", "import globals from 'globals'", "import tseslint from 'typescript-eslint'", "import { defineConfig } from 'eslint/config'", '',
+    'export default defineConfig([', '  js.configs.recommended,', '  tseslint.configs.recommended,', '  {',
+    "    files: ['**/*.{ts,tsx}'],", '    rules: {', "      'no-console': 'error',", '    },', '  },', extra, '])', '',
+  ].join('\n')
+  const SHADCN = "  {\n    // Luật giao diện shadcn\n    files: ['src/**/*.{ts,tsx}'],\n    plugins: { shadcn },\n    rules: {\n      'shadcn/no-raw-colors': 'error',\n      'shadcn/require-static-classes': 'error',\n    },\n  },"
+  const CJS_EXEMPT = "  {\n    files: ['**/*.cjs'],\n    languageOptions: { sourceType: 'commonjs', globals: globals.node },\n    rules: { '@typescript-eslint/no-require-imports': 'off' },\n  },"
+
+  test('eslint.config: thêm import gói + khối luật mức error ⇒ qua; thêm khối miễn (tắt luật, languageOptions) ⇒ chặn nêu dòng; gỡ khối miễn có sẵn ⇒ qua', () => {
+    const tighten = ruleFx({ main: { 'eslint.config.js': ESLINT() }, feat: { 'eslint.config.js': ESLINT(SHADCN).replace("import globals", "import { plugin as shadcn } from '@shadcn/lint'\nimport globals") } })
+    assertPass(claudeSh(tighten, tighten.main, MERGE))
+    const exempt = ruleFx({ main: { 'eslint.config.js': ESLINT() }, feat: { 'eslint.config.js': ESLINT(CJS_EXEMPT) } })
+    const reason = assertDeny(claudeSh(exempt, exempt.main, MERGE))
+    assert.match(reason, /sửa file luật ESLint \(eslint\.config\.js\): dòng 15.*tắt luật/)
+    assertNoUserCmd(reason)
+    const unexempt = ruleFx({ main: { 'eslint.config.js': ESLINT(CJS_EXEMPT) }, feat: { 'eslint.config.js': ESLINT() } })
+    assertPass(claudeSh(unexempt, unexempt.main, MERGE))
+  })
+
+  test('eslint.config: thêm luật mức error vào khối có sẵn ⇒ qua; mức warn, kèm tuỳ chọn, ghi đè luật đã có trong cùng khối, khối chỉ có ignores ⇒ chặn', () => {
+    const add = (line) => ESLINT().replace("      'no-console': 'error',", `      'no-console': 'error',\n${line}`)
+    const ok = ruleFx({ main: { 'eslint.config.js': ESLINT() }, feat: { 'eslint.config.js': add("      'no-debugger': 'error',") } })
+    assertPass(claudeSh(ok, ok.main, MERGE))
+    for (const [line, why] of [
+      ["      'no-debugger': 'warn',", /mức "error"/],
+      ["      complexity: ['error', 30],", /mức "error"/],
+      ["      'no-console': 'error',", /đã có trong cùng khối/],
+    ]) {
+      const fx = ruleFx({ main: { 'eslint.config.js': ESLINT() }, feat: { 'eslint.config.js': add(line) } })
+      assert.match(assertDeny(claudeSh(fx, fx.main, MERGE)), why, line)
+    }
+    const ign = ruleFx({ main: { 'eslint.config.js': ESLINT() }, feat: { 'eslint.config.js': ESLINT("  { ignores: ['src/legacy/**'] },") } })
+    assert.match(assertDeny(claudeSh(ign, ign.main, MERGE)), /bỏ qua file/)
   })
 
   test('thêm dòng tắt luật ⇒ deny kèm file:dòng; mọi loại tắt luật đều bị bắt; Codex/Devin deny', () => {
