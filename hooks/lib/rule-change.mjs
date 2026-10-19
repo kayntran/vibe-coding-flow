@@ -9,11 +9,13 @@
 //   File kit sinh từ arch.json (.dependency-cruiser.mjs, bản cũ .dependency-cruiser.cjs, .go-arch-lint*.yml, .golangci.yml — dòng đầu có dấu "Sinh bởi"): sinh lại từ
 //     arch.json của nhánh trong thư mục tạm dựng lại đúng phần cây gen đọc (arch.json, tsconfig.json, go.mod, thư mục Go) rồi so từng chữ. Khớp ⇒ không tính (đánh giá
 //     nằm ở arch.json); lệch / không có dấu ⇒ nới. Xoá file kit sinh ⇒ chỉ qua khi kit không còn sinh tên đó và (depcruise) .dependency-cruiser.mjs của nhánh khớp.
-//   eslint.config.* (sửa)  eslintLoosening. Còn lại (mốc vi phạm cũ, biome, .eslintrc, golangci viết tay, flow.json, kit/rules…) ⇒ nới như trước.
+//   eslint.config.* (sửa)  eslintLoosening. .claude/ui.json (sửa)  uiLoosening (thêm màn/trạng thái ⇒ qua; thêm nút miễn chữ, bỏ màn, đổi start/url… ⇒ nới).
+//   Còn lại (mốc vi phạm cũ, biome, .eslintrc, golangci viết tay, flow.json, kit/rules…) ⇒ nới như trước.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { ARCH_FILE, DEPCRUISE_FILE, GEN_MARK, archLoosening, genFiles, parseArch } from './arch.mjs'
+import { fold } from './ui-rules.mjs'
 
 const GENERATED = /^(?:\.dependency-cruiser\.[cm]js|\.go-arch-lint(?:\.[a-z0-9-]+)?\.yml|\.golangci\.yml)$/
 // File kit sinh → file viết tay mà nó che khi cùng có mặt (kit chạy depcruise với .mjs trước .cjs; golangci-lint đọc .yml trước .yaml/.toml/.json)
@@ -43,6 +45,7 @@ function verdict(st, file, read, expected) {
     return list.length ? list.join('; ') : null
   }
   if (GENERATED.test(file)) return generatedVerdict(st, file, read, expected)
+  if (file === UI_FILE) return st === 'M' ? uiLoosening(read('base', file), read('head', file)) : ''
   if (ESLINT_FLAT.test(file) && st === 'M') {
     const before = read('base', file)
     const after = read('head', file)
@@ -119,6 +122,38 @@ function regenerate(read, list, log) {
   } finally {
     try { if (dir) fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 }) } catch (e) { log(`rule-change: không xoá được thư mục tạm ${dir}: ${e?.message ?? e}`) } // kết quả đã có, chỉ sót rác tạm
   }
+}
+
+// --- .claude/ui.json (máy kiểm giao diện, ui-check.mjs): sửa chỉ qua khi màn/trạng thái cũ còn đủ, nút miễn chữ không thêm, mọi khoá khác giữ nguyên ---------------
+// Thêm mới / xoá ⇒ chấm như cũ (''): file mới có thể trỏ máy kiểm vào một app khác.
+const UI_FILE = '.claude/ui.json'
+function uiLoosening(beforeText, afterText) {
+  const parse = (t) => { try { const j = JSON.parse(lf(t)); return j && typeof j === 'object' && !Array.isArray(j) ? j : null } catch { return null } }
+  const before = beforeText === null ? null : parse(beforeText)
+  const after = afterText === null ? null : parse(afterText)
+  if (!before || !after) return `không đọc được ${UI_FILE} (JSON hỏng) nên không so được`
+  // Bản mới phải đúng dạng mà ui-check.mjs loadConfig nhận; sai ⇒ máy kiểm thoát mã 2, không kiểm màn nào.
+  const isStr = (v) => typeof v === 'string' && v.trim() !== ''
+  const badState = (s) => !s || typeof s !== 'object' || !isStr(s.route) || !s.route.startsWith('/') || !isStr(s.s) || (s.setup !== undefined && (!isStr(s.setup) || !/^[?#]/.test(s.setup)))
+  if ((after.routes !== undefined && (!Array.isArray(after.routes) || after.routes.some((r) => !isStr(r) || !r.startsWith('/'))))
+    || (after.states !== undefined && (!Array.isArray(after.states) || after.states.some(badState)))
+    || (after.whitelistIcons !== undefined && (!Array.isArray(after.whitelistIcons) || after.whitelistIcons.some((w) => typeof w !== 'string')))) {
+    return `${UI_FILE} mới sai dạng (routes/states/whitelistIcons) nên máy kiểm giao diện sẽ không chạy`
+  }
+  const list = (v) => (Array.isArray(v) ? v : [])
+  const out = []
+  const routes = new Set(list(after.routes))
+  for (const r of list(before.routes)) if (!routes.has(r)) out.push(`bỏ màn "${oneLine(r, 60)}" khỏi routes`)
+  const stateKey = (s) => JSON.stringify([s?.route, s?.setup ?? '', s?.s])
+  const states = new Set(list(after.states).map(stateKey))
+  for (const s of list(before.states)) if (!states.has(stateKey(s))) out.push(`bỏ trạng thái ${oneLine(s?.s, 20)} (${oneLine(`${s?.route ?? ''}${s?.setup ?? ''}`, 60)}) khỏi states`)
+  const white = new Set(list(before.whitelistIcons).map(fold))
+  for (const w of list(after.whitelistIcons)) if (!white.has(fold(w))) out.push(`thêm nút được để hình trơn không chữ "${oneLine(w, 40)}" (whitelistIcons)`)
+  for (const k of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (k === 'routes' || k === 'states' || k === 'whitelistIcons') continue
+    if (JSON.stringify(before[k]) !== JSON.stringify(after[k])) out.push(`đổi "${oneLine(k, 30)}" (máy kiểm có thể mở app khác hoặc kiểm khác đi)`)
+  }
+  return out.length ? out.join('; ') : null
 }
 
 // --- eslint.config.*: chỉ cho qua khi chắc là siết ----------------------------------------------------------------------------------------

@@ -182,6 +182,26 @@ describe('looseRuleChanges', () => {
     assert.match(r.get('.go-arch-lint.yml'), /đường dẫn lạ/)
     assert.equal(fs.existsSync(path.join(os.tmpdir(), escape)), false, 'đã ghi ra ngoài thư mục tạm')
   })
+  test('.claude/ui.json: thêm màn/trạng thái, bớt nút miễn chữ ⇒ siết; thêm miễn, bỏ màn/trạng thái, đổi start/url/khoá lạ, hỏng, thêm mới, xoá ⇒ nới', () => {
+    const UI = (o = {}) => `${JSON.stringify({ start: 'pnpm dev --port {PORT}', url: 'http://localhost:{PORT}', routes: ['/'], states: [{ route: '/', s: 'S-01' }], ...o }, null, 2)}\n`
+    const ui = (before, after, st = 'M') => judge({ '.claude/ui.json': before }, { '.claude/ui.json': after }, [{ st, file: '.claude/ui.json' }]).get('.claude/ui.json') ?? null
+    const more = { routes: ['/', '/guests'], states: [{ route: '/', s: 'S-01' }, { route: '/guests', s: 'S-30' }, { route: '/guests', setup: '?s=S-31', s: 'S-31' }] }
+    assert.equal(ui(UI(), UI(more)), null)
+    assert.equal(ui(UI({ whitelistIcons: ['Chia sẻ', 'Lọc'] }), UI({ whitelistIcons: ['chia se'] })), null)
+    assert.match(ui(UI(), UI({ ...more, whitelistIcons: ['Đóng'] })), /"Đóng"/)
+    assert.match(ui(UI(more), UI()), /\/guests/)
+    assert.match(ui(UI(more), UI({ ...more, states: more.states.slice(0, 2) })), /S-31/)
+    assert.match(ui(UI(), UI({ url: 'http://localhost:9999' })), /url/)
+    assert.match(ui(UI(), UI({ start: 'npx serve empty' })), /start/)
+    assert.match(ui(UI(), UI({ viewports: [390] })), /viewports/)
+    assert.match(ui(UI(), '{'), /không đọc/)
+    // bản mới sai dạng ⇒ máy kiểm giao diện thoát mã 2, không kiểm màn nào (review Grok)
+    for (const bad of [{ routes: ['/', 'x'] }, { states: [{ route: '/', s: 'S-01' }, { route: '/', s: 'S-01', setup: 'x' }] }, { states: [{ route: '/', s: 'S-01' }, { route: '/x' }] }, { whitelistIcons: null }, { whitelistIcons: [1] }, { routes: 'x' }]) {
+      assert.match(ui(UI(), UI(bad)), /sai dạng/, JSON.stringify(bad))
+    }
+    assert.equal(ui(null, UI(), 'A'), '')
+    assert.equal(ui(UI(), null, 'D'), '')
+  })
   test('baseline, biome, eslint mới, xoá arch.json ⇒ vẫn nới như cũ', () => {
     const r = judge({ 'docs/arch.json': ARCH(MODS) }, { 'docs/arch-baseline.json': '{}', 'biome.json': '{}', 'web/eslint.config.js': 'export default []' }, [
       { st: 'A', file: 'docs/arch-baseline.json' }, { st: 'A', file: 'biome.json' }, { st: 'A', file: 'web/eslint.config.js' }, { st: 'D', file: 'docs/arch.json' },

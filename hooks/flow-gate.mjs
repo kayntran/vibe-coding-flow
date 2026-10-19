@@ -798,7 +798,7 @@ const RULE_LABELS = [
   [/(^|\/)biome\.jsonc?$/, 'luật Biome'], [/(^|\/)sgconfig\.ya?ml$/, 'luật ast-grep'], [/^kit\/rules\//, 'luật của kit'],
 ]
 const CHANGE_VERBS = { A: 'thêm', M: 'sửa', D: 'xoá', T: 'đổi kiểu' }
-// Dòng tắt luật. Tài liệu (.md/.mdx/.txt) chỉ nhắc tới chúng, không tắt được gì nên không tính.
+// Dòng tắt luật. Tài liệu (.md/.mdx/.txt) chỉ nhắc tới chúng, không tắt được gì nên không tính (ghi chú .json dưới docs/: xem isNoteJson).
 const SUPPRESS = [
   [/\beslint-disable/, 'eslint-disable'], [/@ts-ignore\b/, '@ts-ignore'], [/\/\/\s*nolint\b/, '//nolint'],
   [/\bbiome-ignore\b/, 'biome-ignore'], [/#\s*noqa\b/i, '# noqa'], [/\bast-grep-ignore\b/, 'ast-grep-ignore'],
@@ -830,6 +830,14 @@ function isGeneratedFile(info, sha, file) {
   if (GENERATED_PATH.test(file)) return true
   const head = git(info.dir, ['cat-file', '-p', `${sha}:${file}`])
   return head !== null && GENERATED_MARK.test(head.split('\n', 5).join('\n'))
+}
+
+// Ghi chú .json dưới docs/ (báo cáo review, sổ) chỉ kể lại dòng tắt luật trong chuỗi. Chỉ tính là ghi chú khi bản của nhánh là JSON thuần:
+// JSON có ghi chú (tsconfig.json, JSONC) thì Biome… đọc được lệnh tắt luật trong ghi chú ⇒ vẫn bắt (review Codex). Đọc không được ⇒ vẫn bắt.
+function isNoteJson(info, sha, file) {
+  if (!/^docs\/.*\.json$/i.test(file)) return false
+  const text = git(info.dir, ['cat-file', '-p', `${sha}:${file}`])
+  try { return text !== null && (JSON.parse(text.replace(/^﻿/, '')), true) } catch { return false }
 }
 
 // Các dòng THÊM tắt luật trong patch `-U0`: [{ file, line, what }]. Đếm dòng theo số dòng ghi ở đầu mỗi hunk nên dòng thêm bắt đầu
@@ -924,6 +932,7 @@ async function mergeGuards(info, base, targets) {
     }
     for (const s of addedSuppressions(diff.patch)) {
       if (isGeneratedFile(info, sha, s.file)) continue // máy sinh (Wails bindings, protobuf…): AI không gỡ được, không phải lách luật
+      if (isNoteJson(info, sha, s.file)) continue
       loosen.push(`thêm dòng tắt luật ở ${s.file}:${s.line} (${s.what})${at}`)
     }
     // chép repo chỉ-học: chỉ khi dự án có thẻ chi-hoc (chiHocMatches trả ngay khi không có thẻ); lỗi bất ngờ ⇒ chặn nếu dự án có docs/research

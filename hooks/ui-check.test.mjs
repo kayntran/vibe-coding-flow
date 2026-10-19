@@ -310,10 +310,11 @@ describe('duyệt và kiểm', () => {
     assert.match(out(r), /khổ hẹp 390:[^\n]*lucide-plus \(khổ hẹp\)/)
   })
 
-  test('whitelistIcons trong ui.json được áp dụng', async () => {
-    const snap = () => [icon('Đóng')]
+  test('whitelistIcons trong ui.json được áp dụng; nút Đóng qua sẵn không cần khai', async () => {
+    const snap = () => [icon('Chia sẻ')]
     assert.equal((await run(['--dir', project({ ...CFG, routes: ['/'] })], answering(fakePw({ snap })))).code, 1)
-    assert.equal((await run(['--dir', project({ ...CFG, routes: ['/'], whitelistIcons: ['Đóng'] })], answering(fakePw({ snap })))).code, 0)
+    assert.equal((await run(['--dir', project({ ...CFG, routes: ['/'], whitelistIcons: ['Chia sẻ'] })], answering(fakePw({ snap })))).code, 0)
+    assert.equal((await run(['--dir', project({ ...CFG, routes: ['/'] })], answering(fakePw({ snap: () => [icon('Đóng')] })))).code, 0)
   })
 
   test('states: mở route + setup, gắn mã S vào lời báo; trùng route thì chỉ mở một lần', async () => {

@@ -15,8 +15,8 @@
 
 export const RULES = ['primary-many', 'icon-only', 'vague-label', 'dialog-on-load', 'no-name', 'long-label']
 
-// Tên (đã bỏ dấu, chữ thường) được phép đứng một mình không kèm chữ: nhà · in · tìm kiếm (research-journey §7). Mở rộng: ui.json whitelistIcons.
-const DEFAULT_ICON_WHITELIST = ['home', 'trang chu', 'nha', 'print', 'in', 'search', 'tim kiem', 'tim']
+// Tên (đã bỏ dấu, chữ thường) được phép đứng một mình không kèm chữ: nhà · in · tìm kiếm (research-journey §7) · đóng (X) (sổ chốt [2e0j]). Mở rộng: ui.json whitelistIcons.
+const DEFAULT_ICON_WHITELIST = ['home', 'trang chu', 'nha', 'print', 'in', 'search', 'tim kiem', 'tim', 'dong', 'close']
 // Nhãn mơ hồ (đã bỏ dấu, chữ thường, bỏ dấu câu cuối).
 const VAGUE_LABELS = new Set(['ok', 'yes', 'no', 'submit', 'co', 'khong', 'xac nhan', 'dong y'])
 const MAX_WORDS = 3
@@ -201,7 +201,7 @@ export function audit(snapshot, opts = {}) {
           'Thêm chữ hiện ra cho nút (nút chỉ có hình thì thêm cả aria-label).', 'error', clean(b.hint).slice(0, 160))
       } else if (!white.has(fold(name)) && !(b.inToolbar && title)) {
         add('icon-only', name, `Nút ${q(name)} chỉ có hình, không có chữ hiện ra — người mới nhìn không biết bấm vào sẽ làm gì.`,
-          `Thêm chữ 1 từ cạnh hình (vd ${q(name)}). Chỉ nhà, in, tìm kiếm được để hình trơn; thanh công cụ dày thì để hình trơn kèm title (hiện khi rê chuột).`)
+          `Thêm chữ 1 từ cạnh hình (vd ${q(name)}). Chỉ nhà, in, tìm kiếm, đóng (X) được để hình trơn; thanh công cụ dày thì để hình trơn kèm title (hiện khi rê chuột).`)
       }
       continue
     }

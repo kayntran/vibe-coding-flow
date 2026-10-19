@@ -2824,13 +2824,20 @@ describe('đợt 2: cổng gộp chống lách (file luật, dòng tắt luật,
     assert.ok(reason.includes('src/tay.ts:1') && !reason.includes('frontend/wailsjs'), reason)
   })
 
-  test('tắt luật có kèm lý do, nhắc trong tài liệu .md, hoặc XOÁ dòng tắt luật ⇒ qua như cũ', () => {
+  test('tắt luật có kèm lý do, nhắc trong tài liệu .md hay ghi chú .json dưới docs/, hoặc XOÁ dòng tắt luật ⇒ qua như cũ; file code dưới docs/ hay .json ngoài docs/ vẫn bị bắt', () => {
     const fx = ruleFx({ feat: {
       'src/ok.ts': '// @ts-expect-error: mock thiếu trường id\nconst x: number = "x"\n',
       'docs/note.md': 'Đừng dùng // eslint-disable hay @ts-ignore.\n',
+      'docs/specs/2026-10-16-x/notes/review.json': '{\n  "delta": "9fb0305 gỡ dòng tắt luật eslint-disable ở anim.ts, bỏ @ts-ignore"\n}\n',
     } })
     assertPass(claudeSh(fx, fx.main, MERGE))
     assertPass(codexSh(fx, fx.main, MERGE))
+    const code = ruleFx({ feat: {
+      'docs/example.ts': '// eslint-' + 'disable\nexport {}\n', 'src/data.json': '{ "a": "// @ts-' + 'ignore" }\n',
+      'docs/tsconfig.json': '{\n  // biome-' + 'ignore-all lint: legacy\n  "a": 1\n}\n', // JSON có ghi chú (JSONC): Biome đọc được lệnh tắt luật — review Codex
+    } })
+    const reason = assertDeny(claudeSh(code, code.main, MERGE))
+    for (const at of ['docs/example.ts:1', 'src/data.json:1', 'docs/tsconfig.json:2']) assert.ok(reason.includes(at), `${at}: ${reason}`)
     const del = ruleFx({ main: { 'src/old.ts': '// eslint-disable-next-line\nlet a = 1\n// @ts-ignore\nlet b = 2\n' }, feat: { 'src/old.ts': 'let a = 1\nlet b = 2\n' } })
     assertPass(claudeSh(del, del.main, MERGE))
     assertPass(codexSh(del, del.main, MERGE))

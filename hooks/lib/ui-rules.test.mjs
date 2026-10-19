@@ -45,14 +45,15 @@ describe('audit — từng luật', () => {
       assert.equal(f.severity, 'error')
       assert.match(f.msg, /"Xoá"/)
     })
-    test('nhà · in · tìm kiếm (không phân biệt hoa/thường/dấu, tiếng Anh cũng được) để hình trơn', () => {
-      for (const n of ['Trang chủ', 'trang chu', 'Home', 'In', 'Print', 'Tìm kiếm', 'TIM KIEM', 'Search', 'Tìm']) {
+    test('nhà · in · tìm kiếm · đóng (X) (không phân biệt hoa/thường/dấu, tiếng Anh cũng được) để hình trơn', () => {
+      for (const n of ['Trang chủ', 'trang chu', 'Home', 'In', 'Print', 'Tìm kiếm', 'TIM KIEM', 'Search', 'Tìm', 'Đóng', 'đóng', 'Close', 'CLOSE']) {
         assert.deepEqual(audit(snap([icon(n)])), [], n)
       }
+      assert.deepEqual(audit(snap([labeled('×', { name: 'Đóng' })])), [], 'nút "×" có tên Đóng')
     })
     test('whitelistIcons của dự án mở rộng danh sách trắng', () => {
-      assert.equal(audit(snap([icon('Đóng')])).length, 1)
-      assert.deepEqual(audit(snap([icon('Đóng')]), { whitelistIcons: ['đóng'] }), [])
+      assert.equal(audit(snap([icon('Chia sẻ')])).length, 1)
+      assert.deepEqual(audit(snap([icon('Chia sẻ')]), { whitelistIcons: ['chia sẻ'] }), [])
     })
     test('thanh công cụ có title ⇒ được; thanh công cụ không title, hoặc title nằm ngoài thanh ⇒ vẫn lỗi', () => {
       assert.deepEqual(audit(snap([icon('Đậm', { inToolbar: true, title: 'Đậm' })])), [])

@@ -21,7 +21,7 @@ Luật cho AI sửa app này. Người dùng không viết code: giữ giao di�
 - Thêm miền/tính năng ⇒ thêm module vào `docs/arch.json` + một dòng Codemap trong `docs/ARCHITECTURE.md`, rồi `node ~/.claude/hooks/arch.mjs sync`.
 
 ## Giao diện
-- Mỗi màn đúng MỘT nút chính (`data-primary`); nhãn 1–3 chữ, động từ ("Lưu", "Thêm từ"); không "OK/Có/Không/Xác nhận". Icon luôn kèm nhãn chữ (trừ nhà · in · tìm kiếm).
+- Mỗi màn đúng MỘT nút chính (`data-primary`); nhãn 1–3 chữ, động từ ("Lưu", "Thêm từ"); không "OK/Có/Không/Xác nhận". Icon luôn kèm nhãn chữ (trừ nhà · in · tìm kiếm · đóng (X)).
 - Việc không quay lại được (xoá, tiền, quyền): nút nêu rõ ("Xoá từ"); việc hoàn tác được: nút Hoàn tác, không hộp xác nhận.
 - Mỗi trạng thái màn trong SPEC có mã `S-nn`: gắn `data-s="S-nn"` vào phần tử gốc của trạng thái và ghi mã trong tên test e2e (`frontend/e2e`).
 - Kiểm: `node ~/.claude/hooks/ui-check.mjs --dir frontend` (đọc `frontend/.claude/ui.json`; Playwright cài trong `frontend`).

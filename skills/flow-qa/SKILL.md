@@ -41,7 +41,7 @@ lỗi cũ chỉ nhắc, lỗi mới chặn [vm5s]); app tạo từ mẫu không 
 
 ### Checklist giao diện (máy kiểm dòng có ⚙, QA soát phần còn lại)
 1. ⚙ Mỗi màn đúng một nút chính. 2. ⚙ Nhãn nút 1–3 chữ, động từ, không OK/Yes/Submit/Có/Không/Xác nhận. 3. ⚙ Nút chỉ có
-icon chỉ cho nhà/in/tìm kiếm; còn lại có nhãn hiện ra. 4. Hộp xác nhận chỉ cho xoá/ghi đè không hoàn tác, tiền, quyền —
+icon chỉ cho nhà/in/tìm kiếm/đóng (X); còn lại có nhãn hiện ra. 4. Hộp xác nhận chỉ cho xoá/ghi đè không hoàn tác, tiền, quyền —
 nêu tên đối tượng, nút theo kết quả, focus không rơi vào nút phá huỷ. 5. Việc hoàn tác được ⇒ nút Hoàn tác thay hộp xác
 nhận. 6. ⚙ Không hộp thoại lúc mở app, không banner chỉ để thông báo. 7. Lỗi một dòng cạnh ô sai, giữ giá trị đã nhập,
 không mã lỗi trần. 8. Màn trống: một câu + một nút bước đầu, khác trạng thái đang tải. 9. Mọi tính năng tới được trong ≤2

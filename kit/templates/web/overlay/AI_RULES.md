@@ -11,7 +11,7 @@ Luật cho AI sửa app này. Người dùng không viết code: giữ giao di�
 | Việc | Dùng | Không |
 |---|---|---|
 | Nút, ô nhập, hộp thoại | `src/components/ui/*` (shadcn). Thêm: `{{PM_DLX}} shadcn@{{V_SHADCN}} add <tên>` | tự viết lại, thêm thư viện giao diện khác |
-| Icon | `lucide-react`, luôn kèm nhãn chữ (trừ nhà · in · tìm kiếm) | icon trần |
+| Icon | `lucide-react`, luôn kèm nhãn chữ (trừ nhà · in · tìm kiếm · đóng (X)) | icon trần |
 | Kiểu dáng | class Tailwind | CSS tự viết, style inline |
 | Gọi dữ liệu / dịch vụ ngoài | `src/features/<tên>/api` | gọi từ `ui` |
 | Tiền, ngày | hàm định dạng chung trong `src/shared` (tạo khi cần) | định dạng rải rác |

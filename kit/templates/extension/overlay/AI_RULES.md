@@ -20,7 +20,7 @@ Luật cho AI sửa extension này. Người dùng không viết code: giữ gia
 - Gọi `browser.*` chỉ trong `api` của tính năng. Thêm tính năng ⇒ thêm module vào `docs/arch.json` + một dòng Codemap trong `docs/ARCHITECTURE.md`, rồi `node ~/.claude/hooks/arch.mjs sync`.
 
 ## Giao diện
-- Mỗi màn đúng MỘT nút chính (`data-primary`); nhãn 1–3 chữ, động từ ("Lưu", "Thêm từ"); không "OK/Có/Không/Xác nhận". Icon luôn kèm nhãn chữ (trừ nhà · in · tìm kiếm).
+- Mỗi màn đúng MỘT nút chính (`data-primary`); nhãn 1–3 chữ, động từ ("Lưu", "Thêm từ"); không "OK/Có/Không/Xác nhận". Icon luôn kèm nhãn chữ (trừ nhà · in · tìm kiếm · đóng (X)).
 - Việc không quay lại được (xoá, tiền, quyền): nút nêu rõ; việc hoàn tác được: nút Hoàn tác, không hộp xác nhận.
 - Mỗi trạng thái màn trong SPEC có mã `S-nn`: gắn `data-s="S-nn"` vào phần tử gốc của trạng thái và ghi mã trong tên test e2e (`e2e/`).
 - Kiểm: `node ~/.claude/hooks/ui-check.mjs` (đọc `.claude/ui.json`, mở popup ở http://localhost:{{PORT}}/src/entrypoints/popup/index.html).
