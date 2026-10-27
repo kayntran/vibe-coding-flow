@@ -126,7 +126,8 @@ const gen = (files) => {
 // Hai phía của nhánh: { base: { rel: chữ }, head: { rel: chữ } } → read/list như git show / git ls-tree
 const sides = (base, head) => ({
   read: (side, rel) => (side === 'base' ? base : head)[rel] ?? null,
-  list: (side, roots) => Object.keys(side === 'base' ? base : head).filter((f) => roots.some((r) => f.startsWith(`${r}/`))),
+  // như git ls-tree: không nêu thư mục ⇒ cả cây
+  list: (side, roots) => Object.keys(side === 'base' ? base : head).filter((f) => roots.length === 0 || roots.some((r) => f.startsWith(`${r}/`))),
 })
 const judge = (base, head, changes) => looseRuleChanges({ changes, ...sides(base, head) })
 
@@ -202,10 +203,24 @@ describe('looseRuleChanges', () => {
     assert.equal(ui(null, UI(), 'A'), '')
     assert.equal(ui(UI(), null, 'D'), '')
   })
-  test('baseline, biome, eslint mới, xoá arch.json ⇒ vẫn nới như cũ', () => {
-    const r = judge({ 'docs/arch.json': ARCH(MODS) }, { 'docs/arch-baseline.json': '{}', 'biome.json': '{}', 'web/eslint.config.js': 'export default []' }, [
+  test('baseline, biome, eslint mới khi đã có cấu hình ESLint, xoá arch.json ⇒ vẫn nới như cũ', () => {
+    const r = judge({ 'docs/arch.json': ARCH(MODS), '.eslintrc.json': '{}' }, { 'docs/arch-baseline.json': '{}', 'biome.json': '{}', 'web/eslint.config.js': 'export default []' }, [
       { st: 'A', file: 'docs/arch-baseline.json' }, { st: 'A', file: 'biome.json' }, { st: 'A', file: 'web/eslint.config.js' }, { st: 'D', file: 'docs/arch.json' },
     ])
     assert.deepEqual([...r.keys()].sort(), ['biome.json', 'docs/arch-baseline.json', 'docs/arch.json', 'web/eslint.config.js'])
+  })
+  test('eslint.config.* đầu tiên của dự án (điểm tách nhánh chưa có cấu hình ESLint nào) ⇒ siết; đã có ở đâu đó / không liệt kê được ⇒ nới', () => {
+    const added = [{ st: 'A', file: 'apps/web/eslint.config.mjs' }, { st: 'A', file: 'eslint.config.js' }]
+    const head = { 'apps/web/eslint.config.mjs': "export default [{ rules: { 'no-x': 'off' } }]", 'eslint.config.js': 'export default []' }
+    const base = { 'README.md': '# app', 'package.json': '{"name":"app"}', 'apps/web/package.json': '{"name":"web"}' }
+    assert.deepEqual([...judge(base, head, added)], [])
+    // cấu hình sẵn có ở thư mục khác, kiểu cũ, hay trong package.json: file mới có thể che nó
+    for (const extra of [{ 'apps/api/eslint.config.ts': 'export default []' }, { '.eslintrc.cjs': 'module.exports = {}' }, { 'apps/web/.eslintrc': '{}' }, { 'eslint-suppressions.json': '{}' }, { 'apps/web/package.json': '{"eslintConfig":{}}' }]) {
+      assert.deepEqual([...judge({ ...base, ...extra }, head, added).keys()].sort(), ['apps/web/eslint.config.mjs', 'eslint.config.js'], JSON.stringify(extra))
+    }
+    const blind = looseRuleChanges({ changes: added, read: sides(base, head).read, list: () => null })
+    assert.equal(blind.get('eslint.config.js'), '')
+    const unread = looseRuleChanges({ changes: added, read: () => null, list: sides(base, head).list })
+    assert.equal(unread.get('eslint.config.js'), '')
   })
 })

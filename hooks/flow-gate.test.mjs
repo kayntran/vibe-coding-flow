@@ -2566,8 +2566,11 @@ describe('đợt 2: cổng gộp chống lách (file luật, dòng tắt luật,
 
   // Nhánh feat (worktree wt) có một commit chạm các file trong `feat` ({ đường dẫn: nội dung | null = xoá }); `main` = file đã có ở nhánh chính
   // trước khi feat tách ra. Đóng đủ review + qa + test, nên chỉ còn cổng chống lách quyết định.
-  function ruleFx({ main = {}, feat = {} } = {}) {
+  // main luôn có sẵn cấu hình ESLint (khoá eslintConfig) nên file eslint.config.* thêm mới vẫn là nới (có thể che cấu hình cũ);
+  // dự án lần đầu có lint (main chưa có cấu hình nào): firstEsl dưới đây + rule-change.test.mjs.
+  function ruleFx({ main = {}, feat = {}, lintless = false } = {}) {
     const fx = fixture()
+    if (!lintless) main = { 'package.json': '{"eslintConfig":{}}\n', ...main }
     if (Object.keys(main).length > 0) {
       for (const [rel, text] of Object.entries(main)) write(fx.main, rel, text)
       git(fx.main, 'add', '-A')
@@ -2665,6 +2668,15 @@ describe('đợt 2: cổng gộp chống lách (file luật, dòng tắt luật,
     assert.match(assertDeny(claudeSh(del, del.main, MERGE)), /xoá.*biome\.json/)
     const mv = ruleFx({ main, feat: { 'eslint.config.js': null, 'eslint.old.js': 'export default []\n' } })
     assert.match(assertDeny(claudeSh(mv, mv.main, MERGE)), /xoá.*eslint\.config\.js/)
+  })
+
+  test('firstEsl: eslint.config.* đầu tiên khi main chưa có cấu hình ESLint nào ⇒ qua; main có .eslintrc ở gốc, gộp từ thư mục con ⇒ vẫn deny', () => {
+    const app = { 'apps/web/src/a.ts': 'export const a = 1\n' }
+    const first = ruleFx({ lintless: true, main: app, feat: { 'apps/web/eslint.config.mjs': "export default [{ rules: { 'no-x': 'off' } }]\n" } })
+    assertPass(claudeSh(first, first.main, MERGE))
+    const shadow = ruleFx({ lintless: true, main: { ...app, '.eslintrc.json': '{}\n' }, feat: { 'apps/web/eslint.config.mjs': 'export default []\n' } })
+    // ls-tree chạy trong thư mục con mà thiếu --full-tree chỉ thấy apps/web, bỏ sót .eslintrc.json ở gốc
+    assert.match(assertDeny(claudeSh(shadow, path.join(shadow.main, 'apps', 'web'), MERGE)), /thêm.*apps\/web\/eslint\.config\.mjs/)
   })
 
   test('nới trần cỡ file trong docs/arch.json ⇒ chặn, lý do nêu trần cũ và mới; hạ trần là siết ⇒ qua', () => {

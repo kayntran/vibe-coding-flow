@@ -921,7 +921,8 @@ async function mergeGuards(info, base, targets) {
     const loose = looseRuleChanges({
       changes: diff.changes.filter(({ file }) => isRuleFile(file)),
       read: (side, rel) => (revs[side] ? git(info.dir, ['cat-file', '-p', `${revs[side]}:${rel}`]) : null),
-      list: (side, dirs) => (revs[side] ? git(info.dir, ['-c', 'core.quotepath=off', 'ls-tree', '-r', '--name-only', '-z', revs[side], '--', ...dirs])?.split('\0').filter(Boolean) ?? null : null),
+      // --full-tree: đường dẫn tính từ gốc repo kể cả khi lệnh gộp chạy trong thư mục con (không thì chỉ liệt kê thư mục con đó)
+      list: (side, dirs) => (revs[side] ? git(info.dir, ['-c', 'core.quotepath=off', 'ls-tree', '-r', '--full-tree', '--name-only', '-z', revs[side], '--', ...dirs])?.split('\0').filter(Boolean) ?? null : null),
       log,
     })
     for (const { st, file } of diff.changes) {

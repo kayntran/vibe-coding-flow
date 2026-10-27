@@ -10,6 +10,7 @@
 //     arch.json của nhánh trong thư mục tạm dựng lại đúng phần cây gen đọc (arch.json, tsconfig.json, go.mod, thư mục Go) rồi so từng chữ. Khớp ⇒ không tính (đánh giá
 //     nằm ở arch.json); lệch / không có dấu ⇒ nới. Xoá file kit sinh ⇒ chỉ qua khi kit không còn sinh tên đó và (depcruise) .dependency-cruiser.mjs của nhánh khớp.
 //   eslint.config.* (sửa)  eslintLoosening. .claude/ui.json (sửa)  uiLoosening (thêm màn/trạng thái ⇒ qua; thêm nút miễn chữ, bỏ màn, đổi start/url… ⇒ nới).
+//   eslint.config.* (thêm)  chỉ qua khi điểm tách nhánh chưa có cấu hình ESLint nào (firstEslintConfig): dự án lần đầu có lint.
 //   Còn lại (mốc vi phạm cũ, biome, .eslintrc, golangci viết tay, flow.json, kit/rules…) ⇒ nới như trước.
 import fs from 'node:fs'
 import os from 'node:os'
@@ -30,13 +31,13 @@ export function looseRuleChanges({ changes, read, list, log = () => {} }) {
   let regen = null
   const expected = () => (regen ??= regenerate(read, list, log))
   for (const { st, file } of changes) {
-    const why = verdict(st, file, read, expected)
+    const why = verdict(st, file, read, expected, list)
     if (why !== null) out.set(file, why)
   }
   return out
 }
 
-function verdict(st, file, read, expected) {
+function verdict(st, file, read, expected, list) {
   if (file === ARCH_FILE) {
     if (st !== 'A' && st !== 'M') return ''
     const before = st === 'A' ? null : read('base', file)
@@ -53,7 +54,23 @@ function verdict(st, file, read, expected) {
     const r = eslintLoosening(before, after)
     return r && `dòng ${r.line}: ${r.why}`
   }
+  if (ESLINT_FLAT.test(file) && st === 'A') return firstEslintConfig(read, list)
   return ''
+}
+
+// Dự án lần đầu có lint: điểm tách nhánh không có cấu hình ESLint nào (file luật, khoá "eslintConfig" trong package.json) thì không có luật nào
+// đang chạy (flow-check chỉ chạy ESLint khi dự án có cấu hình, kit không có cấu hình mặc định) ⇒ file mới chỉ thêm kiểm tra.
+// Đã có cấu hình ở bất kỳ đâu (file mới có thể che file cũ) / không liệt kê hay đọc được ⇒ nới như trước.
+const ESLINT_ANY = /(^|\/)(eslint\.config\.[cm]?[jt]s|\.eslintrc(\.[^/]+)?|eslint-suppressions\.json)$/
+function firstEslintConfig(read, list) {
+  const files = list('base', [])
+  if (files === null) return ''
+  if (files.some((f) => ESLINT_ANY.test(f))) return ''
+  for (const f of files.filter((f) => /(^|\/)package\.json$/.test(f))) {
+    const text = read('base', f)
+    if (text === null || text.includes('"eslintConfig"')) return ''
+  }
+  return null
 }
 
 function generatedVerdict(st, file, read, expected) {
