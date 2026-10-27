@@ -2677,6 +2677,10 @@ describe('đợt 2: cổng gộp chống lách (file luật, dòng tắt luật,
     const shadow = ruleFx({ lintless: true, main: { ...app, '.eslintrc.json': '{}\n' }, feat: { 'apps/web/eslint.config.mjs': 'export default []\n' } })
     // ls-tree chạy trong thư mục con mà thiếu --full-tree chỉ thấy apps/web, bỏ sót .eslintrc.json ở gốc
     assert.match(assertDeny(claudeSh(shadow, path.join(shadow.main, 'apps', 'web'), MERGE)), /thêm.*apps\/web\/eslint\.config\.mjs/)
+    // nhánh tách trước khi main có lint, main thêm luật sau đó: eslint.config.js của nhánh được ESLint ưu tiên hơn .mjs của main (review Codex)
+    const late = ruleFx({ lintless: true, main: app, feat: { 'eslint.config.js': 'export default []\n' } })
+    commit(late.main, 'eslint.config.mjs', "export default [{ rules: { 'no-eval': 'error' } }]\n", 'main thêm lint')
+    assert.match(assertDeny(claudeSh(late, late.main, MERGE)), /thêm.*eslint\.config\.js/)
   })
 
   test('nới trần cỡ file trong docs/arch.json ⇒ chặn, lý do nêu trần cũ và mới; hạ trần là siết ⇒ qua', () => {

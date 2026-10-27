@@ -124,12 +124,16 @@ const gen = (files) => {
   return { ...Object.fromEntries(r.files.map((f) => [f.rel, f.text])), legacy: Object.fromEntries(r.legacy.map((f) => [f.rel, f.text])) }
 }
 // Hai phía của nhánh: { base: { rel: chữ }, head: { rel: chữ } } → read/list như git show / git ls-tree
-const sides = (base, head) => ({
-  read: (side, rel) => (side === 'base' ? base : head)[rel] ?? null,
-  // như git ls-tree: không nêu thư mục ⇒ cả cây
-  list: (side, roots) => Object.keys(side === 'base' ? base : head).filter((f) => roots.length === 0 || roots.some((r) => f.startsWith(`${r}/`))),
-})
-const judge = (base, head, changes) => looseRuleChanges({ changes, ...sides(base, head) })
+// target (đầu nhánh đích lúc gộp) mặc định trùng điểm tách nhánh
+const sides = (base, head, target = base) => {
+  const tree = (side) => ({ base, head, target })[side]
+  return {
+    read: (side, rel) => tree(side)[rel] ?? null,
+    // như git ls-tree: không nêu thư mục ⇒ cả cây
+    list: (side, roots) => Object.keys(tree(side)).filter((f) => roots.length === 0 || roots.some((r) => f.startsWith(`${r}/`))),
+  }
+}
+const judge = (base, head, changes, target) => looseRuleChanges({ changes, ...sides(base, head, target) })
 
 describe('looseRuleChanges', () => {
   test('docs/arch.json thêm module + .dependency-cruiser.mjs sinh lại khớp ⇒ không file nào bị tính là nới', () => {
@@ -215,9 +219,17 @@ describe('looseRuleChanges', () => {
     const base = { 'README.md': '# app', 'package.json': '{"name":"app"}', 'apps/web/package.json': '{"name":"web"}' }
     assert.deepEqual([...judge(base, head, added)], [])
     // cấu hình sẵn có ở thư mục khác, kiểu cũ, hay trong package.json: file mới có thể che nó
-    for (const extra of [{ 'apps/api/eslint.config.ts': 'export default []' }, { '.eslintrc.cjs': 'module.exports = {}' }, { 'apps/web/.eslintrc': '{}' }, { 'eslint-suppressions.json': '{}' }, { 'apps/web/package.json': '{"eslintConfig":{}}' }]) {
+    // cấu hình sẵn có ở thư mục khác, kiểu cũ, trong package.json (kể cả khoá viết bằng escape), package.json hỏng
+    const extras = [
+      { 'apps/api/eslint.config.ts': 'export default []' }, { '.eslintrc.cjs': 'module.exports = {}' }, { 'apps/web/.eslintrc': '{}' },
+      { 'eslint-suppressions.json': '{}' }, { 'apps/web/package.json': '{"eslintConfig":{}}' }, { 'apps/web/package.json': '{"eslint\\u0043onfig":{"rules":{"no-eval":"error"}}}' },
+      { 'apps/web/package.json': '{' },
+    ]
+    for (const extra of extras) {
       assert.deepEqual([...judge({ ...base, ...extra }, head, added).keys()].sort(), ['apps/web/eslint.config.mjs', 'eslint.config.js'], JSON.stringify(extra))
     }
+    // nhánh tách trước khi main có lint, main thêm luật sau đó: file mới của nhánh có thể che luật đó (review Codex)
+    assert.deepEqual([...judge(base, head, added, { ...base, 'eslint.config.mjs': "export default [{ rules: { 'no-eval': 'error' } }]" }).keys()].sort(), ['apps/web/eslint.config.mjs', 'eslint.config.js'])
     const blind = looseRuleChanges({ changes: added, read: sides(base, head).read, list: () => null })
     assert.equal(blind.get('eslint.config.js'), '')
     const unread = looseRuleChanges({ changes: added, read: () => null, list: sides(base, head).list })

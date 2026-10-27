@@ -917,7 +917,9 @@ async function mergeGuards(info, base, targets) {
     if (!diff) { stops.push({ kind: 'unknown', msg: `không tính được thay đổi ${base}...${showName(target)} (git diff lỗi, quá lớn, hoặc nhánh không chung lịch sử với ${base})` }); continue }
     const mergeBase = (git(info.dir, ['merge-base', base, sha]) ?? '').trim()
     // File luật đổi theo hướng siết (thêm module/luật, hạ trần, file sinh lại khớp arch.json, thêm luật ESLint mức error…) thì không tính; không chắc ⇒ tính là nới.
-    const revs = { base: /^[0-9a-f]{40,64}$/.test(mergeBase) ? mergeBase : null, head: sha }
+    // target = đầu nhánh đích lúc gộp: main có thể đã thêm luật sau điểm tách nhánh
+    const targetSha = revOf(info, base)
+    const revs = { base: /^[0-9a-f]{40,64}$/.test(mergeBase) ? mergeBase : null, head: sha, target: /^[0-9a-f]{40,64}$/.test(targetSha) ? targetSha : null }
     const loose = looseRuleChanges({
       changes: diff.changes.filter(({ file }) => isRuleFile(file)),
       read: (side, rel) => (revs[side] ? git(info.dir, ['cat-file', '-p', `${revs[side]}:${rel}`]) : null),

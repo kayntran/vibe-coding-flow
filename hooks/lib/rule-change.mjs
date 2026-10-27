@@ -1,7 +1,7 @@
 // rule-change: cổng gộp (flow-gate.mjs mergeGuards) phân biệt SIẾT với NỚI khi nhánh đổi file luật. Chỉ cho qua khi CHẮC là siết; không chắc ⇒ tính là nới (fail closed).
 // Đây là chỗ AI có thể lách luật nên KHÔNG chạy code nào của nhánh: chỉ đọc chữ (git show) rồi so.
 //   looseRuleChanges({ changes, read, list, log? }) → Map(file → lý do)   chỉ chứa file bị tính là nới; lý do '' = loại file chưa chấm được (chặn như trước).
-//     changes: [{ st: 'A'|'M'|'D'|'T', file }] đã lọc là file luật · read(side, rel) → chữ | null (side 'base' = điểm tách nhánh, 'head' = đầu nhánh)
+//     changes: [{ st: 'A'|'M'|'D'|'T', file }] đã lọc là file luật · read(side, rel) → chữ | null (side 'base' = điểm tách nhánh, 'head' = đầu nhánh, 'target' = đầu nhánh đích lúc gộp)
 //     · list(side, roots) → [đường dẫn file nằm trong roots] | null.
 //   eslintLoosening(before, after) → { line, why } | null   (null = chắc là siết hoặc không đổi luật)
 // Từng loại file:
@@ -10,7 +10,7 @@
 //     arch.json của nhánh trong thư mục tạm dựng lại đúng phần cây gen đọc (arch.json, tsconfig.json, go.mod, thư mục Go) rồi so từng chữ. Khớp ⇒ không tính (đánh giá
 //     nằm ở arch.json); lệch / không có dấu ⇒ nới. Xoá file kit sinh ⇒ chỉ qua khi kit không còn sinh tên đó và (depcruise) .dependency-cruiser.mjs của nhánh khớp.
 //   eslint.config.* (sửa)  eslintLoosening. .claude/ui.json (sửa)  uiLoosening (thêm màn/trạng thái ⇒ qua; thêm nút miễn chữ, bỏ màn, đổi start/url… ⇒ nới).
-//   eslint.config.* (thêm)  chỉ qua khi điểm tách nhánh chưa có cấu hình ESLint nào (firstEslintConfig): dự án lần đầu có lint.
+//   eslint.config.* (thêm)  chỉ qua khi cả điểm tách nhánh lẫn nhánh đích chưa có cấu hình ESLint nào (firstEslintConfig): dự án lần đầu có lint.
 //   Còn lại (mốc vi phạm cũ, biome, .eslintrc, golangci viết tay, flow.json, kit/rules…) ⇒ nới như trước.
 import fs from 'node:fs'
 import os from 'node:os'
@@ -58,17 +58,21 @@ function verdict(st, file, read, expected, list) {
   return ''
 }
 
-// Dự án lần đầu có lint: điểm tách nhánh không có cấu hình ESLint nào (file luật, khoá "eslintConfig" trong package.json) thì không có luật nào
-// đang chạy (flow-check chỉ chạy ESLint khi dự án có cấu hình, kit không có cấu hình mặc định) ⇒ file mới chỉ thêm kiểm tra.
-// Đã có cấu hình ở bất kỳ đâu (file mới có thể che file cũ) / không liệt kê hay đọc được ⇒ nới như trước.
+// Dự án lần đầu có lint: cả điểm tách nhánh lẫn đầu nhánh đích lúc gộp ('target' — main có thể đã thêm luật sau khi tách) đều không có cấu hình
+// ESLint nào (file luật, khoá eslintConfig trong package.json) thì không có luật nào đang chạy (flow-check chỉ chạy ESLint khi dự án có cấu
+// hình, kit không có cấu hình mặc định) ⇒ file mới chỉ thêm kiểm tra. Đã có cấu hình ở bất kỳ đâu (file mới có thể che file cũ) / không liệt
+// kê, đọc hay parse được ⇒ nới như trước. package.json phải parse JSON: khoá viết bằng escape ("eslintConfig") vẫn là eslintConfig.
 const ESLINT_ANY = /(^|\/)(eslint\.config\.[cm]?[jt]s|\.eslintrc(\.[^/]+)?|eslint-suppressions\.json)$/
 function firstEslintConfig(read, list) {
-  const files = list('base', [])
-  if (files === null) return ''
-  if (files.some((f) => ESLINT_ANY.test(f))) return ''
-  for (const f of files.filter((f) => /(^|\/)package\.json$/.test(f))) {
-    const text = read('base', f)
-    if (text === null || text.includes('"eslintConfig"')) return ''
+  for (const side of ['base', 'target']) {
+    const files = list(side, [])
+    if (files === null) return ''
+    if (files.some((f) => ESLINT_ANY.test(f))) return ''
+    for (const f of files.filter((f) => /(^|\/)package\.json$/.test(f))) {
+      let pkg
+      try { pkg = JSON.parse(read(side, f)) } catch { return '' }
+      if (pkg === null || typeof pkg !== 'object' || Object.hasOwn(pkg, 'eslintConfig')) return ''
+    }
   }
   return null
 }
