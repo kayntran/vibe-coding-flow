@@ -26,18 +26,18 @@ const oneLine = (s, max = 160) => String(s ?? '').replace(/\s+/g, ' ').trim().sl
 const lf = (t) => String(t).replace(/^﻿/, '').replace(/\r\n/g, '\n')
 const kitMade = (t) => t !== null && lf(t).split('\n', 1)[0].includes(GEN_MARK)
 
-export function looseRuleChanges({ changes, read, list, log = () => {} }) {
+export function looseRuleChanges({ changes, read, list, eslintAbove, log = () => {} }) {
   const out = new Map()
   let regen = null
   const expected = () => (regen ??= regenerate(read, list, log))
   for (const { st, file } of changes) {
-    const why = verdict(st, file, read, expected, list)
+    const why = verdict(st, file, read, expected, list, eslintAbove)
     if (why !== null) out.set(file, why)
   }
   return out
 }
 
-function verdict(st, file, read, expected, list) {
+function verdict(st, file, read, expected, list, eslintAbove) {
   if (file === ARCH_FILE) {
     if (st !== 'A' && st !== 'M') return ''
     const before = st === 'A' ? null : read('base', file)
@@ -54,7 +54,7 @@ function verdict(st, file, read, expected, list) {
     const r = eslintLoosening(before, after)
     return r && `dòng ${r.line}: ${r.why}`
   }
-  if (ESLINT_FLAT.test(file) && st === 'A') return firstEslintConfig(read, list)
+  if (ESLINT_FLAT.test(file) && st === 'A') return firstEslintConfig(file, read, list, eslintAbove)
   return ''
 }
 
@@ -62,8 +62,13 @@ function verdict(st, file, read, expected, list) {
 // ESLint nào (file luật, khoá eslintConfig trong package.json) thì không có luật nào đang chạy (flow-check chỉ chạy ESLint khi dự án có cấu
 // hình, kit không có cấu hình mặc định) ⇒ file mới chỉ thêm kiểm tra. Đã có cấu hình ở bất kỳ đâu (file mới có thể che file cũ) / không liệt
 // kê, đọc hay parse được ⇒ nới như trước. package.json phải parse JSON: khoá viết bằng escape ("eslintConfig") vẫn là eslintConfig.
+// ESLint còn tìm ngược ra ngoài repo tới gốc ổ đĩa ⇒ eslintAbove (eslintConfigAbove của gốc repo) phải đúng là false (review Grok).
+// File mới vẫn phải kiểm thật (review Grok): bỏ qua mọi file, hay không import gói luật nào lẫn không có khối rules ⇒ bước eslint đang đỏ
+// vì thiếu cấu hình thành xanh mà không kiểm gì ⇒ nới. Chạy file của nhánh để biết chắc thì không được (đầu file), nên chỉ chặn hai dạng rỗng này.
 const ESLINT_ANY = /(^|\/)(eslint\.config\.[cm]?[jt]s|\.eslintrc(\.[^/]+)?|eslint-suppressions\.json)$/
-function firstEslintConfig(read, list) {
+const IGNORE_ALL = /(?:\bignores\s*:|\bglobalIgnores\s*\()\s*\[[^\]]*?['"`](?:\.\/)?\*\*(?:\/\*(?:\.\*)?)?['"`]/
+function firstEslintConfig(file, read, list, eslintAbove) {
+  if (eslintAbove !== false) return 'thư mục cha ngoài repo có cấu hình ESLint (hoặc không kiểm được), file mới có thể che nó'
   for (const side of ['base', 'target']) {
     const files = list(side, [])
     if (files === null) return ''
@@ -74,7 +79,27 @@ function firstEslintConfig(read, list) {
       if (pkg === null || typeof pkg !== 'object' || Object.hasOwn(pkg, 'eslintConfig')) return ''
     }
   }
+  const text = read('head', file)
+  if (text === null) return 'không đọc được file để chấm'
+  if (IGNORE_ALL.test(text)) return 'file luật đầu tiên bỏ qua mọi file'
+  if (!/^\s*import\s/m.test(text) && !/\brules\s*:/.test(text)) return 'file luật đầu tiên không bật luật nào (không import gói luật, không có rules)'
   return null
+}
+
+// Thư mục cha của gốc repo (ra tới gốc ổ đĩa) có cấu hình ESLint không. Đọc đĩa máy này, không đọc nhánh. Không đọc được ⇒ true (chặn).
+export function eslintConfigAbove(toplevel) {
+  for (let d = path.dirname(path.resolve(toplevel)); ; d = path.dirname(d)) {
+    let names
+    try { names = fs.readdirSync(d) } catch { return true }
+    if (names.some((n) => ESLINT_ANY.test(n))) return true
+    if (names.includes('package.json')) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(path.join(d, 'package.json'), 'utf8'))
+        if (pkg === null || typeof pkg !== 'object' || Object.hasOwn(pkg, 'eslintConfig')) return true
+      } catch { return true }
+    }
+    if (path.dirname(d) === d) return false
+  }
 }
 
 function generatedVerdict(st, file, read, expected) {

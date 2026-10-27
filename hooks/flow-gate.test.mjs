@@ -2674,6 +2674,9 @@ describe('đợt 2: cổng gộp chống lách (file luật, dòng tắt luật,
     const app = { 'apps/web/src/a.ts': 'export const a = 1\n' }
     const first = ruleFx({ lintless: true, main: app, feat: { 'apps/web/eslint.config.mjs': "export default [{ rules: { 'no-x': 'off' } }]\n" } })
     assertPass(claudeSh(first, first.main, MERGE))
+    // cấu hình ESLint ở thư mục cha ngoài repo đang áp cho repo: file mới sẽ che nó (review Grok)
+    fs.writeFileSync(path.join(first.root, 'eslint.config.js'), "export default [{ rules: { 'no-eval': 'error' } }]\n")
+    assert.match(assertDeny(claudeSh(first, first.main, MERGE)), /thư mục cha/)
     const shadow = ruleFx({ lintless: true, main: { ...app, '.eslintrc.json': '{}\n' }, feat: { 'apps/web/eslint.config.mjs': 'export default []\n' } })
     // ls-tree chạy trong thư mục con mà thiếu --full-tree chỉ thấy apps/web, bỏ sót .eslintrc.json ở gốc
     assert.match(assertDeny(claudeSh(shadow, path.join(shadow.main, 'apps', 'web'), MERGE)), /thêm.*apps\/web\/eslint\.config\.mjs/)

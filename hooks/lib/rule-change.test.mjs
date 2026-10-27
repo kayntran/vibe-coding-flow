@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import * as A from './arch.mjs'
-import { eslintLoosening, looseRuleChanges } from './rule-change.mjs'
+import { eslintConfigAbove, eslintLoosening, looseRuleChanges } from './rule-change.mjs'
 
 const roots = []
 after(() => { for (const r of roots) fs.rmSync(r, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) })
@@ -133,7 +133,8 @@ const sides = (base, head, target = base) => {
     list: (side, roots) => Object.keys(tree(side)).filter((f) => roots.length === 0 || roots.some((r) => f.startsWith(`${r}/`))),
   }
 }
-const judge = (base, head, changes, target) => looseRuleChanges({ changes, ...sides(base, head, target) })
+// thư mục cha ngoài repo coi như sạch; trường hợp có cấu hình ESLint ở đó thử riêng
+const judge = (base, head, changes, target) => looseRuleChanges({ changes, ...sides(base, head, target), eslintAbove: false })
 
 describe('looseRuleChanges', () => {
   test('docs/arch.json thêm module + .dependency-cruiser.mjs sinh lại khớp ⇒ không file nào bị tính là nới', () => {
@@ -215,10 +216,18 @@ describe('looseRuleChanges', () => {
   })
   test('eslint.config.* đầu tiên của dự án (điểm tách nhánh chưa có cấu hình ESLint nào) ⇒ siết; đã có ở đâu đó / không liệt kê được ⇒ nới', () => {
     const added = [{ st: 'A', file: 'apps/web/eslint.config.mjs' }, { st: 'A', file: 'eslint.config.js' }]
-    const head = { 'apps/web/eslint.config.mjs': "export default [{ rules: { 'no-x': 'off' } }]", 'eslint.config.js': 'export default []' }
+    const head = {
+      'apps/web/eslint.config.mjs': "import js from '@eslint/js'\nexport default [{ ignores: ['public/vendor'] }, js.configs.recommended, { rules: { 'no-x': 'off' } }]",
+      'eslint.config.js': "export default [{ rules: { 'no-eval': 'error' } }]",
+    }
     const base = { 'README.md': '# app', 'package.json': '{"name":"app"}', 'apps/web/package.json': '{"name":"web"}' }
     assert.deepEqual([...judge(base, head, added)], [])
-    // cấu hình sẵn có ở thư mục khác, kiểu cũ, hay trong package.json: file mới có thể che nó
+    // file đầu tiên nhưng rỗng: bỏ qua mọi file / không bật luật nào ⇒ bước eslint đang đỏ thành xanh mà không kiểm gì (review Grok)
+    const empties = ["export default [{ ignores: ['**/*'] }]", "import { globalIgnores } from 'eslint/config'\nexport default [globalIgnores(['**'])]", 'export default [{ ignores: ["./**"] }, js]', 'export default []']
+    for (const empty of empties) assert.match(judge(base, { ...head, 'eslint.config.js': empty }, added).get('eslint.config.js'), /mọi file|không bật luật/, empty)
+    // ESLint tìm cấu hình ngược ra thư mục cha ngoài repo: có (hoặc không kiểm được) ⇒ nới (review Grok)
+    assert.match(looseRuleChanges({ changes: added, ...sides(base, head), eslintAbove: true }).get('eslint.config.js'), /thư mục cha/)
+    assert.match(looseRuleChanges({ changes: added, ...sides(base, head) }).get('eslint.config.js'), /thư mục cha/)
     // cấu hình sẵn có ở thư mục khác, kiểu cũ, trong package.json (kể cả khoá viết bằng escape), package.json hỏng
     const extras = [
       { 'apps/api/eslint.config.ts': 'export default []' }, { '.eslintrc.cjs': 'module.exports = {}' }, { 'apps/web/.eslintrc': '{}' },
@@ -230,9 +239,24 @@ describe('looseRuleChanges', () => {
     }
     // nhánh tách trước khi main có lint, main thêm luật sau đó: file mới của nhánh có thể che luật đó (review Codex)
     assert.deepEqual([...judge(base, head, added, { ...base, 'eslint.config.mjs': "export default [{ rules: { 'no-eval': 'error' } }]" }).keys()].sort(), ['apps/web/eslint.config.mjs', 'eslint.config.js'])
-    const blind = looseRuleChanges({ changes: added, read: sides(base, head).read, list: () => null })
+    const blind = looseRuleChanges({ changes: added, read: sides(base, head).read, list: () => null, eslintAbove: false })
     assert.equal(blind.get('eslint.config.js'), '')
-    const unread = looseRuleChanges({ changes: added, read: () => null, list: sides(base, head).list })
+    const unread = looseRuleChanges({ changes: added, read: () => null, list: sides(base, head).list, eslintAbove: false })
     assert.equal(unread.get('eslint.config.js'), '')
+  })
+  test('eslintConfigAbove: thư mục cha có eslint.config.* / .eslintrc / package.json có eslintConfig hoặc hỏng ⇒ true; repo trong thư mục sạch ⇒ false', () => {
+    const top = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'rc-above-')))
+    roots.push(top)
+    const repo = path.join(top, 'a', 'repo')
+    fs.mkdirSync(repo, { recursive: true })
+    const clean = eslintConfigAbove(repo) // false trừ khi máy này có cấu hình ESLint ở thư mục cha của thư mục tạm
+    for (const [name, text] of [['eslint.config.js', 'export default []'], ['.eslintrc.json', '{}'], ['package.json', '{"eslintConfig":{}}'], ['package.json', '{']]) {
+      const f = path.join(top, 'a', name)
+      fs.writeFileSync(f, text)
+      assert.equal(eslintConfigAbove(repo), true, `${name}: ${text}`)
+      fs.rmSync(f)
+    }
+    fs.writeFileSync(path.join(top, 'a', 'package.json'), '{"name":"x"}')
+    assert.equal(eslintConfigAbove(repo), clean)
   })
 })

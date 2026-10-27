@@ -908,7 +908,8 @@ async function mergeGuards(info, base, targets) {
   const multi = targets.length > 1
   const safeName = (t) => (SAFE_REF.test(t) ? t : '(tên có ký tự lạ)')
   const { isRuleFile } = await import('./lib/rule-files.mjs')
-  const { looseRuleChanges } = await import('./lib/rule-change.mjs')
+  const { looseRuleChanges, eslintConfigAbove } = await import('./lib/rule-change.mjs')
+  const eslintAbove = eslintConfigAbove(info.toplevel) // ESLint tìm cấu hình ngược ra ngoài repo
   for (const target of targets) {
     const at = multi ? ` (nhánh ${safeName(target)})` : ''
     const sha = revOf(info, target)
@@ -925,6 +926,7 @@ async function mergeGuards(info, base, targets) {
       read: (side, rel) => (revs[side] ? git(info.dir, ['cat-file', '-p', `${revs[side]}:${rel}`]) : null),
       // --full-tree: đường dẫn tính từ gốc repo kể cả khi lệnh gộp chạy trong thư mục con (không thì chỉ liệt kê thư mục con đó)
       list: (side, dirs) => (revs[side] ? git(info.dir, ['-c', 'core.quotepath=off', 'ls-tree', '-r', '--full-tree', '--name-only', '-z', revs[side], '--', ...dirs])?.split('\0').filter(Boolean) ?? null : null),
+      eslintAbove,
       log,
     })
     for (const { st, file } of diff.changes) {
