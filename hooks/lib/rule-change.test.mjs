@@ -260,3 +260,186 @@ describe('looseRuleChanges', () => {
     assert.equal(eslintConfigAbove(repo), clean)
   })
 })
+
+// --- kit/checkers.json: sửa chỉ qua khi chắc là siết ([tbpn]) ---------------------------------------------------------------------------
+
+const CHECKERS = 'kit/checkers.json'
+const FLOW_CHECK = 'hooks/flow-check.mjs'
+// PLANNERS của flow-check.mjs: tên có dấu nháy và không dấu nháy; dòng chú thích và bảng khác không tính
+const PLANNERS_SRC = [
+  "// 'ghost': ( nhắc trong chú thích không phải planner",
+  'export const PLANNERS = {',
+  "  'ui-check': ({ checker }) => ({ runs: [] }),",
+  '  jscpd: ({ root, checker }) => {',
+  '    return { runs: [] }',
+  '  },',
+  '  oasdiff: ({ dir, ctx }) => ({ skip: "không có OpenAPI" }),',
+  "  'tsc-build': ({ root, checker, ctx }) => {",
+  '    return { runs: [] }',
+  '  },',
+  '}',
+  '',
+  'const INTERNALS = {',
+  "  'only-internal': (ctx) => ({}),",
+  '}',
+  '',
+].join('\n')
+const REFS = { all: [{ files: ['tsconfig.json'] }, { grep: { file: 'tsconfig.json', re: '"references"\\s*:' } }] }
+const TSC = { id: 'tsc', stack: 'web', title: 'Kiểm kiểu TypeScript', cmd: 'tsc', args: ['--noEmit'], detect: { files: ['tsconfig.json'] }, skipWhy: 'không có tsconfig.json', required: true, timeoutMs: 180000, install: 'npm i -D typescript', docs: 'https://www.typescriptlang.org/download', hint: 'Sửa đúng kiểu dữ liệu.' }
+const TSC_B = { id: 'tsc-build', stack: 'web', title: 'Kiểm kiểu TypeScript (nhiều tsconfig)', cmd: 'tsc', args: ['-b'], detect: REFS, skipWhy: 'không dùng references', required: true, timeoutMs: 180000, install: 'npm i -D typescript', docs: 'https://www.typescriptlang.org/download', hint: 'Sửa đúng kiểu dữ liệu.' }
+const ESLINT = { id: 'eslint', stack: 'web', title: 'Kiểm lỗi code (ESLint)', cmd: 'eslint', args: ['.'], detect: { deps: ['eslint'] }, required: true, timeoutMs: 180000, install: 'npm i -D eslint', hint: 'Sửa các lỗi ESLint.' }
+// như bảng thật: axe, ui-rules, log-secrets là exclusive (chạy nối tiếp sau nhóm song song, theo thứ tự trong danh sách; log-secrets quét log mà hai cái trước sinh ra)
+const AXE = { id: 'axe', stack: 'web', title: 'Kiểm trợ năng (axe)', cmd: 'playwright', args: ['test'], detect: { deps: ['@playwright/test'] }, required: true, exclusive: true, timeoutMs: 300000, install: 'npm i -D @playwright/test', hint: 'Sửa lỗi trợ năng.' }
+const UI_RULES = { ...AXE, id: 'ui-rules', title: 'Kiểm giao diện', cmd: 'node', args: ['{hooks}/ui-check.mjs'] }
+const LOGSEC = { id: 'log-secrets', stack: 'web', title: 'Quét log tìm khoá', internal: 'log-secrets', required: true, exclusive: true, hint: 'Xoá khoá khỏi log.' }
+const STOCK = [TSC, TSC_B, ESLINT, AXE, UI_RULES, LOGSEC]
+const swap = (id, patch, list = STOCK) => list.map((c) => (c.id === id ? { ...c, ...patch } : c)) // patch có giá trị undefined ⇒ bỏ khoá đó
+const CK = (checkers = STOCK, top = {}) => `${JSON.stringify({ $comment: 'ghi chú cũ', version: 1, checkers, ...top }, null, 2)}\n`
+// → null (siết / không đổi) | chữ lý do (nới). flow = hooks/flow-check.mjs của nhánh (null = nhánh không có file đó)
+const ck = (before, after, { flow = PLANNERS_SRC, st = 'M' } = {}) =>
+  judge({ [CHECKERS]: before }, { [CHECKERS]: after, ...(flow === null ? {} : { [FLOW_CHECK]: flow }) }, [{ st, file: CHECKERS }]).get(CHECKERS) ?? null
+
+describe('looseRuleChanges — kit/checkers.json', () => {
+  test('ca thật: tsc-build đổi args ["-b"]→["-b","--noEmit"], thêm plan "tsc-build" + exclusive, sửa $comment ⇒ siết (không bị tính là nới)', () => {
+    const head = CK(swap('tsc-build', { args: ['-b', '--noEmit'], plan: 'tsc-build', exclusive: true }), { $comment: 'ghi chú mới dài hơn nhiều' })
+    assert.equal(ck(CK(), head), null)
+    // không đổi gì cũng vậy
+    assert.equal(ck(CK(), CK()), null)
+  })
+  test('chỉ đổi chữ (title, hint, docs, install, skipWhy), $comment, thứ tự khoá trong checker ⇒ siết', () => {
+    const text = STOCK.map((c) => ({ ...c, title: `${c.title} mới`, hint: 'dặn mới', docs: 'https://example.com/docs', install: { win32: 'winget install x', posix: 'brew install x' }, skipWhy: 'lý do mới' }))
+    assert.equal(ck(CK(), CK(text, { $comment: undefined })), null)
+    const reordered = JSON.stringify({ version: 1, checkers: STOCK.map((c) => Object.fromEntries(Object.entries(c).reverse())) })
+    assert.equal(ck(CK(), reordered), null)
+    // file CRLF + BOM vẫn đọc được
+    assert.equal(ck(CK(), `﻿${CK().replace(/\n/g, '\r\n')}`), null)
+  })
+  test('exclusive: từ không/false lên true ở checker đứng TRƯỚC mọi checker exclusive có sẵn (hoặc bảng cũ chưa có exclusive nào) ⇒ siết', () => {
+    assert.equal(ck(CK(), CK(swap('eslint', { exclusive: true }))), null)
+    assert.equal(ck(CK(), CK(swap('tsc', { exclusive: true }))), null)
+    assert.equal(ck(CK(swap('eslint', { exclusive: false })), CK(swap('eslint', { exclusive: true }))), null)
+    assert.equal(ck(CK([TSC, TSC_B, ESLINT]), CK(swap('eslint', { exclusive: true }, [TSC, TSC_B, ESLINT]))), null)
+    // không → false là không đổi gì; giữ nguyên true ⇒ không đổi
+    assert.equal(ck(CK(), CK(swap('eslint', { exclusive: false }))), null)
+    assert.equal(ck(CK(swap('eslint', { exclusive: true })), CK(swap('eslint', { exclusive: true, title: 'khác' }))), null)
+  })
+  test('plan thêm mới đúng bằng id của checker và có trong PLANNERS của nhánh (tên có hoặc không có dấu nháy) ⇒ siết', () => {
+    const WITH = [...STOCK, { ...ESLINT, id: 'jscpd' }] // PLANNERS_SRC viết jscpd không dấu nháy
+    assert.equal(ck(CK(WITH), CK(swap('jscpd', { plan: 'jscpd' }, WITH))), null)
+    // plan đã có và giữ nguyên ⇒ không phải thay đổi
+    const has = CK(swap('jscpd', { plan: 'jscpd' }, WITH))
+    assert.equal(ck(has, CK(swap('jscpd', { plan: 'jscpd', title: 'khác' }, WITH))), null)
+  })
+  test('args của checker tsc thêm đúng một --noEmit (đầu, giữa hay cuối), phần còn lại giữ nguyên thứ tự ⇒ siết', () => {
+    assert.equal(ck(CK(), CK(swap('tsc-build', { args: ['--noEmit', '-b'] }))), null)
+    const base = CK(swap('tsc-build', { args: ['-b', '--pretty', 'false'] }))
+    assert.equal(ck(base, CK(swap('tsc-build', { args: ['-b', '--noEmit', '--pretty', 'false'] }))), null)
+    assert.equal(ck(base, CK(swap('tsc-build', { args: ['-b', '--pretty', 'false', '--noEmit'] }))), null)
+  })
+
+  test('bỏ checker ⇒ nới, nêu id', () => {
+    assert.match(ck(CK(), CK(STOCK.filter((c) => c.id !== 'eslint'))), /bỏ checker "eslint"/)
+  })
+  test('thêm checker ⇒ nới, nêu id; id trùng ⇒ nới', () => {
+    assert.match(ck(CK(), CK([...STOCK, { ...ESLINT, id: 'extra' }])), /thêm checker "extra"/)
+    assert.match(ck(CK(), CK([...STOCK, ESLINT])), /trùng/)
+    assert.match(ck(CK([...STOCK, ESLINT]), CK([...STOCK, ESLINT])), /trùng/)
+  })
+  test('required true→false, hoặc đổi sang khoá khác (timeoutMs, stack, cmd, requires, passOn…) ⇒ nới, nêu id + khoá', () => {
+    assert.match(ck(CK(), CK(swap('tsc', { required: false }))), /checker "tsc": đổi "required"/)
+    assert.match(ck(CK(), CK(swap('eslint', { timeoutMs: 1000 }))), /checker "eslint": đổi "timeoutMs"/)
+    assert.match(ck(CK(), CK(swap('eslint', { stack: 'go' }))), /checker "eslint": đổi "stack"/)
+    assert.match(ck(CK(), CK(swap('eslint', { cmd: 'echo' }))), /checker "eslint": đổi "cmd"/)
+    assert.match(ck(CK(), CK(swap('eslint', { passOn: { exit: [0, 1] } }))), /checker "eslint": đổi "passOn"/)
+    assert.match(ck(CK(), CK(swap('eslint', { quietSkip: true }))), /checker "eslint": đổi "quietSkip"/)
+    assert.match(ck(CK(), CK(swap('eslint', { requires: { pkgs: ['x'], install: 'npm i x' } }))), /checker "eslint": đổi "requires"/)
+    assert.match(ck(CK(), CK(swap('tsc', { internal: 'x', cmd: undefined, args: undefined }))), /checker "tsc": đổi "(cmd|internal)"/)
+  })
+  test('detect đổi (checker bị bỏ qua nhiều hơn) ⇒ nới, nêu id + khoá', () => {
+    assert.match(ck(CK(), CK(swap('tsc-build', { detect: { files: ['no-such-file.json'] } }))), /checker "tsc-build": đổi "detect"/)
+    assert.match(ck(CK(), CK(swap('tsc-build', { detect: undefined }))), /checker "tsc-build": đổi "detect"/)
+  })
+  test('args đổi ở checker không phải tsc (kể cả thêm --noEmit), hoặc cmd của checker tsc khác tsc ⇒ nới', () => {
+    assert.match(ck(CK(), CK(swap('eslint', { args: ['.', '--noEmit'] }))), /checker "eslint": đổi "args"/)
+    assert.match(ck(CK(), CK(swap('eslint', { args: ['src'] }))), /checker "eslint": đổi "args"/)
+    const arr = swap('tsc-build', { cmd: ['tsc', 'x'] })
+    assert.match(ck(CK(arr), CK(swap('tsc-build', { cmd: ['tsc', 'x'], args: ['-b', '--noEmit'] }, arr))), /checker "tsc-build": đổi "args"/)
+  })
+  test('args của checker tsc thêm cờ khác, thêm hai cờ, bỏ cờ, đổi thứ tự, sửa phần tử có sẵn, thêm --noEmit mà bỏ -b ⇒ nới', () => {
+    for (const args of [['-b', '--skipLibCheck'], ['-b', '--noEmit', '--skipLibCheck'], ['-b', '--noEmit', '--noEmit'], ['--noEmit'], [], ['-b', 'x', '--noEmit'], ['--noEmit', '-w'], ['-b', '--noEmit=false']]) {
+      assert.match(ck(CK(), CK(swap('tsc-build', { args }))), /checker "tsc-build": đổi "args"/, JSON.stringify(args))
+    }
+    const two = CK(swap('tsc-build', { args: ['-b', '--pretty'] }))
+    assert.match(ck(two, CK(swap('tsc-build', { args: ['--pretty', '-b', '--noEmit'] }))), /"args"/)
+    assert.match(ck(CK(), CK(swap('tsc-build', { args: undefined }))), /"args"/)
+    assert.match(ck(CK(), CK(swap('tsc-build', { args: '-b --noEmit' }))), /"args"/)
+  })
+  test('plan trỏ tới planner không có trong PLANNERS (không có, chỉ ở chú thích, chỉ ở bảng khác, nhánh không có flow-check.mjs) ⇒ nới', () => {
+    const ODD = [...STOCK, { ...ESLINT, id: 'ghost' }, { ...ESLINT, id: 'only-internal' }]
+    assert.match(ck(CK(ODD), CK(swap('ghost', { plan: 'ghost' }, ODD))), /checker "ghost": plan "ghost" không có/)
+    assert.match(ck(CK(ODD), CK(swap('only-internal', { plan: 'only-internal' }, ODD))), /plan "only-internal" không có/)
+    assert.match(ck(CK(), CK(swap('tsc-build', { plan: 'tsc-build' })), { flow: PLANNERS_SRC.replace("'tsc-build'", "'tsc-xxx'") }), /plan "tsc-build" không có/)
+    assert.match(ck(CK(), CK(swap('tsc-build', { plan: 'tsc-build' })), { flow: null }), /plan "tsc-build" không có/)
+    assert.match(ck(CK(), CK(swap('tsc-build', { plan: 'tsc-build' })), { flow: '/*\nexport const PLANNERS = {\n  \'tsc-build\': () => 1,\n}\n*/\n' }), /không có/)
+    assert.match(ck(CK(), CK(swap('tsc-build', { plan: 123 }))), /"plan"/)
+  })
+  test('plan thêm mới mà tên KHÁC id checker ⇒ nới, kể cả khi planner đó có thật (oasdiff bỏ qua khi không có OpenAPI ⇒ checker không chạy mà vẫn tính đạt)', () => {
+    const SAST = [...STOCK, { ...ESLINT, id: 'sast-ast-grep', cmd: 'ast-grep' }]
+    assert.match(ck(CK(SAST), CK(swap('sast-ast-grep', { plan: 'oasdiff' }, SAST))), /checker "sast-ast-grep": plan "oasdiff" khác id/)
+    assert.match(ck(CK(), CK(swap('eslint', { plan: 'jscpd' }))), /checker "eslint": plan "jscpd" khác id/)
+    assert.match(ck(CK(), CK(swap('eslint', { plan: 'ui-check' }))), /plan "ui-check" khác id/)
+    // planner viết cho checker khác (tsc-build) gắn vào checker tsc
+    assert.match(ck(CK(), CK(swap('tsc', { plan: 'tsc-build' }))), /checker "tsc": plan "tsc-build" khác id/)
+    assert.match(ck(CK(), CK(swap('tsc-build', { plan: 'ghost' }))), /checker "tsc-build": plan "ghost" khác id/)
+  })
+  test('plan đã có mà đổi sang tên khác hoặc bị bỏ ⇒ nới (plan quyết định chạy gì)', () => {
+    const WITH = [...STOCK, { ...ESLINT, id: 'jscpd' }]
+    const had = CK(swap('jscpd', { plan: 'jscpd' }, WITH))
+    assert.match(ck(had, CK(swap('jscpd', { plan: 'ui-check' }, WITH))), /checker "jscpd": đổi "plan" đã có/)
+    assert.match(ck(had, CK(WITH)), /checker "jscpd": đổi "plan" đã có/)
+  })
+  test('thứ tự checker đổi ⇒ nới (checker chạy theo thứ tự trong danh sách): đảo cả bảng, đưa log-secrets lên trước axe/ui-rules, đổi chỗ hai checker thường', () => {
+    assert.match(ck(CK(), CK([...STOCK].reverse())), /đổi thứ tự/)
+    assert.match(ck(CK(), CK([TSC, TSC_B, ESLINT, LOGSEC, AXE, UI_RULES])), /đổi thứ tự/)
+    assert.match(ck(CK(), CK([TSC_B, TSC, ESLINT, AXE, UI_RULES, LOGSEC])), /đổi thứ tự/)
+    // thêm checker đồng thời đổi thứ tự những cái còn lại: vẫn nới (và báo cả hai)
+    const why = ck(CK(), CK([LOGSEC, ...STOCK.filter((c) => c.id !== 'log-secrets'), { ...ESLINT, id: 'extra' }]))
+    assert.match(why, /đổi thứ tự/)
+    assert.match(why, /thêm checker "extra"/)
+  })
+  test('exclusive bỏ, hạ về false, hoặc bật ở checker đứng SAU một checker exclusive có sẵn, hoặc không phải true/false ⇒ nới', () => {
+    // log-secrets mất exclusive ⇒ chạy trong nhóm song song, trước khi axe/ui-rules sinh log
+    assert.match(ck(CK(), CK(swap('log-secrets', { exclusive: undefined }))), /checker "log-secrets": đổi "exclusive"/)
+    assert.match(ck(CK(), CK(swap('log-secrets', { exclusive: false }))), /checker "log-secrets": đổi "exclusive"/)
+    assert.match(ck(CK(), CK(swap('axe', { exclusive: false }))), /checker "axe": đổi "exclusive"/)
+    assert.match(ck(CK(swap('eslint', { exclusive: true })), CK()), /checker "eslint": đổi "exclusive"/)
+    // bật ở checker đứng sau (hoặc giữa) các checker exclusive có sẵn: nó chen vào hàng chạy nối tiếp trước/sau log-secrets
+    const TAIL = [...STOCK, { ...ESLINT, id: 'late' }]
+    assert.match(ck(CK(TAIL), CK(swap('late', { exclusive: true }, TAIL))), /checker "late": đổi "exclusive"/)
+    const MID = [TSC, TSC_B, ESLINT, AXE, { ...ESLINT, id: 'mid' }, UI_RULES, LOGSEC]
+    assert.match(ck(CK(MID), CK(swap('mid', { exclusive: true }, MID))), /checker "mid": đổi "exclusive"/)
+    assert.match(ck(CK(), CK(swap('eslint', { exclusive: 'yes' }))), /checker "eslint": đổi "exclusive"/)
+  })
+  test('đổi version, thêm/đổi khoá ngoài cùng (trừ $comment), checkers không phải mảng, JSON hỏng, không đọc được bản cũ/mới ⇒ nới', () => {
+    assert.match(ck(CK(), CK(STOCK, { version: 2 })), /"version"/)
+    assert.match(ck(CK(), CK(STOCK, { extra: 1 })), /"extra"/)
+    assert.match(ck(CK(STOCK, { extra: 1 }), CK(STOCK, { extra: 2 })), /"extra"/)
+    assert.match(ck(CK(STOCK, { extra: 1 }), CK()), /"extra"/)
+    assert.match(ck(CK(), '{"version":1,"checkers":{}}'), /không đọc được|checkers/)
+    assert.match(ck(CK(), '{"version":1,"checkers":[1]}'), /không đọc được|checkers/)
+    assert.match(ck(CK(), '{'), /không đọc được/)
+    assert.match(ck('{', CK()), /không đọc được/)
+    const gone = judge({ [CHECKERS]: CK() }, {}, [{ st: 'M', file: CHECKERS }]).get(CHECKERS)
+    assert.match(gone, /không đọc được/)
+    const noBase = judge({}, { [CHECKERS]: CK() }, [{ st: 'M', file: CHECKERS }]).get(CHECKERS)
+    assert.match(noBase, /không đọc được/)
+  })
+  test('thêm mới / xoá file checkers.json ⇒ nới như trước; nhiều chỗ nới trong một lần ⇒ liệt kê (không quá dài)', () => {
+    assert.equal(ck(null, CK(), { st: 'A' }), '')
+    assert.equal(ck(CK(), null, { st: 'D' }), '')
+    const many = CK(STOCK.map((c, i) => ({ ...c, required: false, timeoutMs: 1 + i, stack: 'go' })))
+    const why = ck(CK(), many)
+    assert.match(why, /checker "tsc": đổi "required"/)
+    assert.match(why, /…và \d+ chỗ nữa/)
+  })
+})

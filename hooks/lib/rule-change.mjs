@@ -11,10 +11,14 @@
 //     nằm ở arch.json); lệch / không có dấu ⇒ nới. Xoá file kit sinh ⇒ chỉ qua khi kit không còn sinh tên đó và (depcruise) .dependency-cruiser.mjs của nhánh khớp.
 //   eslint.config.* (sửa)  eslintLoosening. .claude/ui.json (sửa)  uiLoosening (thêm màn/trạng thái ⇒ qua; thêm nút miễn chữ, bỏ màn, đổi start/url… ⇒ nới).
 //   eslint.config.* (thêm)  chỉ qua khi cả điểm tách nhánh lẫn nhánh đích chưa có cấu hình ESLint nào (firstEslintConfig): dự án lần đầu có lint.
+//   kit/checkers.json (sửa)  checkersLoosening: chỉ đổi chữ dặn ($comment, title, hint, docs, install, skipWhy), bật exclusive ở checker đứng trước mọi checker exclusive có sẵn, thêm plan
+//     trùng id checker và có trong PLANNERS của hooks/flow-check.mjs (đọc 'head', không chạy), thêm đúng một --noEmit vào args của checker tsc ⇒ qua; đổi thứ tự, bỏ/thêm checker,
+//     bỏ exclusive, đổi required, detect, cmd… ⇒ nới. Chi tiết và chỗ còn hở: xem phần kit/checkers.json bên dưới.
 //   Còn lại (mốc vi phạm cũ, biome, .eslintrc, golangci viết tay, flow.json, kit/rules…) ⇒ nới như trước.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import { ARCH_FILE, DEPCRUISE_FILE, GEN_MARK, archLoosening, genFiles, parseArch } from './arch.mjs'
 import { fold } from './ui-rules.mjs'
 
@@ -47,6 +51,7 @@ function verdict(st, file, read, expected, list, eslintAbove) {
   }
   if (GENERATED.test(file)) return generatedVerdict(st, file, read, expected)
   if (file === UI_FILE) return st === 'M' ? uiLoosening(read('base', file), read('head', file)) : ''
+  if (file === CHECKERS_FILE) return st === 'M' ? checkersLoosening(read('base', file), read('head', file), () => read('head', PLANNERS_FILE)) : ''
   if (ESLINT_FLAT.test(file) && st === 'M') {
     const before = read('base', file)
     const after = read('head', file)
@@ -200,6 +205,98 @@ function uiLoosening(beforeText, afterText) {
     if (JSON.stringify(before[k]) !== JSON.stringify(after[k])) out.push(`đổi "${oneLine(k, 30)}" (máy kiểm có thể mở app khác hoặc kiểm khác đi)`)
   }
   return out.length ? out.join('; ') : null
+}
+
+// --- kit/checkers.json (bảng checker của flow-check.mjs): sửa chỉ qua khi chắc là siết ([tbpn]; cổng tự chấm siết/nới, không có nút duyệt) ----------------------------
+// Thêm mới / xoá ⇒ chấm như cũ (''). Sửa: đọc JSON của điểm tách nhánh và của đầu nhánh (hỏng/không đọc được ⇒ nới), chỉ qua khi
+//   · cùng `version`, khoá ngoài cùng giống nhau (trừ `$comment`, chữ tự do); cùng dãy `id` checker, ĐÚNG thứ tự cũ (không thêm, bỏ, trùng, đổi chỗ): checker chạy theo thứ tự
+//     trong danh sách, exclusive nối tiếp theo thứ tự đó (log-secrets phải sau axe/ui-rules thì mới có log để quét)
+//   · mỗi checker mọi khoá giống nhau (so sâu) TRỪ: chữ dặn người dùng (title, hint, docs, install, skipWhy);
+//     `exclusive` chỉ từ không/false lên true, và chỉ ở checker đứng TRƯỚC mọi checker đang exclusive trong bảng cũ (nó chạy trước chúng nên không đổi lúc log-secrets chạy); bỏ/hạ ⇒ nới;
+//     `plan` chỉ khi THÊM MỚI, đúng bằng id của checker đó (planner viết riêng cho nó; planner của checker khác có thể trả "bỏ qua", vd oasdiff khi không có OpenAPI ⇒ checker không
+//     chạy mà vẫn tính đạt) và tên có trong PLANNERS của hooks/flow-check.mjs ở đầu nhánh (đọc chữ, không chạy module);
+//     `args` chỉ khi cmd là "tsc" và args mới = args cũ thêm đúng một "--noEmit" (các phần tử còn lại giữ nguyên thứ tự).
+//   Còn hở (chủ ý): thân planner nằm trong hooks/flow-check.mjs là CODE, không phải file luật nên cổng này không soi; sửa thân planner `tsc-build` để nó bỏ qua tsc thì lọt qua đây.
+const CHECKERS_FILE = 'kit/checkers.json'
+const PLANNERS_FILE = 'hooks/flow-check.mjs'
+const FREE_TEXT = new Set(['title', 'hint', 'docs', 'install', 'skipWhy'])
+const MAX_WHY = 6
+
+// Tên các planner: khoá mức 2 dấu cách trong `export const PLANNERS = {` … `}` (có/không dấu nháy), bỏ chú thích khối. Không tìm được ⇒ tập rỗng (plan nào cũng bị nới).
+function plannerNames(text) {
+  const src = text === null ? '' : lf(text).replace(/\/\*[\s\S]*?\*\//g, '')
+  const start = src.search(/^export const PLANNERS = \{/m)
+  if (start < 0) return new Set()
+  const end = src.indexOf('\n}', start)
+  const body = src.slice(start, end < 0 ? src.length : end)
+  return new Set([...body.matchAll(/^ {2}(?:'([^'\n]+)'|"([^"\n]+)"|([A-Za-z_$][\w$]*))\s*:\s*(?:async\s+)?\(/gm)].map((m) => m[1] ?? m[2] ?? m[3]))
+}
+
+// args mới = args cũ + đúng một "--noEmit" (ở đâu cũng được), phần còn lại giữ nguyên thứ tự.
+const addsNoEmit = (was, now) => Array.isArray(was) && Array.isArray(now) && now.length === was.length + 1
+  && now.some((x, i) => x === '--noEmit' && isDeepStrictEqual(now.filter((_, j) => j !== i), was))
+
+// Một khoá của checker đã đổi (ngoài chữ tự do): null = chắc là siết, chữ = lý do nới. ctx: { hasPlanner(tên), index (chỗ của checker trong bảng cũ), firstExclusive (chỗ của checker exclusive đầu tiên trong bảng cũ, Infinity nếu chưa có) }
+function checkerKeyLoosening(k, was, now, ctx) {
+  if (k === 'plan') {
+    if (was.plan !== undefined) return 'đổi "plan" đã có (plan quyết định lần này chạy gì)'
+    if (typeof now.plan !== 'string') return '"plan" phải là tên planner (chữ)'
+    // planner của checker khác có thể trả "bỏ qua" (oasdiff khi không có OpenAPI) ⇒ checker này không chạy mà vẫn tính đạt
+    if (now.plan !== now.id) return `plan "${oneLine(now.plan, 40)}" khác id checker (chỉ nhận planner viết riêng cho checker này; planner của checker khác có thể bỏ qua nó)`
+    return ctx.hasPlanner(now.plan) ? null : `plan "${oneLine(now.plan, 40)}" không có trong PLANNERS của ${PLANNERS_FILE} (nhánh)`
+  }
+  if (k === 'exclusive') {
+    const bool = (v) => v === undefined || typeof v === 'boolean'
+    const ok = bool(was.exclusive) && bool(now.exclusive)
+    if (ok && (was.exclusive === true) === (now.exclusive === true)) return null // không ↔ false: không đổi gì
+    if (ok && now.exclusive === true && ctx.index < ctx.firstExclusive) return null
+    return 'đổi "exclusive" (chỉ được bật ở checker đứng trước mọi checker exclusive có sẵn; bỏ hoặc hạ exclusive làm log-secrets có thể chạy trước khi axe/ui-rules sinh log)'
+  }
+  if (k === 'args') return now.cmd === 'tsc' && addsNoEmit(was.args ?? [], now.args) ? null : 'đổi "args" (chỉ cho thêm đúng một --noEmit vào checker tsc)'
+  return `đổi "${oneLine(k, 30)}"`
+}
+
+function checkersLoosening(beforeText, afterText, readPlanners) {
+  const parse = (t) => { try { const j = t === null ? null : JSON.parse(lf(t)); return j && typeof j === 'object' && !Array.isArray(j) ? j : null } catch { return null } }
+  const before = parse(beforeText)
+  const after = parse(afterText)
+  if (!before || !after) return `không đọc được ${CHECKERS_FILE} (JSON hỏng hoặc thiếu bản cũ/mới) nên không so được`
+  const table = (j) => {
+    const list = j.checkers
+    if (!Array.isArray(list) || list.some((c) => !c || typeof c !== 'object' || Array.isArray(c) || typeof c.id !== 'string')) return null
+    const byId = new Map()
+    for (const c of list) { if (byId.has(c.id)) return { dup: c.id }; byId.set(c.id, c) }
+    return { byId }
+  }
+  const was = table(before)
+  const now = table(after)
+  if (!was || !now) return 'không đọc được danh sách checkers (không phải mảng object có id) nên không so được'
+  const dup = was.dup ?? now.dup
+  if (dup !== undefined) return `id checker "${oneLine(dup, 40)}" trùng nhau nên không so được`
+  const out = []
+  for (const k of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (k !== '$comment' && k !== 'checkers' && !isDeepStrictEqual(before[k], after[k])) out.push(`đổi "${oneLine(k, 30)}" ở mức ngoài cùng`)
+  }
+  for (const id of was.byId.keys()) if (!now.byId.has(id)) out.push(`bỏ checker "${oneLine(id, 40)}"`)
+  for (const id of now.byId.keys()) if (!was.byId.has(id)) out.push(`thêm checker "${oneLine(id, 40)}"`)
+  // Thứ tự là luật: checker chạy theo thứ tự trong danh sách, exclusive nối tiếp theo đúng thứ tự đó (log-secrets sau axe/ui-rules mới có log để quét).
+  const common = (a, b) => [...a.keys()].filter((id) => b.has(id))
+  if (!isDeepStrictEqual(common(was.byId, now.byId), common(now.byId, was.byId))) out.push('đổi thứ tự checker (checker chạy theo thứ tự trong danh sách; log-secrets phải chạy sau axe và ui-rules)')
+  let planners = null
+  const ids = [...was.byId.keys()]
+  const first = ids.findIndex((id) => was.byId.get(id).exclusive === true)
+  const ctx = { hasPlanner: (name) => (planners ??= plannerNames(readPlanners())).has(name), firstExclusive: first < 0 ? Infinity : first }
+  for (const [id, old] of was.byId) {
+    const cur = now.byId.get(id)
+    if (!cur) continue
+    for (const k of new Set([...Object.keys(old), ...Object.keys(cur)])) {
+      if (FREE_TEXT.has(k) || isDeepStrictEqual(old[k], cur[k])) continue
+      const why = checkerKeyLoosening(k, old, cur, { ...ctx, index: ids.indexOf(id) })
+      if (why) out.push(`checker "${oneLine(id, 40)}": ${why}`)
+    }
+  }
+  if (!out.length) return null
+  return out.slice(0, MAX_WHY).join('; ') + (out.length > MAX_WHY ? `; …và ${out.length - MAX_WHY} chỗ nữa` : '')
 }
 
 // --- eslint.config.*: chỉ cho qua khi chắc là siết ----------------------------------------------------------------------------------------
