@@ -588,7 +588,8 @@ test('checkers.json thật: lệnh đúng bảng PLAN (go vet, golangci-lint, go
   assert.equal(get('secret-build').internal, 'secret-scan-build')
   assert.equal(get('mv3-manifest').internal, 'mv3-manifest')
   assert.ok(get('tsc').args.includes('--noEmit'))
-  assert.deepEqual(get('tsc-build').args, ['-b'], 'tsconfig kiểu solution (references, mẫu Vite): tsc --noEmit sẽ pass giả')
+  assert.deepEqual(get('tsc-build').args, ['-b', '--noEmit'], 'tsconfig kiểu solution (references, mẫu Vite): tsc --noEmit trơn sẽ pass giả nên dùng -b; --noEmit để -b không ghi .js/.d.ts vào dự án (TS cũ từ chối ⇒ planner chạy lại -b trơn)')
+  assert.equal(typeof PLANNERS[get('tsc-build').plan], 'function', 'tsc-build có planner (lo chạy lại cho TS cũ + dọn file mới)')
 })
 
 test('checkers.json thật: mọi checker chạy lệnh có lệnh cài chính thức + lời dặn tiếng Việt; checker nội bộ có hàm trong INTERNALS', () => {
@@ -1901,7 +1902,7 @@ test('checkers.json thật: axe (playwright test tự bật webServer) và ui-ru
   const get = (id) => REAL.checkers.find((c) => c.id === id)
   assert.equal(get('axe').exclusive, true)
   assert.equal(get('ui-rules').exclusive, true)
-  assert.deepEqual(REAL.checkers.filter((c) => c.exclusive).map((c) => c.id), ['axe', 'ui-rules', 'log-secrets'], 'log-secrets đứng SAU axe và ui-rules (quét log hai checker đó vừa sinh ra)')
+  assert.deepEqual(REAL.checkers.filter((c) => c.exclusive).map((c) => c.id), ['tsc-build', 'axe', 'ui-rules', 'log-secrets'], 'log-secrets đứng SAU axe và ui-rules (quét log hai checker đó vừa sinh ra); tsc-build exclusive vì ghi/xoá file trong cây dự án')
   const dir = project({ 'package.json': { devDependencies: { '@playwright/test': '1', '@axe-core/playwright': '4', typescript: '5' } }, 'tsconfig.json': '{}', '.claude/ui.json': '{}' })
   let appUp = 0
   let overlap = 0
@@ -2173,4 +2174,131 @@ test('log-secrets chạy SAU axe: log mà bước axe vừa ghi vào test-result
   const rep = await check(dir, ['axe', 'log-secrets'], { exec })
   assert.deepEqual(rep.results.map((r) => [r.id, r.status]), [['axe', 'pass'], ['log-secrets', 'fail']])
   assert.equal(rep.ok, false)
+})
+
+// --- tsc-build không để rác trong dự án (28/10): `tsc -b` ghi .js/.d.ts cạnh .ts + *.tsbuildinfo ⇒ ESLint báo hàng trăm "lỗi" trên rác đó ---------------
+
+const TS5094 = "error TS5094: Compiler option '--noEmit' may not be used with '--build'.\n"
+const TS_ERROR = "src/a.ts(1,24): error TS2322: Type 'string' is not assignable to type 'number'.\n"
+const hasFile = (d, rel) => fs.existsSync(path.join(d, ...rel.split('/')))
+const porcelain = (d) => git(d, 'status', '--porcelain', '--untracked-files=all')
+// Dự án composite kiểu Vite, đã commit (repo git thật): tsconfig.json chỉ có references.
+// Có đủ nguồn cho mọi đầu ra fakeTsc ghi (b.mts → b.mjs, c.cts → c.cjs, d.mts → d.d.mts, e.cts → e.d.cts, f.tsx → f.jsx).
+const tscProject = (extra = {}) => repo({ 'package.json': '{}', 'tsconfig.json': '{ "files": [], "references": [{ "path": "./tsconfig.app.json" }] }', 'tsconfig.app.json': '{}', 'src/a.ts': 'export const a: number = 1\n', 'src/b.mts': 'export {}\n', 'src/c.cts': 'export {}\n', 'src/d.mts': 'export {}\n', 'src/e.cts': 'export {}\n', 'src/f.tsx': 'export {}\n', ...extra })
+// tsc giả ghi đúng những file mà tsc thật ghi: `-b --noEmit` (TS ≥ 5.6) chỉ ghi tsbuildinfo (composite cấm --incremental false, TS6379); `-b` trơn ghi cả .js/.d.ts/.map.
+// old = TS 5.4: từ chối --noEmit kèm --build bằng TS5094 (không ghi gì). also(w) = ghi thêm file khác cùng lúc, w(rel, text) ghi vào thư mục chạy.
+function fakeTsc({ old = false, error = false, timedOut = false, boom = false, also = () => {} } = {}) {
+  const calls = []
+  const exec = async (file, args, o) => {
+    calls.push(args)
+    const w = (rel, text = 'x\n') => put(o.cwd, rel, text)
+    const noEmit = args.includes('--noEmit')
+    if (noEmit && old) return { ...OK, code: 1, stdout: TS5094 }
+    w('tsconfig.app.tsbuildinfo')
+    if (!noEmit) for (const rel of ['src/a.js', 'src/a.d.ts', 'src/a.js.map', 'src/a.d.ts.map', 'src/b.mjs', 'src/c.cjs', 'src/d.d.mts', 'src/e.d.cts', 'src/f.jsx']) w(rel)
+    also(w)
+    if (boom) throw new Error('tsc nổ giữa chừng')
+    if (timedOut) return { ...OK, code: null, timedOut: true }
+    return error ? { ...OK, code: 2, stdout: TS_ERROR } : OK
+  }
+  return { exec, calls }
+}
+
+test('tsc-build: chạy `tsc -b --noEmit` một lệnh, xoá *.tsbuildinfo mà composite vẫn ghi ⇒ repo sạch như trước; lỗi kiểu vẫn KHÔNG ĐẠT (không chạy lại vô ích)', async () => {
+  const d = tscProject()
+  assert.equal(porcelain(d), '')
+  const ok = fakeTsc()
+  const pass = await first(d, 'tsc-build', { exec: ok.exec })
+  assert.equal(pass.status, 'pass', JSON.stringify(pass))
+  assert.deepEqual(ok.calls, [['-b', '--noEmit']], 'TS ≥ 5.6 nhận cờ ⇒ đúng một lệnh')
+  assert.equal(porcelain(d), '', 'không để lại file nào (kể cả tsbuildinfo)')
+  const bad = fakeTsc({ error: true })
+  const fail = await first(d, 'tsc-build', { exec: bad.exec })
+  assert.equal(fail.status, 'fail')
+  assert.ok(fail.detail.some((l) => /TS2322/.test(l)), 'dòng lỗi kiểu của tsc vẫn được chép')
+  assert.equal(fail.fix, REAL.checkers.find((c) => c.id === 'tsc-build').hint, 'lời dặn sửa của checker giữ nguyên')
+  assert.deepEqual(bad.calls, [['-b', '--noEmit']], 'lỗi kiểu không phải TS5094 ⇒ không chạy lại')
+  assert.equal(porcelain(d), '')
+})
+
+test('tsc-build × TS cũ (TS5094: --noEmit không đi với --build): chạy lại `tsc -b` trơn, vẫn xoá hết .js/.d.ts/.map/tsbuildinfo mới sinh; kết quả theo lần chạy lại', async () => {
+  const d = tscProject()
+  const ok = fakeTsc({ old: true })
+  const pass = await first(d, 'tsc-build', { exec: ok.exec })
+  assert.equal(pass.status, 'pass', JSON.stringify(pass))
+  assert.deepEqual(ok.calls, [['-b', '--noEmit'], ['-b']])
+  assert.equal(porcelain(d), '', 'ghi 9 file đầu ra + tsbuildinfo rồi dọn sạch')
+  const bad = fakeTsc({ old: true, error: true })
+  const fail = await first(d, 'tsc-build', { exec: bad.exec })
+  assert.equal(fail.status, 'fail')
+  assert.ok(fail.detail.some((l) => /TS2322/.test(l)), 'lỗi kiểu của lần chạy lại, không phải dòng TS5094')
+  assert.ok(!fail.detail.some((l) => /TS5094/.test(l)))
+  assert.equal(porcelain(d), '')
+})
+
+test('tsc-build: chỉ xoá file MỚI mà là đầu ra trình biên dịch — file đã theo dõi, file chưa theo dõi có sẵn, file mới không phải đầu ra, file bị .gitignore: giữ nguyên', async () => {
+  const d = tscProject({ 'src/tracked.js': 'đã theo dõi\n', '.gitignore': 'dist/\n' })
+  put(d, 'src/old.js', 'cũ, chưa theo dõi\n')
+  put(d, 'tsconfig.node.tsbuildinfo', 'cũ\n')
+  // Người dùng (hay phiên khác) tạo file .js/.mjs/.map mới đúng lúc tsc chạy: không có .ts/.mts nguồn bên cạnh ⇒ không phải đầu ra của tsc ⇒ giữ
+  const mine = ['scripts/tool.mjs', 'src/user.js', 'src/user.js.map', 'other.tsbuildinfo']
+  const sim = fakeTsc({ old: true, also: (w) => { w('src/tracked.js', 'bị ghi đè\n'); w('src/old.js', 'bị ghi đè\n'); w('src/new.ts', 'export {}\n'); w('notes.txt', 'ghi chú\n'); w('dist/ignored.js', 'x\n'); for (const rel of mine) w(rel, 'của người dùng\n') } })
+  const r = await first(d, 'tsc-build', { exec: sim.exec })
+  assert.equal(r.status, 'pass', JSON.stringify(r))
+  for (const keep of ['src/tracked.js', 'src/old.js', 'tsconfig.node.tsbuildinfo', 'src/new.ts', 'notes.txt', 'dist/ignored.js', 'src/a.ts', 'package.json', ...mine]) assert.ok(hasFile(d, keep), `${keep} phải còn`)
+  for (const gone of ['src/a.js', 'src/a.d.ts', 'src/a.js.map', 'src/a.d.ts.map', 'src/b.mjs', 'src/c.cjs', 'src/d.d.mts', 'src/e.d.cts', 'src/f.jsx', 'tsconfig.app.tsbuildinfo']) assert.ok(!hasFile(d, gone), `${gone} phải bị xoá`)
+  const left = porcelain(d).split('\n').filter(Boolean).map((l) => l.replace(/^\s*\S+\s+/, '')).sort()
+  assert.deepEqual(left, ['notes.txt', 'other.tsbuildinfo', 'scripts/tool.mjs', 'src/new.ts', 'src/old.js', 'src/tracked.js', 'src/user.js', 'src/user.js.map', 'tsconfig.node.tsbuildinfo'], 'chỉ còn file có sẵn + file mới không phải đầu ra (dist/ bị .gitignore nên git không kể)')
+})
+
+test('tsc-build × TS mới (`--noEmit` được nhận): chỉ dọn *.tsbuildinfo — cặp .ts/.js viết tay mà người dùng hay phiên khác tạo đúng lúc đang kiểm vẫn giữ (review Codex 28/10)', async () => {
+  const d = tscProject()
+  const mine = ['src/manual.ts', 'src/manual.js', 'src/manual.d.ts', 'src/manual.js.map']
+  const sim = fakeTsc({ also: (w) => { for (const rel of mine) w(rel, 'của người dùng\n') } })
+  const r = await first(d, 'tsc-build', { exec: sim.exec })
+  assert.equal(r.status, 'pass', JSON.stringify(r))
+  assert.deepEqual(sim.calls, [['-b', '--noEmit']])
+  for (const keep of mine) assert.ok(hasFile(d, keep), `${keep} phải còn`)
+  assert.ok(!hasFile(d, 'tsconfig.app.tsbuildinfo'), 'tsbuildinfo do tsc ghi vẫn được dọn')
+})
+
+test('tsc-build: quá giờ hoặc công cụ nổ giữa chừng vẫn dọn file mới, và vẫn KHÔNG ĐẠT (dọn không che lỗi)', async () => {
+  const d = tscProject()
+  const slow = await first(d, 'tsc-build', { exec: fakeTsc({ old: true, timedOut: true }).exec })
+  assert.equal(slow.status, 'fail')
+  assert.match(slow.message, /Quá thời gian/)
+  assert.equal(porcelain(d), '', 'đang ghi dở thì bị dừng: file mới vẫn bị dọn')
+  const boom = await first(d, 'tsc-build', { exec: fakeTsc({ boom: true }).exec })
+  assert.equal(boom.status, 'fail')
+  assert.match(boom.message, /tsc nổ giữa chừng/)
+  assert.equal(porcelain(d), '')
+})
+
+test('tsc-build: không hỏi được git (thư mục không phải repo, git lỗi) ⇒ KHÔNG xoá gì (không biết file nào có sẵn thì không đụng), kết quả vẫn theo tsc', async () => {
+  const d = project({ 'package.json': '{}', 'tsconfig.json': '{ "references": [{ "path": "./tsconfig.app.json" }] }', 'src/a.ts': 'x' })
+  const notRepo = () => ({ code: 128, stdout: '', stderr: 'fatal: not a git repository' })
+  const sim = fakeTsc({ old: true })
+  const r = await first(d, 'tsc-build', { exec: sim.exec, git: notRepo })
+  assert.equal(r.status, 'pass', JSON.stringify(r))
+  assert.deepEqual(sim.calls, [['-b', '--noEmit'], ['-b']], 'vẫn tìm cách chạy cho TS cũ')
+  assert.ok(hasFile(d, 'src/a.js') && hasFile(d, 'tsconfig.app.tsbuildinfo'), 'không có mốc để so ⇒ để nguyên')
+  const failing = fakeTsc({ error: true })
+  assert.equal((await first(d, 'tsc-build', { exec: failing.exec, git: () => ({ code: null, stdout: '', stderr: '' }) })).status, 'fail')
+})
+
+test('tsc-build là exclusive: chạy SAU nhóm song song (ESLint/knip/jscpd không bao giờ thấy .js/.d.ts mà tsc đang ghi dở; tsc cũng không xoá nhầm file của checker khác); thứ tự bảng giữ nguyên', async () => {
+  const d = tscProject()
+  const events = []
+  const sim = fakeTsc({ old: true })
+  const exec = async (file, args, o) => {
+    const tsc = args.includes('-b')
+    events.push(`start ${tsc ? 'tsc-build' : args[0]}`)
+    await new Promise((r) => setTimeout(r, 30))
+    const r = tsc ? await sim.exec(file, args, o) : OK
+    events.push(`end ${tsc ? 'tsc-build' : args[0]}`)
+    return r
+  }
+  const rep = await check(d, ['tsc-build', 'eslint'], { exec })
+  assert.deepEqual(rep.results.map((r) => [r.id, r.status]), [['tsc-build', 'pass'], ['eslint', 'pass']], 'thứ tự bảng theo checkers.json')
+  assert.ok(events.indexOf('end .') < events.indexOf('start tsc-build'), `eslint xong rồi tsc mới chạy: ${events.join(', ')}`)
 })

@@ -24,6 +24,7 @@
 // Đợt 4 (phát hành + chăm sóc, docs/specs/2026-10-13-flow-v7-dot4, AC-30): `stack` có thể là MẢNG (checker chạy một lần khi dự án có một trong các stack đó; `secret-build` phủ cả web lẫn extension);
 //   extension quét bản build MỚI nhất (extensionBuilds: dist/, build/, .output/<trình duyệt>/) thay vì chỉ dist/; `log-secrets` (lib/log-scan.mjs) quét log bài thử (test-results/,
 //   playwright-report/, *.log) tìm bí mật — `exclusive` để chạy SAU axe/ui-rules (hai checker này sinh ra log), không có log nào thì không hiện dòng.
+// Lượt 28/10: `tsc-build` không để rác trong dự án — planner `tsc-build` (chạy `tsc -b --noEmit`, TS cũ thì chạy lại `-b` trơn qua run.retry, rồi xoá file đầu ra mới sinh; xem ghi chú ở TSC_OUTPUT_RE).
 //
 // runCommand của lib/clis.mjs không có tuỳ chọn cwd ⇒ execIn() đổi cwd của tiến trình đúng lúc spawn (spawn chạy đồng bộ trong executor
 // của Promise) rồi trả lại ngay; vì vậy chạy song song vẫn đúng thư mục. resolveBin của clis.mjs chỉ biết 6 CLI cố định ⇒ findTool() riêng ở đây.
@@ -504,7 +505,8 @@ function joinFixes(fixes) {
 //   | { skip, quiet? }       không chạy (quiet ⇒ không hiện dòng BỎ QUA)
 //   | { fail: {message, detail?, fix?} }   không đạt ngay (vd chưa sinh cấu hình)
 //   | { missing: {message, fix?} }         chưa kiểm được vì thiếu điều kiện (vd chưa build) ⇒ THIẾU, không chạy công cụ
-//   | { runs: [{ args, cwd?, label?, judge? }], toolDirs?, cleanup? }   chạy lần lượt; judge(r, out) → {status,message,detail?,fix?} thay cho luật mã thoát
+//   | { runs: [{ args, cwd?, label?, judge?, retry? }], toolDirs?, cleanup? }   chạy lần lượt; judge(r, out) → {status,message,detail?,fix?} thay cho luật mã thoát;
+//     retry = { when: RegExp, args, onRetry? } chạy lại với args khác nếu output lần đầu khớp `when` (onRetry() gọi ngay trước lần chạy lại); cleanup() chạy sau cùng, kể cả khi lỗi / quá giờ
 // ctx.getBase() → { ref, sha, fork }|null · ctx.changed() → string[]|null · ctx.git(args, {cwd}) → {code,stdout,stderr}.
 
 export const OPENAPI_FILES = ['openapi.yaml', 'openapi.yml', 'openapi.json', 'docs/openapi.yaml', 'docs/openapi.yml', 'docs/openapi.json', 'api/openapi.yaml', 'api/openapi.yml', 'api/openapi.json']
@@ -680,8 +682,63 @@ function judgeWebExt(checker, manifestDir) {
   }
 }
 
+// tsc -b (dự án nhiều tsconfig, composite) ghi .js/.d.ts cạnh từng .ts/.tsx cùng *.tsbuildinfo vào dự án đang kiểm ⇒ ESLint rồi báo hàng trăm "lỗi" trên rác đó. Kiểm kiểu không cần đầu ra:
+// chạy `tsc -b --noEmit` (TS ≥ 5.6: không ghi .js/.d.ts, chỉ còn *.tsbuildinfo vì composite cấm --incremental false, TS6379); TS cũ từ chối bằng TS5094 ⇒ chạy lại `tsc -b` trơn.
+// Cả hai đường đều dọn sau cùng (cleanup chạy cả khi lỗi / quá giờ): xoá file ĐẦU RA của trình biên dịch mà trước lần chạy git chưa từng thấy (chưa theo dõi, không bị .gitignore).
+// Không đụng file đã theo dõi, file đã có sẵn (kể cả chưa theo dõi), file mới không phải đầu ra. Không hỏi được git (không phải repo, git lỗi) ⇒ không có mốc để so ⇒ KHÔNG xoá gì.
+// "Đầu ra" = có file nguồn sinh ra nó nằm cạnh (a.js ← a.ts/a.tsx, b.mjs ← b.mts, x.js.map ← x.ts, tsconfig.app.tsbuildinfo ← tsconfig.app.json): file .js/.mjs người dùng hay phiên
+// khác tạo đúng lúc tsc chạy không có nguồn như thế ⇒ giữ.
+// Giới hạn: đầu ra rơi vào chỗ .gitignore (outDir, node_modules/.tmp) thì git không kể nên để nguyên (ESLint/git đều không thấy); thư mục rỗng tsc tạo ra (outDir) cũng để nguyên.
+// Checker này `exclusive`: chạy SAU nhóm song song, nên không linter nào thấy file ghi dở và việc dọn không xoá nhầm file của checker khác.
+const TSC_OUTPUT_RE = /\.(?:[cm]?js|jsx|d\.[cm]?ts|map|tsbuildinfo)$/i
+const TSC_NOEMIT_REFUSED = /TS5094/
+// Đuôi đầu ra → đuôi các file nguồn cùng tên gốc có thể sinh ra nó (xét theo thứ tự: .d.mts trước .mjs, .d.ts trước .js)
+const TSC_SOURCES = [
+  [/\.tsbuildinfo$/i, ['.json']],
+  [/\.d\.mts$/i, ['.mts']],
+  [/\.d\.cts$/i, ['.cts']],
+  [/\.d\.ts$/i, ['.ts', '.tsx']],
+  [/\.mjs$/i, ['.mts']],
+  [/\.cjs$/i, ['.cts']],
+  [/\.jsx?$/i, ['.ts', '.tsx']],
+]
+
+// rel (tính từ root, dấu /) là đầu ra của tsc: có file nguồn tương ứng nằm cạnh; x.js.map xét như x.js.
+function hasTscSource(root, rel) {
+  const out = rel.replace(/\.map$/i, '')
+  const hit = TSC_SOURCES.find(([re]) => re.test(out))
+  if (!hit) return false
+  const base = out.replace(hit[0], '')
+  return hit[1].some((ext) => fs.existsSync(path.join(root, ...`${base}${ext}`.split('/'))))
+}
+
+// Các file chưa theo dõi và không bị .gitignore (đường dẫn tính từ `root`, dấu /); không hỏi được git ⇒ null.
+function untrackedFiles(ctx, root) {
+  const r = ctx.git(['ls-files', '--others', '--exclude-standard', '-z'], { cwd: root })
+  return r.code === 0 ? new Set(String(r.stdout).split('\0').filter(Boolean)) : null
+}
+
 export const PLANNERS = {
   'ui-check': ({ checker }) => ({ runs: [{ args: checker.args ?? [], judge: judgeUiCheck(checker) }] }),
+
+  'tsc-build': ({ root, checker, ctx }) => {
+    const args = checker.args ?? []
+    const before = untrackedFiles(ctx, root)
+    // Chỉ khi đã phải chạy `-b` trơn (TS cũ) tsc mới ghi .js/.d.ts; với `--noEmit` nó chỉ ghi *.tsbuildinfo ⇒ chỉ dọn đúng loại đó, để cặp .ts/.js
+    // mà người dùng hay phiên khác tạo đúng lúc đang kiểm không bao giờ bị đụng (còn nguy cơ ấy chỉ ở TS cũ).
+    let emitted = !args.includes('--noEmit')
+    const cleanup = () => {
+      const after = before && untrackedFiles(ctx, root)
+      if (!after) return
+      for (const rel of after) {
+        if (before.has(rel) || !TSC_OUTPUT_RE.test(rel) || !hasTscSource(root, rel)) continue
+        if (!emitted && !/\.tsbuildinfo$/i.test(rel)) continue
+        try { fs.unlinkSync(path.join(root, ...rel.split('/'))) } catch { /* không xoá được (đang bị khoá…) thì thôi, file khác vẫn phải được dọn */ }
+      }
+    }
+    const retry = { when: TSC_NOEMIT_REFUSED, args: args.filter((a) => a !== '--noEmit'), onRetry: () => (emitted = true) }
+    return { runs: [{ args, retry }], cleanup }
+  },
 
   // --config thay cho .jscpd.json của dự án ⇒ gộp cấu hình có sẵn của dự án (nếu đọc được) với danh sách bỏ của kit, không làm mất ignore riêng của dự án.
   jscpd: ({ root, checker }) => {
@@ -823,9 +880,14 @@ async function resolveTool(c, cwd, ctx) {
 
 // Chạy MỘT lệnh của checker → { status, message, fix?, detail? }. Lệnh không chạy được / quá giờ / mã thoát lạ ⇒ không bao giờ pass im lặng.
 async function execRun(c, tool, run, root, ctx) {
-  const args = run.args.map((a) => a.replaceAll('{kit}', KIT_SLASH).replaceAll('{hooks}', HOOKS_SLASH))
   const timeoutMs = c.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  const r = await ctx.exec(tool.file, args, { cwd: run.cwd ?? root, timeoutMs, env: ctx.env, platform: ctx.platform })
+  const call = (list) => ctx.exec(tool.file, list.map((a) => a.replaceAll('{kit}', KIT_SLASH).replaceAll('{hooks}', HOOKS_SLASH)), { cwd: run.cwd ?? root, timeoutMs, env: ctx.env, platform: ctx.platform })
+  let r = await call(run.args)
+  // run.retry = { when: RegExp, args }: công cụ bản cũ từ chối cờ (vd tsc < 5.6 không nhận `-b --noEmit`) ⇒ chạy lại với đối số khác. Chỉ khi lệnh đầu chạy được (không lỗi, không quá giờ) mà output khớp `when`.
+  if (run.retry && !r.error && !r.timedOut && run.retry.when.test(clean(`${r.stdout}\n${r.stderr}`))) {
+    run.retry.onRetry?.()
+    r = await call(run.retry.args)
+  }
   if (r.error) {
     if (r.error.code === 'ENOENT') return { status: 'missing', message: `Chưa cài ${tool.name}`, fix: `Cài: ${installText(c.install, ctx.platform)}` }
     if (r.error.code === 'EUNSAFE') return { status: 'fail', message: `Không chạy được ${tool.name}: ${r.error.message}`, fix: 'Đường dẫn có dấu cách hoặc ký tự lạ nên không chạy được qua shim .cmd: cài bản .exe của công cụ (không qua npm) hoặc dùng đường dẫn không có dấu cách.' }

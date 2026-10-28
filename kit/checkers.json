@@ -1,5 +1,5 @@
 {
-  "$comment": "Danh sách checker của hooks/flow-check.mjs (AC-11/43). stack: web | extension | go | wails | all, hoặc mảng các stack đó (chạy một lần khi dự án có một trong số đó). cmd = tên công cụ (mảng = ứng viên theo thứ tự; tìm trong node_modules/.bin rồi PATH) hoặc internal = checker viết sẵn trong flow-check.mjs. args: {kit} = thư mục kit/, {hooks} = thư mục hooks/ (script kèm kit, vd ui-check.mjs). detect = khi nào áp dụng (xem hooks/lib/stack.mjs; không khớp ⇒ BỎ QUA). requires = gói npm phải có trong package.json. passOn = {exit:[mã đạt], match: regex phải thấy trong output}. install = lệnh cài chính thức (chuỗi hoặc {win32, posix}); thiếu công cụ ⇒ THIẾU, không cài ngầm. hint = lời dặn sửa khi không đạt. plan = tên hàm trong PLANNERS của flow-check.mjs quyết định lần này chạy gì (đối số tính từ docs/arch.json, git, docs/arch-baseline.json). quietSkip = không áp dụng thì không hiện dòng BỎ QUA. exclusive = checker tự bật app trên cổng cố định (axe qua webServer của Playwright, ui-rules bật dev server): chạy NỐI TIẾP từng cái sau nhóm song song, kẻo hai cái tranh cùng cổng và tắt server của nhau; log-secrets cũng exclusive vì phải quét log mà axe/ui-rules vừa sinh ra (đặt SAU hai cái đó). Test đối chiếu: hooks/flow-check.test.mjs (thiếu checker bắt buộc ⇒ đỏ).",
+  "$comment": "Danh sách checker của hooks/flow-check.mjs (AC-11/43). stack: web | extension | go | wails | all, hoặc mảng các stack đó (chạy một lần khi dự án có một trong số đó). cmd = tên công cụ (mảng = ứng viên theo thứ tự; tìm trong node_modules/.bin rồi PATH) hoặc internal = checker viết sẵn trong flow-check.mjs. args: {kit} = thư mục kit/, {hooks} = thư mục hooks/ (script kèm kit, vd ui-check.mjs). detect = khi nào áp dụng (xem hooks/lib/stack.mjs; không khớp ⇒ BỎ QUA). requires = gói npm phải có trong package.json. passOn = {exit:[mã đạt], match: regex phải thấy trong output}. install = lệnh cài chính thức (chuỗi hoặc {win32, posix}); thiếu công cụ ⇒ THIẾU, không cài ngầm. hint = lời dặn sửa khi không đạt. plan = tên hàm trong PLANNERS của flow-check.mjs quyết định lần này chạy gì (đối số tính từ docs/arch.json, git, docs/arch-baseline.json). quietSkip = không áp dụng thì không hiện dòng BỎ QUA. exclusive = checker tự bật app trên cổng cố định (axe qua webServer của Playwright, ui-rules bật dev server): chạy NỐI TIẾP từng cái sau nhóm song song, kẻo hai cái tranh cùng cổng và tắt server của nhau; log-secrets cũng exclusive vì phải quét log mà axe/ui-rules vừa sinh ra (đặt SAU hai cái đó); tsc-build exclusive vì nó ghi rồi xoá file trong cây dự án (linter chạy song song không được thấy .js/.d.ts đang ghi dở, và việc dọn không được xoá nhầm file của checker khác). tsc-build: plan tsc-build chạy `tsc -b --noEmit`, TS cũ từ chối (TS5094) thì chạy lại `tsc -b`, xong xoá file đầu ra (.js .d.ts .map .tsbuildinfo…) mới sinh ra mà git chưa từng thấy; không hỏi được git thì không xoá gì. Test đối chiếu: hooks/flow-check.test.mjs (thiếu checker bắt buộc ⇒ đỏ).",
   "version": 1,
   "checkers": [
     {
@@ -21,7 +21,9 @@
       "stack": "web",
       "title": "Kiểm kiểu TypeScript (nhiều tsconfig)",
       "cmd": "tsc",
-      "args": ["-b"],
+      "args": ["-b", "--noEmit"],
+      "plan": "tsc-build",
+      "exclusive": true,
       "detect": { "all": [{ "files": ["tsconfig.json"] }, { "grep": { "file": "tsconfig.json", "re": "\"references\"\\s*:" } }] },
       "skipWhy": "tsconfig.json không dùng references (đã có checker tsc)",
       "required": true,
