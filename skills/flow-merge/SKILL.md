@@ -25,7 +25,8 @@ Chỉ chạy khi user đã gật trong chat. Nhánh chính tên `master`/khác �
    `node ~/.claude/hooks/lib/so-chot.mjs xong <projectRoot> <YYYY-MM-DD>-<slug>` — ghi `Trạng thái: xong` + `Xong ngày`
    vào progress.md (hook thôi nạp sổ này), cất kho các quyết định ✅ phạm vi tính năng (điều `chung` và điều ⚠️ chờ xem lại giữ nguyên) và sinh
    lại INDEX/ROADMAP. Dùng lệnh này, KHÔNG sửa progress.md bằng Edit: thư mục chính bị hook chặn sửa thẳng. Việc có chạy `flow-impact` ⇒ cập nhật mục tương ứng trong
-   `docs/feature-map.md` (registry · tính năng tiêu thụ · file test đối chiếu). Rồi commit phần đóng sổ.
+   `docs/feature-map.md` (registry · tính năng tiêu thụ · file test đối chiếu). Rồi commit phần đóng sổ, kèm `docs/IDEAS.md`
+   nếu có dòng chưa commit (sổ ý tưởng luôn ghi ở thư mục chính, kể cả khi gọi từ worktree, nên nhánh không mang nó).
 4b. **Rút kinh nghiệm (sau gộp, cùng commit đóng sổ):** nhìn lại việc vừa xong — lỗi QA/review, vòng sửa, phát hiện bất
    ngờ trong PLAN. Mỗi điều QUA "durable bar" (đọc code/test/tài liệu hiện có KHÔNG suy ra được, và quên nó sẽ tái phạm)
    ⇒ `node ~/.claude/hooks/solutions.mjs ghi <projectRoot> -` (JSON qua stdin); điều tầm thường ⇒ không ghi. Lỗi khớp

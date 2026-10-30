@@ -432,9 +432,17 @@ function ideasPath(root, tao) {
   return abs
 }
 
+// Sổ ý tưởng nằm ở thư mục chính (worktree đầu tiên của repo) kể cả khi gọi từ một worktree: dòng ý tưởng mà đi theo nhánh
+// thì lúc gộp, IDEAS.md chưa commit của các phiên ở thư mục chính chặn merge --ff-only (gặp 2 lần, 30/10). Không phải repo ⇒ `root`.
+function ideasRoot(root) {
+  const main = worktreeRoots(root)[0]
+  if (!main) return root
+  try { return realRootOf(main) } catch { return root }
+}
+
 // Ghi thêm MỘT dòng vào docs/IDEAS.md (chỉ ghi thêm; không tra trùng lúc đó). Không sinh lại ROADMAP (để lần ghi/gộp kế tiếp).
 export function ghiYTuong(projectRoot, { loai, noi_dung } = {}, opts = {}) {
-  const root = realRootOf(projectRoot)
+  const root = ideasRoot(realRootOf(projectRoot))
   const kind = LOAI_Y_TUONG[plain(String(loai ?? '')).trim()]
   if (!kind) throw new Error('loại ý tưởng phải là "tính năng" hoặc "cải tiến"')
   const text = oneLine(noi_dung, 500)
@@ -452,7 +460,7 @@ export function ghiYTuong(projectRoot, { loai, noi_dung } = {}, opts = {}) {
 
 // Ghi thêm dòng "làm" (→ thư mục spec) hoặc "bỏ" trỏ về đúng mã ý tưởng. Sự kiện y hệt đã có ⇒ không ghi lại.
 export function suKienYTuong(projectRoot, ma, { lam, bo } = {}, opts = {}) {
-  const root = realRootOf(projectRoot)
+  const root = ideasRoot(realRootOf(projectRoot))
   if ((lam ? 1 : 0) + (bo ? 1 : 0) !== 1) throw new Error('cần đúng một trong lam=<thư mục spec> hoặc bo=true')
   const abs = ideasPath(root, false)
   const cur = readText(abs, MAX_BIG)
@@ -461,7 +469,8 @@ export function suKienYTuong(projectRoot, ma, { lam, bo } = {}, opts = {}) {
   let target = ''
   if (lam) {
     target = String(lam).trim()
-    if (!isSpecDir(root, target)) throw new Error(`không có thư mục tính năng docs/specs/${oneLine(target, 60)}`)
+    // Tính năng vừa tạo trong worktree chưa có ở thư mục chính
+    if (!isSpecDirAnyWorktree(root, target)) throw new Error(`không có thư mục tính năng docs/specs/${oneLine(target, 60)}`)
   }
   const kind = lam ? 'lam' : 'bo'
   const line = lam ? `- ${ma} · ${vnDate(opts.now ?? Date.now())} · → ${target}` : `- ${ma} · ${vnDate(opts.now ?? Date.now())} · bỏ`

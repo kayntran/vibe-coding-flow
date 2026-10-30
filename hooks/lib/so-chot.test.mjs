@@ -290,26 +290,39 @@ describe('AC2/AC9 hai nhánh cùng ghi rồi gộp bằng git thật', () => {
     assert.match(read(main, 'docs/IDEAS.md'), /Y1[\s\S]*Y2|Y2[\s\S]*Y1/)
   })
 
-  test('hai nhánh cùng triển khai MỘT ý tưởng: gộp không xung đột, số ý tưởng vẫn đếm theo mã', () => {
+  test('hai worktree cùng triển khai MỘT ý tưởng (spec chỉ có trong worktree): cả hai dòng vào sổ ở thư mục chính, số ý tưởng vẫn đếm theo mã', () => {
     const main = repo('ac19')
-    spec(main, '2026-10-05-a')
-    spec(main, '2026-10-06-b')
     const idea = L.ghiYTuong(main, { loai: 'tính năng', noi_dung: 'Xuất PDF' })
     commit(main, 'base')
     const wt1 = path.join(TMP, 'ac19-wt1')
     const wt2 = path.join(TMP, 'ac19-wt2')
     gitOk(main, 'worktree', 'add', '-q', '-b', 'b1', wt1)
     gitOk(main, 'worktree', 'add', '-q', '-b', 'b2', wt2)
+    spec(wt1, '2026-10-05-a')
+    spec(wt2, '2026-10-06-b')
     L.suKienYTuong(wt1, idea.ma, { lam: '2026-10-05-a' })
     L.suKienYTuong(wt2, idea.ma, { lam: '2026-10-06-b' })
-    commit(wt1, 'b1')
-    commit(wt2, 'b2')
-    gitOk(main, 'merge', '-q', 'b1', '-m', 'm1')
-    const m = git(main, 'merge', 'b2', '-m', 'm2')
-    assert.equal(m.status, 0, m.stdout + m.stderr)
+    for (const wt of [wt1, wt2]) assert.equal(gitOk(wt, 'status', '--porcelain', '--', 'docs/IDEAS.md'), '')
     const lines = read(main, 'docs/IDEAS.md').split('\n').filter(Boolean)
     assert.equal(lines.length, 3)
     assert.match(L.render(main).roadmap, /## Ý tưởng \(1 · 0 chưa làm\)/)
+  })
+
+  // Gặp 2 lần 30/10: ý tưởng ghi trong worktree đi theo nhánh, IDEAS.md chưa commit ở thư mục chính chặn merge --ff-only
+  test('ý tưởng ghi trong worktree vào sổ ở thư mục chính: nhánh không đổi IDEAS.md nên merge --ff-only không bị chặn', () => {
+    const main = repo('ff')
+    L.ghiYTuong(main, { loai: 'tính năng', noi_dung: 'Gốc' })
+    commit(main, 'base')
+    const wt = path.join(TMP, 'ff-wt')
+    gitOk(main, 'worktree', 'add', '-q', '-b', 'f', wt)
+    L.ghiYTuong(main, { loai: 'cải tiến', noi_dung: 'Của phiên ở thư mục chính, chưa commit' })
+    L.ghiYTuong(wt, { loai: 'tính năng', noi_dung: 'Từ worktree' })
+    assert.equal(gitOk(wt, 'status', '--porcelain', '--', 'docs/IDEAS.md'), '')
+    assert.match(read(main, 'docs/IDEAS.md'), /chưa commit[\s\S]*Từ worktree/)
+    fs.writeFileSync(path.join(wt, 'code.txt'), 'x\n')
+    commit(wt, 'f')
+    const m = git(main, 'merge', '--ff-only', 'f')
+    assert.equal(m.status, 0, m.stdout + m.stderr)
   })
 
   test('mã trùng giả lập khi tạo ⇒ sinh lại, hai file đều còn', () => {
