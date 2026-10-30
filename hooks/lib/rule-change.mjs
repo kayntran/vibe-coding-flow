@@ -305,6 +305,7 @@ function checkersLoosening(beforeText, afterText, readPlanners) {
 // thêm vào khối rules có sẵn mà khối đó chưa có luật cùng tên (trùng tên trong một khối là ghi đè cả tuỳ chọn cũ) và không có "..."/tên tính bằng code, plugin chưa có
 // thêm vào khối plugins có sẵn. Mỗi khúc BỎ phải là: import gói mà tên không còn dùng ở bản mới, khối chỉ nới (tắt luật, ignores, languageOptions chỉ sourceType/globals,
 // files chỉ .js/.cjs/.mjs), globalIgnores, luật đang tắt trong rules; ignores/globalIgnores có mẫu "!" thì không gỡ được.
+// Ngoại lệ bỏ qua file: globalIgnores mới, khối mới chỉ có ignores, mẫu thêm vào ignores/globalIgnores có sẵn ⇒ nhận khi MỌI mẫu là thư mục máy/công cụ sinh (GEN_DIRS).
 // Mức "error" không kèm tuỳ chọn không bao giờ nới: ESLint giữ tuỳ chọn của khối trước khi khối sau chỉ ghi mức (rulesSchema.merge của eslint).
 // Dòng biên giống nhau ("}," "{") làm khúc lệch vài dòng ⇒ thử dời khúc lên/xuống như git. Không đọc chắc được (regex, chuỗi `${}`, file quá dài) ⇒ nới.
 const MAX_LINES = 2000
@@ -314,6 +315,11 @@ const OFF = ['off', '0']
 const BARE = /^(?:(?:@[\w.-]+\/)?[\w-][\w.-]*(?:\/[\w.-]+)*|node:[\w/]+)$/
 const STRICT_KEYS = 'chỉ nhận name, files, ignores, plugins, rules mức "error"'
 const NEGATED = 'có mẫu "!" (đưa file trở lại vòng kiểm) — gỡ đi có thể làm ESLint thôi kiểm các file đó'
+// Thư mục do máy/công cụ sinh (bản build, kiểu route tự sinh, báo cáo test, skill/worktree của AI) — bỏ qua không bớt kiểm code thật của app.
+// Nhận cả dạng có "./", "/", "**/" ở đầu và "/", "/*", "/**", "/**/*" ở cuối; còn lại (src, **/*.tsx, "!…") vẫn là nới.
+const GEN_DIRS = new Set(['dist', 'build', 'out', '.next', '.react-router', '.svelte-kit', '.output', '.nuxt', '.vercel', '.wrangler', 'coverage', 'test-results', 'playwright-report', '.claude', '.turbo', '.cache'])
+const genDir = (g) => GEN_DIRS.has(g.replace(/^(?:\.?\/)?(?:\*\*\/)?/, '').replace(/\/(?:\*\*(?:\/\*)?|\*)?$/, ''))
+const notGen = (globs) => { const g = globs.find((x) => !genDir(x)); return g === undefined ? null : `mẫu "${oneLine(g, 40)}" không phải thư mục máy sinh (dist, build, .next, coverage…)` }
 
 function tokenize(src) {
   const toks = []
@@ -398,7 +404,9 @@ function containers(toks) {
     if (t.k !== 'p') {
       if (top.open === '{' && t.k === 'id' && ['{', ','].includes(toks[k - 1]?.t) && [',', '}'].includes(toks[k + 1]?.t)) top.keys.push(t.t)
     } else if (t.t === '{' || t.t === '[' || t.t === '(') {
-      const key = t.t === '(' ? (toks[k - 1]?.k === 'id' ? toks[k - 1].t : null) : toks[k - 1]?.t === ':' ? propName(toks[k - 2]) : null
+      // mảng là đối số đầu của globalIgnores([…]) mang tên globalIgnores (hàm khác thì không — có thể là hàm tự viết trùng tên ignores)
+      const key = t.t === '(' ? (toks[k - 1]?.k === 'id' ? toks[k - 1].t : null) : toks[k - 1]?.t === ':' ? propName(toks[k - 2])
+        : t.t === '[' && toks[k - 1]?.t === '(' && top.key === 'globalIgnores' ? 'globalIgnores' : null
       stack.push({ open: t.t, key, keys: [], opaque: false })
     } else if (CLOSE.has(t.t)) { if (stack.length > 1) stack.pop() } else if (t.t === '...') top.opaque = true
     else if (t.t === ':') { if (propName(toks[k - 1]) !== null) top.keys.push(propName(toks[k - 1])); else top.opaque = true }
@@ -499,15 +507,29 @@ function rulesBlock(c, sev, bad) {
 const strictRule = (k) => `luật "${k}" không ở mức "error" hoặc kèm tuỳ chọn`
 
 function strictObject(c) {
+  let ignores = []
   const { why, seen } = configBlock(c, (k, cc) => {
     if (k === 'name') return str(cc) === null ? '"name" phải là chữ' : null
-    if (k === 'files' || k === 'ignores') return strList(cc) === null ? `"${k}" phải là danh sách chữ` : null
+    if (k === 'files' || k === 'ignores') {
+      const globs = strList(cc)
+      if (k === 'ignores') ignores = globs ?? []
+      return globs === null ? `"${k}" phải là danh sách chữ` : null
+    }
     if (k === 'plugins') return block(cc, pluginEntry)
     if (k === 'rules') return rulesBlock(cc, (c3) => severity(c3, STRICT), strictRule)
     return `khối mới có "${k}" (${STRICT_KEYS})`
   })
   if (why) return why
-  return seen.includes('ignores') && seen.every((k) => k === 'ignores' || k === 'name') ? 'khối chỉ có ignores (bỏ qua file khỏi mọi luật)' : null
+  if (!seen.includes('ignores') || !seen.every((k) => k === 'ignores' || k === 'name')) return null
+  const gen = notGen(ignores)
+  return gen && `khối chỉ có ignores (bỏ qua file khỏi mọi luật): ${gen}`
+}
+
+// globalIgnores([mẫu, …], 'tên'?) → danh sách mẫu; null khi viết kiểu lạ.
+function globalIgnoresCall(c) {
+  c.p += 2
+  const globs = strList(c)
+  return globs === null || (eat(c, ',') && str(c) === null) || !eat(c, ')') ? null : globs
 }
 
 function looseObject(c) {
@@ -570,6 +592,11 @@ function addItem(c, ctx) {
     const name = propName(at(c))
     return pluginEntry(c) ?? (ctx.keys.filter((x) => x === name).length > 1 ? `plugin "${name}" đã có trong cùng khối (ghi đè plugin cũ)` : null)
   }
+  if (t.k === 'id' && t.t === 'globalIgnores' && at(c, 1)?.t === '(') {
+    const globs = globalIgnoresCall(c)
+    return globs === null ? 'globalIgnores viết kiểu lạ' : notGen(globs)
+  }
+  if (t.k === 'str' && ctx.open === '[' && (ctx.key === 'ignores' || ctx.key === 'globalIgnores')) return notGen([str(c)])
   return `chỉ nhận import gói, khối cấu hình mới hoặc luật mức "error" (gặp "${oneLine(t.k === 'str' ? t.v : t.t, 40)}")`
 }
 
@@ -585,9 +612,8 @@ function removeItem(c, ctx, usedAfter) {
   }
   if (t.k === 'p' && t.t === '{') return looseObject(c)
   if (t.k === 'id' && t.t === 'globalIgnores' && at(c, 1)?.t === '(') {
-    c.p += 2
-    const globs = strList(c)
-    if (globs === null || (eat(c, ',') && str(c) === null) || !eat(c, ')')) return 'globalIgnores viết kiểu lạ'
+    const globs = globalIgnoresCall(c)
+    if (globs === null) return 'globalIgnores viết kiểu lạ'
     return globs.some((g) => g.startsWith('!')) ? NEGATED : null
   }
   if (ctx.open === '{' && ctx.key === 'rules') {

@@ -108,6 +108,30 @@ describe('eslintLoosening — chỉ cho qua khi CHẮC là siết', () => {
     bad(neg, CFG(), /"!"/)
     bad(CFG("  { ignores: ['!dist/keep.js'] },"), CFG(), /"!"/)
   })
+  test('bỏ qua thư mục máy sinh (build, .react-router, .claude…) ⇒ siết; mẫu ngoài danh sách hoặc "!" ⇒ vẫn nới', () => {
+    const swap = (line) => CFG().replace("  globalIgnores(['dist']),", line)
+    // ca thật: dự án React Router (Kajun, nhánh web-ban-nen) — thay dòng globalIgnores, kèm chú thích
+    ok(CFG(), swap("  // .claude: skill/hướng dẫn cho AI\n  // build, .react-router: bản build và kiểu route do React Router sinh ra\n  globalIgnores(['dist', 'build', '.react-router', 'test-results', 'playwright-report', '.claude']),"))
+    ok(CFG(), swap("  globalIgnores(['dist']),\n  globalIgnores(['./.next/', '/out', '**/coverage/**', '.svelte-kit/*', '.turbo/**/*'], 'máy sinh'),"))
+    ok(CFG(), CFG("  { name: 'máy sinh', ignores: ['build/', '**/.wrangler'] },"))
+    const multi = swap("  globalIgnores([\n    'dist',\n  ]),")
+    ok(multi, multi.replace("    'dist',\n", "    'dist',\n    'build',\n    '.output',\n"))
+    const blockIgn = CFG("  {\n    ignores: [\n      'dist',\n    ],\n  },")
+    ok(blockIgn, blockIgn.replace("      'dist',\n", "      'dist',\n      '.nuxt/**',\n"))
+    for (const g of ['src', '**/*.tsx', 'src/build', 'build/../src', 'builds', '**']) {
+      bad(CFG(), swap(`  globalIgnores(['dist', 'build', '${g}']),`), /bỏ qua file.*không phải thư mục máy sinh/)
+      bad(CFG(), CFG(`  { ignores: ['${g}'] },`), /khối chỉ có ignores/)
+      bad(multi, multi.replace("    'dist',\n", `    'dist',\n    '${g}',\n`), /không phải thư mục máy sinh/)
+    }
+    bad(CFG(), swap("  globalIgnores(['dist', '!build']),"), /"!build"/)
+    bad(CFG(), CFG("  { ignores: ['build', '!.claude/keep.ts'] },"), /"!/)
+    // mảng không phải ignores (files, đối số hàm khác) không được nhận nhờ danh sách
+    const files = CFG().replace("    files: ['**/*.ts'],", "    files: [\n      '**/*.ts',\n    ],")
+    bad(files, files.replace("      '**/*.ts',\n", "      '**/*.ts',\n      'build',\n"), /không chắc/)
+    // hàm tự viết tên ignores([…]) không phải globalIgnores của ESLint (review Codex)
+    const own = CFG("  ...ignores([\n    'legacy',\n  ]),")
+    bad(own, own.replace("    'legacy',\n", "    'legacy',\n    'build',\n"), /không chắc/)
+  })
 })
 
 // --- looseRuleChanges: file luật đổi trên nhánh → file nào bị tính là nới ---------------------------------------------------------------
