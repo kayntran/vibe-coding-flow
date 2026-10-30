@@ -160,7 +160,7 @@ function uiLoosening(beforeText, afterText) {
 // Tách token (bỏ chú thích, khoảng trắng), so từng "dòng token" giữa hai bản (dòng khớp bỏ qua dấu phẩy cuối dòng). Mỗi khúc THÊM phải là: import gói (không phải file
 // của dự án), khối cấu hình mới chỉ gồm name/files/ignores/plugins/rules mức "error" không tuỳ chọn (khối chỉ có ignores là bỏ qua file ⇒ không nhận), luật mức "error"
 // thêm vào khối rules có sẵn mà khối đó chưa có luật cùng tên (trùng tên trong một khối là ghi đè cả tuỳ chọn cũ) và không có "..."/tên tính bằng code, plugin chưa có
-// thêm vào khối plugins có sẵn. Mỗi khúc BỎ phải là: import gói mà tên không còn dùng ở bản mới, khối chỉ nới (tắt luật, ignores, languageOptions chỉ sourceType/globals,
+// thêm vào khối plugins có sẵn, globalIgnores chỉ gồm thư mục máy sinh ở gốc dự án (TOOL_DIRS). Mỗi khúc BỎ phải là: import gói mà tên không còn dùng ở bản mới, khối chỉ nới (tắt luật, ignores, languageOptions chỉ sourceType/globals,
 // files chỉ .js/.cjs/.mjs), globalIgnores, luật đang tắt trong rules; ignores/globalIgnores có mẫu "!" thì không gỡ được.
 // Mức "error" không kèm tuỳ chọn không bao giờ nới: ESLint giữ tuỳ chọn của khối trước khi khối sau chỉ ghi mức (rulesSchema.merge của eslint).
 // Dòng biên giống nhau ("}," "{") làm khúc lệch vài dòng ⇒ thử dời khúc lên/xuống như git. Không đọc chắc được (regex, chuỗi `${}`, file quá dài) ⇒ nới.
@@ -171,6 +171,10 @@ const OFF = ['off', '0']
 const BARE = /^(?:(?:@[\w.-]+\/)?[\w-][\w.-]*(?:\/[\w.-]+)*|node:[\w/]+)$/
 const STRICT_KEYS = 'chỉ nhận name, files, ignores, plugins, rules mức "error"'
 const NEGATED = 'có mẫu "!" (đưa file trở lại vòng kiểm) — gỡ đi có thể làm ESLint thôi kiểm các file đó'
+// Thư mục không phải code viết tay của app: bản build, kiểu route React Router sinh, báo cáo test, .claude (skill/worktree của AI). Chỉ nhận đúng tên ở gốc
+// (vd "build", "build/", "build/**"); "**/build", "src/…", "!…" hay chữ có ký tự thoát đều không khớp ⇒ vẫn là nới.
+const TOOL_DIRS = new Set(['dist', 'build', 'coverage', 'test-results', 'playwright-report', 'blob-report', '.react-router', '.claude'])
+const toolGlob = (g) => TOOL_DIRS.has(g.replace(/\/(?:\*\*)?$/, ''))
 
 function tokenize(src) {
   const toks = []
@@ -415,6 +419,13 @@ function addItem(c, ctx) {
   const t = at(c)
   if (t.k === 'id' && t.t === 'import') return importDecl(c)
   if (t.k === 'p' && t.t === '{') return strictObject(c)
+  if (t.k === 'id' && t.t === 'globalIgnores' && at(c, 1)?.t === '(') {
+    c.p += 2
+    const globs = strList(c)
+    if (globs === null || (eat(c, ',') && str(c) === null) || !eat(c, ')')) return 'globalIgnores viết kiểu lạ'
+    const other = globs.find((g) => !toolGlob(g))
+    return other === undefined ? null : `globalIgnores có "${oneLine(other, 40)}" (chỉ nhận thư mục máy sinh ở gốc: ${[...TOOL_DIRS].join(', ')})`
+  }
   if (ctx.open === '{' && ctx.key === 'rules') {
     if (ctx.opaque) return 'khối rules có "..." hoặc tên luật tính bằng code nên không biết luật nào đã có (thêm luật vào một khối mới riêng)'
     const k = prop(c)
