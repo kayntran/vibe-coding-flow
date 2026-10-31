@@ -103,6 +103,21 @@ describe('eslintLoosening — chỉ cho qua khi CHẮC là siết', () => {
     bad(CFG().replace("import js from '@eslint/js'", "import js from './strict-config.mjs'"), CFG(), /import/)
     bad(CFG(), CFG().replace("import js from '@eslint/js'\n", ''), /import/)
   })
+  // Ca từ 69bf413 (Mac, cùng lỗi Kajun), ghép 31/10 vào cách làm của 83b528d: "**/build" là thư mục máy sinh ở mọi cấp (dự án nhiều gói) ⇒ siết.
+  test('globalIgnores thêm thư mục máy sinh (build, .react-router, .claude, blob-report…) ⇒ siết; thư mục khác, "!", ký tự thoát, mẫu dựng bằng code, includeIgnoreFile ⇒ nới', () => {
+    const swap = (list) => CFG().replace("  globalIgnores(['dist']),", `  globalIgnores(${list}),`)
+    ok(CFG(), swap("['dist', 'build', '.react-router', 'test-results', 'playwright-report', 'blob-report', '.claude']"))
+    ok(CFG(), swap("['dist', 'build/', 'coverage/**'], 'máy sinh'"))
+    ok(CFG(), CFG().replace("  globalIgnores(['dist']),", "  globalIgnores(['dist']),\n  globalIgnores([\"build\"]),"))
+    ok(CFG(), swap("['dist', '**/build']"))
+    bad(CFG(), swap("['dist', 'build', 'src']"), /bỏ qua file.*"src"/)
+    bad(CFG(), swap("['dist', 'build/**/x.ts']"), /không phải thư mục máy sinh/)
+    bad(CFG(), swap("['dist', '!build']"), /"!build"/)
+    bad(CFG(), swap("['dist', 'bu\\u0069ld']"), /không chắc|không phải thư mục máy sinh/)
+    bad(CFG(), swap("['dist', ...extra]"), /viết kiểu lạ/)
+    bad(CFG(), swap('IGNORED'), /viết kiểu lạ/)
+    bad(CFG(), CFG("  includeIgnoreFile(gitignorePath),"), /không chắc/)
+  })
   test('gỡ globalIgnores / khối ignores có mẫu "!" (đưa file trở lại vòng kiểm) ⇒ nới', () => {
     const neg = CFG().replace("  globalIgnores(['dist']),", "  globalIgnores(['dist']),\n  globalIgnores(['!node_modules/', 'node_modules/*', '!node_modules/mylib/']),")
     bad(neg, CFG(), /"!"/)

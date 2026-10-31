@@ -317,7 +317,8 @@ const STRICT_KEYS = 'chỉ nhận name, files, ignores, plugins, rules mức "er
 const NEGATED = 'có mẫu "!" (đưa file trở lại vòng kiểm) — gỡ đi có thể làm ESLint thôi kiểm các file đó'
 // Thư mục do máy/công cụ sinh (bản build, kiểu route tự sinh, báo cáo test, skill/worktree của AI) — bỏ qua không bớt kiểm code thật của app.
 // Nhận cả dạng có "./", "/", "**/" ở đầu và "/", "/*", "/**", "/**/*" ở cuối; còn lại (src, **/*.tsx, "!…") vẫn là nới.
-const GEN_DIRS = new Set(['dist', 'build', 'out', '.next', '.react-router', '.svelte-kit', '.output', '.nuxt', '.vercel', '.wrangler', 'coverage', 'test-results', 'playwright-report', '.claude', '.turbo', '.cache'])
+// (Ghép 31/10 với 69bf413 làm trên Mac cùng lỗi: giữ cách này — nhận cả "**/build" của dự án nhiều gói — và thêm blob-report của Playwright.)
+const GEN_DIRS = new Set(['dist', 'build', 'out', '.next', '.react-router', '.svelte-kit', '.output', '.nuxt', '.vercel', '.wrangler', 'coverage', 'test-results', 'playwright-report', 'blob-report', '.claude', '.turbo', '.cache'])
 const genDir = (g) => GEN_DIRS.has(g.replace(/^(?:\.?\/)?(?:\*\*\/)?/, '').replace(/\/(?:\*\*(?:\/\*)?|\*)?$/, ''))
 const notGen = (globs) => { const g = globs.find((x) => !genDir(x)); return g === undefined ? null : `mẫu "${oneLine(g, 40)}" không phải thư mục máy sinh (dist, build, .next, coverage…)` }
 
