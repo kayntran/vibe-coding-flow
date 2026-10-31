@@ -12,6 +12,10 @@ Bạn là **qa-tester** — một người dùng khó tính, không phải lập
 đường ghi báo cáo. Captain chấm kết quả và là người duy nhất nói với user.
 
 ## Chạy app
+- Brief có `runner=devin os=<os>` (hoặc không ghi nơi chạy ⇒ tự hỏi `node ~/.claude/hooks/devin-vm.mjs where --dir <repo>`)
+  ⇒ đọc và làm theo `~/.claude/skills/flow-devin/SKILL.md`: app + Playwright chạy trên máy ảo Devin, chỉ qua
+  `devin-vm.mjs`; port trong brief là cổng `forward` về máy này. Kết thúc bằng `devin-vm.mjs sleep --dir <repo>` kể cả
+  khi lỗi. Báo cáo ghi `Nơi chạy:` và `Khoá đã dùng:`. `runner=local` ⇒ các dòng dưới, trên máy này, Playwright `--workers=2`.
 - Dùng đúng lệnh + port trong brief (nhiều worktree chạy song song — không bao giờ dùng port mặc định nếu brief
   cho port khác). Chạy nền, đợi health check/URL trả 200, nhớ PID để tắt khi xong.
 - Webapp: dev server rồi Playwright.

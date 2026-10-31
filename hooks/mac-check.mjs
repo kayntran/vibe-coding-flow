@@ -1,22 +1,27 @@
 #!/usr/bin/env node
-// mac-check: chạy bộ kiểm của kit trên Mac bằng MỘT lệnh (cùng bộ `node --test` đang chạy trên Windows). Spec: docs/specs/2026-10-13-flow-v7-dot4 (AC-26).
+// mac-check: chạy bộ kiểm của kit trên Mac bằng MỘT lệnh (cùng bộ `node --test` đang chạy trên Windows). Spec: docs/specs/2026-10-13-flow-v7-dot4 (AC-26), docs/specs/2026-10-31-may-ao-devin (AC-15).
 // Tên KHÔNG được khớp mẫu file test mặc định của `node --test` (*-test.mjs …) — nếu khớp, chạy toàn bộ test sẽ tự gọi sang Mac.
-//   node hooks/mac-check.mjs [--host macmini] [--only <glob test>]…     ví dụ: --only hooks/lib/luu.test.mjs   (--only lặp được; gạch chéo ngược tự đổi thành /)
-// Cách làm: git bundle của HEAD (chỉ phần ĐÃ commit; có file chưa commit thì in lưu ý) -> ssh `mktemp -d /tmp/flowtest-XXXXXX` tạo thư mục RIÊNG trên Mac
+//   node hooks/mac-check.mjs [--host <ssh>] [--only <glob test>]…     ví dụ: --only hooks/lib/luu.test.mjs   (--only lặp được; gạch chéo ngược tự đổi thành /)
+// MẶC ĐỊNH (không --host): chạy trên máy macOS của DEVIN (lib/devin.mjs): bật/đánh thức máy macOS của kit -> chép git bundle của HEAD bằng tệp đính kèm Devin ->
+//   MỘT script bash (gửi trong đối số dạng base64, KHÔNG qua stdin: stdin của `devin ssh` bị treo) tự mktemp + curl bundle + clone + `node --test` + dọn
+//   -> LUÔN cho máy ngủ và chờ suspended rồi mới báo (đạt/hỏng/lỗi/bị ngắt đều ngủ). Devin không dùng được hoặc máy chưa có node/git => exit 3.
+// `--host macmini` giữ làm LỐI CŨ (ssh tới một Mac thật), mô tả bên dưới.
+// Cách làm của lối cũ: git bundle của HEAD (chỉ phần ĐÃ commit; có file chưa commit thì in lưu ý) -> ssh `mktemp -d /tmp/flowtest-XXXXXX` tạo thư mục RIÊNG trên Mac
 //   (0700, tên ngẫu nhiên; không dùng tên đoán trước được như sha/giờ — user khác trên Mac đặt sẵn symlink thì scp đã ghi đè đích) -> scp bundle VÀO thư mục đó
 //   -> ssh chạy `node --test --test-reporter=tap` -> in tổng kết (tests/pass/fail + tên bài hỏng). Mọi giá trị đi sang Mac nằm TRONG script gửi qua stdin của `ssh host bash -s`
 //   (đã trích dẫn; đường thư mục do mktemp trả về chỉ được nhận khi đúng /tmp/flowtest-<chữ+số>); dòng lệnh ssh/scp chỉ có mảng tham số cố định. Việc dọn nằm TRONG script đó
 //   (trap EXIT/HUP/INT/TERM, chỉ xoá đúng thư mục riêng khớp /tmp/flowtest-*, bundle nằm trong đó nên đi theo): không có dòng lệnh nào của người dùng hay AI chứa thao tác xoá thư mục.
 //   Bài hỏng vì Mac thiếu công cụ (spawn x ENOENT, "x: command not found") được tách khỏi lỗi kit.
-// Exit: 0 xanh (kể cả khi chỉ có bài không chạy được vì Mac thiếu công cụ) · 1 có bài hỏng / Mac không dựng được bản sao / không đọc được kết quả · 2 dùng sai · 3 không ssh được hoặc Mac chưa có node/git.
-// Lõi (buildCommands, remoteCommands, remoteScript, parseTap, summarize, macTest) là hàm thuần/tiêm `run`: test không cần Mac thật.
+// Exit: 0 xanh (kể cả khi chỉ có bài không chạy được vì Mac thiếu công cụ) · 1 có bài hỏng / Mac không dựng được bản sao / không đọc được kết quả / máy Devin không ngủ được · 2 dùng sai · 3 không ssh được, Devin không dùng được, hoặc Mac chưa có node/git.
+// Lõi (buildCommands, remoteCommands, remoteScript, devinScript, parseTap, summarize, macTest, macTestDevin) là hàm thuần/tiêm `run` / `vm`: test không cần Mac hay Devin thật.
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { DevinUnavailable, ToolError, appendLog, makeCtx, vmClient } from './lib/devin.mjs'
 
-export const DEFAULT_HOST = 'macmini'
+export const DEFAULT_HOST = 'macmini' // máy Mac thật của lối cũ (--host macmini); KHÔNG còn là mặc định
 export const MAC_PATH = '/opt/homebrew/bin:/usr/local/bin'
 export const MARK = '@@FLOWTEST@@'
 const BUNDLE_NAME = 'flowtest.bundle'
@@ -30,10 +35,12 @@ const GLOB_RE = /^[\w.\/*?[\]{},@+=-]+$/
 const TIMEOUT = { probe: 20_000, bundle: 120_000, copy: 180_000, run: 20 * 60_000, clean: 30_000 }
 const MAX_LIST = 20
 
-const USAGE = `dùng: mac-check.mjs [--host macmini] [--only <glob test>]…
-  chạy bộ kiểm của kit trên Mac (bản đã commit của nhánh hiện tại), in tổng kết, tự dọn thư mục tạm trên Mac
+const USAGE = `dùng: mac-check.mjs [--host <ssh>] [--only <glob test>]…
+  chạy bộ kiểm của kit trên Mac (bản đã commit của nhánh hiện tại), in tổng kết, tự dọn thư mục tạm
+  mặc định     máy macOS của Devin (máy ảo riêng của kit; luôn cho ngủ khi xong)
+  --host macmini   lối cũ: ssh tới một Mac thật
   --only hooks/lib/luu.test.mjs   chỉ chạy test khớp (lặp được)
-exit: 0 xanh · 1 có bài hỏng · 2 dùng sai · 3 không ssh được / Mac chưa có node hoặc git`
+exit: 0 xanh · 1 có bài hỏng · 2 dùng sai · 3 Devin không dùng được / không ssh được / Mac chưa có node hoặc git`
 
 export class UsageError extends Error {}
 
@@ -41,7 +48,7 @@ const clean = (s, max = 200) => String(s ?? '').replace(/[\u0000-\u0008\u000b-\u
 export const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`
 
 export function parseArgs(argv) {
-  const o = { host: DEFAULT_HOST, only: [], help: false }
+  const o = { host: null, only: [], help: false }
   const value = (a, flag, i) => (a === flag ? argv[i + 1] : a.slice(flag.length + 1))
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
@@ -94,6 +101,37 @@ export function remoteScript({ dir, sha, only = [], mode = 'run' }) {
     `echo "${MARK} node $(node -v </dev/null)"`,
     '[ -d "$DIR" ] && [ ! -L "$DIR" ] || exit 98',
     'git -c advice.detachedHead=false clone -q "$BUNDLE" "$DIR/kit" </dev/null || exit 98',
+    `cd "$DIR/kit" && git checkout -q --detach ${sha} </dev/null || exit 98`,
+    `node --test --test-reporter=tap${only.map((g) => ` ${shq(g)}`).join('')} </dev/null`,
+    'rc=$?',
+    'exit "$rc"',
+    '',
+  ].join('\n')
+}
+
+// Script bash cho máy macOS của DEVIN: MỘT script làm hết (không có bước mktemp riêng vì không còn scp): mktemp -d riêng (0700, tên ngẫu nhiên) -> curl bundle (link ký sẵn của
+// tệp đính kèm Devin) VÀO thư mục đó -> clone -> checkout đúng sha -> node --test. Dọn bằng trap như lối cũ. Mã thoát: 97 thiếu công cụ · 96 không tải được bundle · 98 không dựng được bản sao.
+// Script đi tới máy ảo trong đối số dạng base64 (lib/devin.mjs wrapRemote), không qua stdin. url nằm TRONG script, không bao giờ ra stdout.
+export function devinScript({ url, sha, only = [] }) {
+  if (!SHA_RE.test(sha)) throw new Error(`mã commit lạ: ${sha}`)
+  if (!/^https:\/\/[^\s'"\\]+$/.test(url ?? '')) throw new Error('link tải phải là https')
+  return [
+    `export PATH=${shq(MAC_PATH)}":$HOME/.local/bin:$PATH"`,
+    'DIR=$(mktemp -d /tmp/flowtest-XXXXXX </dev/null) || exit 98',
+    'cleanup() {',
+    '  case "$DIR" in /tmp/flowtest-*) rm -rf -- "$DIR" ;; esac',
+    `  if [ ! -e "$DIR" ]; then echo '${MARK} cleaned'; else echo '${MARK} not-cleaned'; fi`,
+    '}',
+    'trap cleanup EXIT',
+    "trap 'exit 129' HUP",
+    "trap 'exit 130' INT",
+    "trap 'exit 143' TERM",
+    'for t in node git curl; do',
+    `  command -v "$t" >/dev/null 2>&1 || { echo "${MARK} missing $t"; exit 97; }`,
+    'done',
+    `echo "${MARK} node $(node -v </dev/null)"`,
+    `curl -fsSL --retry 3 --max-time 300 -o "$DIR/${BUNDLE_NAME}" ${shq(url)} </dev/null || exit 96`,
+    `git -c advice.detachedHead=false clone -q "$DIR/${BUNDLE_NAME}" "$DIR/kit" </dev/null || exit 98`,
     `cd "$DIR/kit" && git checkout -q --detach ${sha} </dev/null || exit 98`,
     `node --test --test-reporter=tap${only.map((g) => ` ${shq(g)}`).join('')} </dev/null`,
     'rc=$?',
@@ -262,8 +300,80 @@ export function macTest({ repo, host = DEFAULT_HOST, only = [], run = defaultRun
   }
 }
 
-// deps tiêm để test: { run, tmp, repo, stdout, stderr }. Trả mã thoát.
-export function main(argv = process.argv.slice(2), deps = {}) {
+const DEVIN_HOST = 'Devin macOS'
+
+// Chạy bộ kiểm trên máy macOS của Devin. vm = { up(say)→{id}, upload(file,name)→{url}, runScript(id,script,{timeout,secrets})→{code,stdout,stderr,timedOut}, sleep(say)→{ok,status} }
+// (lib/devin.mjs vmClient; test tiêm giả). Thứ tự: đóng gói bundle ở máy này (rẻ, hỏng thì chưa bật máy) -> bật máy -> chép -> chạy -> LUÔN cho ngủ (kể cả khi bật/chép/chạy lỗi hay ném lỗi).
+// Trả { exit, lines, id }. Máy không ngủ được thì xanh cũng thành exit 1 (AC-07: không báo xong khi máy còn bật).
+export async function macTestDevin({ repo, only = [], run = defaultRun, tmp = defaultTmp, say = () => {}, vm }) {
+  const git = (...args) => run('git', args, { cwd: repo, timeout: 30_000 })
+  const head = git('rev-parse', 'HEAD')
+  const sha = String(head.stdout ?? '').trim()
+  if (head.status !== 0 || !SHA_RE.test(sha)) return { exit: 1, lines: ['Không đọc được git của kit (thư mục này có phải repo git không?).'] }
+  const branch = clean(git('rev-parse', '--abbrev-ref', 'HEAD').stdout, 80) || 'HEAD'
+  say(`Gửi sang máy macOS của Devin: nhánh ${branch} (commit ${sha.slice(0, 7)}).`)
+  if (String(git('status', '--porcelain').stdout ?? '').trim()) say('Lưu ý: còn thay đổi chưa commit — Mac chỉ nhận phần đã commit.')
+
+  const bundleDir = tmp.make()
+  let id = null
+  let res = null
+  let thrown = null
+  let tried = false
+  try {
+    say('Đóng gói bản hiện tại…')
+    const file = path.join(bundleDir, BUNDLE_NAME)
+    const b = run('git', ['bundle', 'create', file, 'HEAD'], { cwd: repo, timeout: TIMEOUT.bundle })
+    if (b.status !== 0) return { exit: 1, lines: [`Không đóng gói được bản hiện tại: ${clean(b.stderr || b.error?.message, 160)}`] }
+    tried = true
+    try {
+      say('Bật máy macOS của Devin…')
+      id = (await vm.up(say)).id
+      say('Chép bản kit lên máy ảo…')
+      const f = await vm.upload(file, `flowtest-${sha.slice(0, 8)}.bundle`)
+      say('Chạy bộ kiểm trên máy macOS của Devin…')
+      const r = await vm.runScript(id, devinScript({ url: f.url, sha, only }), { timeout: TIMEOUT.run, secrets: [f.url] })
+      res = interpretDevin(r, only)
+    } catch (e) {
+      if (e instanceof DevinUnavailable) res = { exit: 3, lines: [`Devin không dùng được: ${e.message}${e.loginCmd ? ` — chạy: ${e.loginCmd}` : ''}`] }
+      else if (e instanceof ToolError) res = { exit: 3, lines: [`Máy macOS của Devin chưa dùng được: ${e.message}`] }
+      else thrown = e
+    }
+  } finally {
+    tmp.remove(bundleDir)
+  }
+  // luôn cho ngủ (tìm máy theo sổ nên ngủ được cả khi `up` hỏng giữa chừng); lỗi vì Devin không dùng được lúc đã exit 3 thì không đòi thêm gì
+  let sleepNote = null
+  if (tried) {
+    try {
+      const s = await vm.sleep(say)
+      id ??= s.id ?? null
+      if (!s.ok) sleepNote = `máy macOS của Devin chưa ngủ (trạng thái ${s.status}) — chạy: node hooks/devin-vm.mjs sleep --os macos --dir ${repo}`
+    } catch (e) {
+      if (!(e instanceof DevinUnavailable && res?.exit === 3)) sleepNote = `không cho máy macOS của Devin ngủ được (${clean(e.message, 120)}) — chạy: node hooks/devin-vm.mjs sleep --os macos --dir ${repo}`
+    }
+  }
+  if (thrown) throw thrown
+  const lines = [...res.lines, ...(sleepNote ? [`CẢNH BÁO: ${sleepNote}`] : [])]
+  return { exit: sleepNote && res.exit === 0 ? 1 : res.exit, lines, id }
+}
+
+// Kết quả script trên máy Devin -> { exit, lines } đời thường (cùng cách đọc TAP và cùng lời như lối ssh).
+function interpretDevin(r, only) {
+  const out = String(r.stdout ?? '')
+  const cleaned = out.includes(`${MARK} cleaned`)
+  const tail = [cleaned ? 'Đã dọn thư mục tạm trên máy ảo.' : 'Chưa xác nhận dọn thư mục tạm trên máy ảo (nằm trong /tmp của máy ảo, mất khi máy bị xoá).']
+  const done = (x) => ({ exit: x.exit, lines: [...x.lines, ...tail] })
+  if (r.timedOut) return done({ exit: 1, lines: [`Bộ kiểm trên máy ảo chạy quá ${TIMEOUT.run / 60_000} phút nên đã dừng.`] })
+  if (r.code === 255 || r.code === null) return done({ exit: 3, lines: [`Mất kết nối với máy ảo giữa chừng: ${clean(r.stderr || r.error?.message, 160)}`] })
+  if (r.code === 97) return done({ exit: 3, lines: [`Máy macOS của Devin chưa có ${/missing (\w+)/.exec(out)?.[1] ?? 'node/git'}. Chạy: node hooks/devin-vm.mjs up --os macos --dir <kit> để cài Node, rồi chạy lại.`] })
+  if (r.code === 96) return done({ exit: 3, lines: ['Máy macOS của Devin không tải được bản kit (link tệp đính kèm lỗi hoặc hết hạn).'] })
+  if (r.code === 98) return done({ exit: 1, lines: [`Máy ảo không dựng được bản sao để chạy: ${clean(r.stderr, 160)}`] })
+  const nodeVer = new RegExp(`${MARK} node (\\S+)`).exec(out)?.[1]
+  return done(summarize({ host: DEVIN_HOST, nodeVer, status: r.code, stdout: out, stderr: r.stderr, only }))
+}
+
+// deps tiêm để test: { run, tmp, repo, stdout, stderr, vm, ctx }. Trả Promise<mã thoát>.
+export async function main(argv = process.argv.slice(2), deps = {}) {
   const out = deps.stdout ?? process.stdout
   const errOut = deps.stderr ?? process.stderr
   let o
@@ -279,11 +389,21 @@ export function main(argv = process.argv.slice(2), deps = {}) {
     return 0
   }
   const repo = deps.repo ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-  const res = macTest({ repo, host: o.host, only: o.only, run: deps.run, tmp: deps.tmp, say: (s) => out.write(`${s}\n`) })
+  const say = (s) => out.write(`${s}\n`)
+  if (o.host) {
+    const res = macTest({ repo, host: o.host, only: o.only, run: deps.run, tmp: deps.tmp, say })
+    out.write(`${res.lines.join('\n')}\n`)
+    return res.exit
+  }
+  const ctx = deps.ctx ?? (deps.vm ? null : makeCtx())
+  const vm = deps.vm ?? vmClient(ctx, { dir: repo, os: 'macos', noRepos: true })
+  const t0 = Date.now()
+  const res = await macTestDevin({ repo, only: o.only, run: deps.run, tmp: deps.tmp, say, vm })
   out.write(`${res.lines.join('\n')}\n`)
+  if (ctx) appendLog(ctx, { cmd: 'mac-check', id: res.id ?? '-', ms: Date.now() - t0, code: res.exit })
   return res.exit
 }
 
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))) {
-  process.exitCode = main()
+  main().then((code) => { process.exitCode = code })
 }

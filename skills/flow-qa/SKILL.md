@@ -9,12 +9,16 @@ description: Kiểm và sửa — chạy lint/typecheck/test, tự mở app dùn
 `node ~/.claude/hooks/flow-check.mjs --dir <worktree>` (máy kiểm theo stack: lint, typecheck, SAST, lỗ hổng thư viện,
 khoá trong bản build, mã S-nn/P-nn của SPEC có trong app/test, header an toàn, luật giao diện qua `ui-check` khi dự án
 có `.claude/ui.json` — công cụ thiếu ⇒ hỏi user cài, không cài ngầm) + Agent `test-runner` chạy đủ bộ test (unit,
-integration, build) theo CLAUDE.md dự án. Đỏ ⇒ pha 7. Xanh ⇒ pha 6.
+integration, build) theo CLAUDE.md dự án. Bộ test có mở app (Playwright e2e) ⇒ hỏi
+`node ~/.claude/hooks/devin-vm.mjs where --dir <worktree>`: `devin` ⇒ chạy trên máy ảo theo skill `flow-devin` (`job`), `local`
+⇒ máy user với `--workers=2`. Đỏ ⇒ pha 7. Xanh ⇒ pha 6.
 Bật máy kiểm giao diện ở dự án có sẵn ⇒ `node ~/.claude/hooks/ui-check.mjs --dir <repo> --baseline` một lần (chốt mốc:
 lỗi cũ chỉ nhắc, lỗi mới chặn [vm5s]); app tạo từ mẫu không chốt mốc.
 
 ## Pha 6 — Test thực tế
-1. Lấy QA charter trong PLAN.md (cỡ S: captain tự viết 3–5 dòng từ yêu cầu).
+1. Lấy QA charter trong PLAN.md (cỡ S: captain tự viết 3–5 dòng từ yêu cầu). Chọn nơi chạy:
+   `node ~/.claude/hooks/devin-vm.mjs where --dir <worktree> [--need <nhãn của charter>]` ⇒ `devin` thì brief thêm
+   `runner=devin os=<os>` (qa-tester làm theo skill `flow-devin`), `local` thì báo user một dòng lý do.
 2. Agent `qa-tester` — brief: charter, lệnh chạy app, **port riêng** từ `node ~/.claude/hooks/wt-env.mjs alloc <đường worktree>` (`PORT_BASE`),
    dữ liệu/tài khoản test (từ seed của dự án), đường ghi `<scratchpad>/qa/qa-report.md`.
    Nhiều luồng độc lập ⇒ 2–3 `qa-tester` song song, mỗi con một nhóm criteria + port riêng.
@@ -30,14 +34,16 @@ lỗi cũ chỉ nhắc, lỗi mới chặn [vm5s]); app tạo từ mẫu không 
    `P-01: đỏ khi tắt: có — <file test>`; thiếu mã nào hook không đóng dấu QA và nêu mã đó.
 3. Đọc báo cáo, mở 1–2 ảnh của bug nặng nhất để kiểm claim.
 4. Có bug ⇒ pha 7, rồi chạy lại qa-tester cho đúng criteria hỏng + một vòng hồi quy luồng chính.
-5. Diff đụng giao diện ⇒ DỪNG: chạy app, mở cho user xem (hoặc 2–3 ảnh chụp màn chính), hỏi "giao diện đã ổn chưa?"
+5. Diff đụng giao diện ⇒ DỪNG: chạy app (máy ảo thì cho user xem ảnh chụp hoặc mở qua cổng `forward`; xong cho máy
+   ngủ), mở cho user xem (hoặc 2–3 ảnh chụp màn chính), hỏi "giao diện đã ổn chưa?"
    bằng AskUserQuestion. Chưa ưng ⇒ sửa, QA lại phần đổi, hỏi lại. Gật ⇒ ghi vào báo cáo dòng
    `User duyệt giao diện: có (<ngày>, <xem gì>)` — thiếu dòng này hook không đóng dấu QA cho diff có UI. Kiểm luôn: bản
    demo thừa và thanh chuyển demo đã gỡ hết.
 6. Hết bug ⇒ đóng dấu trong worktree:
    `node ~/.claude/hooks/flow-gate.mjs stamp qa <scratchpad>/qa/qa-report.md`
    Diff không đụng UI/app ⇒ được ghi file chỉ một dòng `N/A: <lý do>` rồi stamp (hook từ chối N/A khi diff có file UI).
-   Báo cáo ghi commit đã kiểm + mã AC từng mục; bản cuối chép vào `docs/specs/<tính năng>/notes/qa-report.md`.
+   Báo cáo ghi commit đã kiểm + mã AC từng mục + `Nơi chạy:` (máy ảo Devin <os> (<id>) / máy user — lý do); bản cuối chép
+   vào `docs/specs/<tính năng>/notes/qa-report.md`.
 
 ### Checklist giao diện (máy kiểm dòng có ⚙, QA soát phần còn lại)
 1. ⚙ Mỗi màn đúng một nút chính. 2. ⚙ Nhãn nút 1–3 chữ, động từ, không OK/Yes/Submit/Có/Không/Xác nhận. 3. ⚙ Nút chỉ có

@@ -3,9 +3,11 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
+import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { MARK, UsageError, buildCommands, macTest, main, missingTool, parseArgs, parseTap, remoteCommands, remoteScript, shq, summarize } from './mac-check.mjs'
+import { MARK, UsageError, buildCommands, devinScript, macTest, macTestDevin, main, missingTool, parseArgs, parseTap, remoteCommands, remoteScript, shq, summarize } from './mac-check.mjs'
+import { DevinUnavailable, ToolError, makeCtx, runProc, wrapRemote } from './lib/devin.mjs'
 
 const SHA = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678'
 
@@ -65,8 +67,8 @@ function go(over = {}, opts = {}) {
 }
 
 describe('parseArgs', () => {
-  test('mặc định macmini, không --only; --host / --only (lặp được, dạng = cũng được)', () => {
-    assert.deepEqual(parseArgs([]), { host: 'macmini', only: [], help: false })
+  test('mặc định KHÔNG có host (⇒ máy macOS của Devin), không --only; --host / --only (lặp được, dạng = cũng được)', () => {
+    assert.deepEqual(parseArgs([]), { host: null, only: [], help: false })
     assert.deepEqual(parseArgs(['--host', 'kayn@10.0.0.5', '--only', 'hooks/lib/luu.test.mjs', '--only=hooks/*.test.mjs']), { host: 'kayn@10.0.0.5', only: ['hooks/lib/luu.test.mjs', 'hooks/*.test.mjs'], help: false })
     assert.equal(parseArgs(['--host=mac-mini_2']).host, 'mac-mini_2')
     assert.equal(parseArgs(['-h']).help, true)
@@ -339,23 +341,272 @@ describe('macTest (run giả)', () => {
 
 describe('main', () => {
   const sink = () => { const b = []; return { write: (s) => b.push(s), text: () => b.join('') } }
-  test('cờ sai / host nguy hiểm ⇒ exit 2 + dòng dùng', () => {
+  test('cờ sai / host nguy hiểm ⇒ exit 2 + dòng dùng', async () => {
     for (const argv of [['--bogus'], ['--host', '-oProxyCommand=x'], ['--only', '../x']]) {
       const e = sink()
-      assert.equal(main(argv, { stderr: e, stdout: sink() }), 2, argv.join(' '))
+      assert.equal(await main(argv, { stderr: e, stdout: sink() }), 2, argv.join(' '))
       assert.match(e.text(), /dùng: mac-check\.mjs/)
     }
   })
-  test('-h ⇒ exit 0 và in cách dùng, không chạy gì', () => {
+  test('-h ⇒ exit 0 và in cách dùng, không chạy gì', async () => {
     const o = sink()
-    assert.equal(main(['-h'], { stdout: o, run: () => { throw new Error('không được chạy') } }), 0)
+    assert.equal(await main(['-h'], { stdout: o, run: () => { throw new Error('không được chạy') } }), 0)
     assert.match(o.text(), /exit: 0 xanh/)
+    assert.match(o.text(), /máy macOS của Devin/)
   })
-  test('chạy đủ qua main với run giả: in tiến trình rồi tổng kết, trả mã thoát của lõi', () => {
+  test('--host macmini giữ LỐI CŨ (ssh): in tiến trình rồi tổng kết, trả mã thoát của lõi; không đụng Devin', async () => {
     const f = fake({ run: { status: 1, stdout: out(TAP_MIXED), stderr: '' } })
     const o = sink()
-    const code = main(['--only', 'hooks/lib/luu.test.mjs'], { repo: REPO, run: f.run, stdout: o, tmp: { make: () => TMP_DIR, remove() {} } })
+    const vm = new Proxy({}, { get: () => { throw new Error('lối ssh không được gọi Devin') } })
+    const code = await main(['--host', 'macmini', '--only', 'hooks/lib/luu.test.mjs'], { repo: REPO, run: f.run, stdout: o, vm, tmp: { make: () => TMP_DIR, remove() {} } })
     assert.equal(code, 1)
     assert.match(o.text(), /Đóng gói bản hiện tại…\nChép sang Mac…\nChạy bộ kiểm trên Mac…\nMac \(macmini, node v24\.18\.0\): 4 bài/)
+  })
+})
+
+// ---------- đường mặc định: máy macOS của Devin (AC-15) ----------
+const SIGNED = 'https://s3.example.test/signed/att1abcdef?X-Amz-Signature=SIGSECRET'
+const OUT = (tap, { cleaned = true } = {}) => out(tap, { cleaned })
+
+describe('devinScript', () => {
+  const s = devinScript({ url: SIGNED, sha: SHA, only: ['hooks/lib/luu.test.mjs'] })
+  test('MỘT script: mktemp -d riêng + trap dọn + kiểm node/git/curl + curl bundle vào thư mục riêng + clone + checkout đúng sha + node --test tap; lệnh con có </dev/null; chỉ ASCII', () => {
+    assert.match(s, /^export PATH='\/opt\/homebrew\/bin:\/usr\/local\/bin'":\$HOME\/\.local\/bin:\$PATH"\n/)
+    assert.match(s, /DIR=\$\(mktemp -d \/tmp\/flowtest-XXXXXX <\/dev\/null\) \|\| exit 98/)
+    assert.match(s, /trap cleanup EXIT[\s\S]*trap 'exit 129' HUP/)
+    assert.match(s, /case "\$DIR" in \/tmp\/flowtest-\*\) rm -rf -- "\$DIR" ;; esac/, 'chỉ xoá khi đường dẫn thuộc /tmp/flowtest-*')
+    assert.match(s, /for t in node git curl; do[\s\S]*exit 97/)
+    assert.ok(s.includes(`curl -fsSL --retry 3 --max-time 300 -o "$DIR/flowtest.bundle" '${SIGNED}' </dev/null || exit 96`), 'link ký sẵn trong nháy đơn, tải VÀO thư mục riêng')
+    assert.ok(s.includes('git -c advice.detachedHead=false clone -q "$DIR/flowtest.bundle" "$DIR/kit" </dev/null || exit 98'))
+    assert.ok(s.includes(`git checkout -q --detach ${SHA} </dev/null || exit 98`))
+    assert.ok(s.includes("node --test --test-reporter=tap 'hooks/lib/luu.test.mjs' </dev/null"))
+    assert.ok(!/\bscp\b|\bssh\b|stdin/.test(s), 'không còn scp/ssh trong script')
+    assert.ok(!s.includes('\r') && /^[\x09\x0a\x20-\x7e]*$/.test(s))
+    assert.ok(devinScript({ url: SIGNED, sha: SHA }).includes('node --test --test-reporter=tap </dev/null'))
+  })
+  test('sha/link lạ ⇒ ném lỗi (không bao giờ ghép giá trị lạ vào script); bash -n ổn', (t) => {
+    for (const bad of [{ sha: 'HEAD; ls' }, { url: 'http://x/y' }, { url: "https://x/'; rm -rf ~; '" }, { url: 'file:///etc/passwd' }, { url: undefined }]) assert.throws(() => devinScript({ url: SIGNED, sha: SHA, ...bad }), undefined, JSON.stringify(bad))
+    const r = spawnSync('bash', ['-n'], { input: s, encoding: 'utf8' })
+    if (r.error) return t.skip('không có bash')
+    assert.equal(r.status, 0, r.stderr)
+  })
+  test('qua wrapRemote của lõi: dòng lệnh tới `devin ssh` chỉ có ký tự an toàn (không nháy kép, không xuống dòng, không link thô)', () => {
+    const cmd = wrapRemote(s)
+    assert.ok(!/["\n\r]/.test(cmd) && !cmd.includes('SIGSECRET') && !cmd.includes('s3.example'))
+    assert.equal(Buffer.from(/printf %s '([A-Za-z0-9+/=]+)'/.exec(cmd)[1], 'base64').toString('utf8'), s)
+  })
+})
+
+// vm giả (cùng hình với vmClient của lõi); timeline chung với `run` git để kiểm thứ tự.
+function fakeVm(timeline, over = {}) {
+  const calls = { run: [], upload: [] }
+  const vm = {
+    calls,
+    up: async () => { timeline.push('up'); return over.up ? over.up() : { id: 'devin-mac123abc' } },
+    upload: async (file, name) => { timeline.push('upload'); calls.upload.push({ file, name }); const u = { name }; Object.defineProperty(u, 'url', { value: SIGNED }); return u },
+    runScript: async (id, script, o) => { timeline.push('run'); calls.run.push({ id, script, o }); if (over.run instanceof Error) throw over.run; return over.run ?? { code: 0, stdout: OUT(TAP_GREEN), stderr: '', timedOut: false } },
+    sleep: async () => { timeline.push('sleep'); if (over.sleep instanceof Error) throw over.sleep; return over.sleep ?? { ok: true, status: 'suspended', id: 'devin-mac123abc' } },
+  }
+  return vm
+}
+async function goDevin({ vmOver = {}, git = {}, opts = {} } = {}) {
+  const timeline = []
+  const f = fake(git)
+  const run = (cmd, args, o) => { timeline.push(`${cmd} ${args[0]}`); return f.run(cmd, args, o) }
+  const removed = []
+  const said = []
+  const vm = fakeVm(timeline, vmOver)
+  let res
+  let error
+  try {
+    res = await macTestDevin({ repo: REPO, run, tmp: { make: () => TMP_DIR, remove: (d) => removed.push(d) }, say: (s) => said.push(s), vm, ...opts })
+  } catch (e) {
+    error = e
+  }
+  return { res, error, timeline, removed, said, vm }
+}
+
+describe('macTestDevin (vm giả)', () => {
+  test('đường xanh: git → đóng gói bundle (rẻ) → bật máy → chép → chạy → NGỦ; tổng kết như lối ssh; bundle/link không lọt ra lời; thư mục tạm máy này được gỡ', async () => {
+    const r = await goDevin({ opts: { only: ['hooks/lib/luu.test.mjs'] } })
+    assert.equal(r.res.exit, 0)
+    assert.deepEqual(r.timeline, ['git rev-parse', 'git rev-parse', 'git status', 'git bundle', 'up', 'upload', 'run', 'sleep'])
+    assert.deepEqual(r.res.lines, ['Mac (Devin macOS, node v24.18.0): 2 bài · 2 đạt · 0 hỏng — xanh', 'Đã dọn thư mục tạm trên máy ảo.'])
+    assert.deepEqual(r.removed, [TMP_DIR])
+    assert.match(r.said[0], /máy macOS của Devin: nhánh flow-v7-dot4 \(commit a1b2c3d\)/)
+    const [run] = r.vm.calls.run
+    assert.equal(run.id, 'devin-mac123abc')
+    assert.ok(run.script.includes(`'${SIGNED}'`) && run.script.includes("tap 'hooks/lib/luu.test.mjs'"))
+    assert.deepEqual(run.o.secrets, [SIGNED], 'link ký sẵn bị che nếu máy ảo in lại')
+    assert.equal(run.o.timeout, 20 * 60_000)
+    assert.equal(r.vm.calls.upload[0].name, 'flowtest-a1b2c3d4.bundle')
+    assert.ok(![...r.res.lines, ...r.said].join('\n').match(/SIGSECRET|s3\.example/))
+  })
+  test('có bài hỏng ⇒ exit 1 kèm tên bài (đọc TAP như lối ssh); vẫn ngủ', async () => {
+    const r = await goDevin({ vmOver: { run: { code: 1, stdout: OUT(TAP_MIXED), stderr: '', timedOut: false } } })
+    assert.equal(r.res.exit, 1)
+    assert.match(r.res.lines.join('\n'), /Hỏng do kit \(1\):\n  - hooks\/demo\.test\.mjs > hỏng thường/)
+    assert.equal(r.timeline.at(-1), 'sleep')
+  })
+  test('chỉ hỏng vì Mac thiếu công cụ ⇒ exit 0 và nói rõ (như lối ssh)', async () => {
+    const r = await goDevin({ vmOver: { run: { code: 1, stdout: OUT(TAP_ONLY_MACHINE), stderr: '', timedOut: false } } })
+    assert.equal(r.res.exit, 0)
+    assert.match(r.res.lines.join('\n'), /Thiếu công cụ trên Mac, KHÔNG phải lỗi kit \(1 bài\): osv-scanner/)
+  })
+  test('Devin chưa đăng nhập / hết hạn mức lúc bật máy ⇒ exit 3 + lệnh đăng nhập, không chép/chạy gì; vẫn thử cho ngủ (máy tạo dở)', async () => {
+    const r = await goDevin({ vmOver: { up: () => { throw new DevinUnavailable('not-logged-in', 'Devin chưa đăng nhập', 'devin auth login') } } })
+    assert.equal(r.res.exit, 3)
+    assert.equal(r.res.lines[0], 'Devin không dùng được: Devin chưa đăng nhập — chạy: devin auth login')
+    assert.deepEqual(r.timeline.slice(4), ['up', 'sleep'])
+  })
+  test('cài Node lên máy ảo lỗi (ToolError) ⇒ exit 3 (máy chưa dùng được), vẫn ngủ', async () => {
+    const r = await goDevin({ vmOver: { up: () => { throw new ToolError('Cài Node lên máy ảo lỗi: Node tải về sai mã kiểm') } } })
+    assert.equal(r.res.exit, 3)
+    assert.match(r.res.lines[0], /Máy macOS của Devin chưa dùng được: Cài Node/)
+    assert.equal(r.timeline.at(-1), 'sleep')
+  })
+  test('lỗi bất ngờ giữa chừng ⇒ ném tiếp NHƯNG máy vẫn ngủ và thư mục tạm vẫn gỡ (AC-07)', async () => {
+    const r = await goDevin({ vmOver: { run: new Error('nổ') } })
+    assert.match(r.error.message, /nổ/)
+    assert.equal(r.timeline.at(-1), 'sleep')
+    assert.deepEqual(r.removed, [TMP_DIR])
+  })
+  test('máy không ngủ kịp ⇒ xanh cũng thành exit 1 + CẢNH BÁO kèm lệnh sleep; ngủ ném lỗi cũng vậy; exit 3 vì Devin hỏng thì không đòi thêm', async () => {
+    const slow = await goDevin({ vmOver: { sleep: { ok: false, status: 'running' } } })
+    assert.equal(slow.res.exit, 1)
+    assert.match(slow.res.lines.at(-1), /^CẢNH BÁO: máy macOS của Devin chưa ngủ \(trạng thái running\) — chạy: node hooks\/devin-vm\.mjs sleep --os macos/)
+    const thrown = await goDevin({ vmOver: { sleep: new ToolError('MCP lỗi') } })
+    assert.equal(thrown.res.exit, 1)
+    assert.match(thrown.res.lines.at(-1), /CẢNH BÁO: không cho máy macOS của Devin ngủ được/)
+    const down = await goDevin({ vmOver: { up: () => { throw new DevinUnavailable('network', 'mạng') }, sleep: new DevinUnavailable('network', 'mạng') } })
+    assert.deepEqual([down.res.exit, down.res.lines.length], [3, 1])
+  })
+  test('mã thoát của script: 97 thiếu node ⇒ 3 · 96 không tải được ⇒ 3 · 98 ⇒ 1 · 255/mất nối ⇒ 3 · quá giờ ⇒ 1 · không đọc được kết quả ⇒ 1', async () => {
+    const t = async (run) => (await goDevin({ vmOver: { run: { stdout: '', stderr: '', timedOut: false, ...run } } })).res
+    const missing = await t({ code: 97, stdout: `${MARK} missing node\n${MARK} cleaned\n` })
+    assert.equal(missing.exit, 3)
+    assert.match(missing.lines[0], /chưa có node/)
+    assert.equal((await t({ code: 96 })).exit, 3)
+    assert.equal((await t({ code: 98, stderr: 'fatal: bad object' })).exit, 1)
+    assert.equal((await t({ code: 255, stderr: 'client_loop: send disconnect' })).exit, 3)
+    const slow = await t({ code: null, timedOut: true })
+    assert.deepEqual([slow.exit, /quá 20 phút/.test(slow.lines[0])], [1, true])
+    const none = await t({ code: 1, stderr: 'Error: Cannot find module x' })
+    assert.equal(none.exit, 1)
+    assert.match(none.lines[0], /không đọc được kết quả.*Cannot find module x/)
+    assert.match((await t({ code: 0, stdout: OUT(TAP_GREEN, { cleaned: false }) })).lines.at(-1), /Chưa xác nhận dọn thư mục tạm trên máy ảo/)
+  })
+  test('git bundle lỗi ⇒ exit 1 và CHƯA đụng máy ảo (không bật, không ngủ); git hỏng ⇒ exit 1', async () => {
+    const r = await goDevin({ git: { bundle: { status: 128, stdout: '', stderr: 'fatal: Refusing to create empty bundle' } } })
+    assert.equal(r.res.exit, 1)
+    assert.deepEqual(r.timeline.filter((x) => !x.startsWith('git ')), [])
+    const g = await macTestDevin({ repo: REPO, run: () => ({ status: 128, stdout: '', stderr: 'fatal' }), tmp: { make: () => TMP_DIR, remove() {} }, vm: {} })
+    assert.equal(g.exit, 1)
+  })
+  test('có file chưa commit ⇒ một dòng lưu ý, vẫn chạy', async () => {
+    const r = await goDevin({ git: { dirty: true } })
+    assert.equal(r.res.exit, 0)
+    assert.ok(r.said.some((s) => /chưa commit.*chỉ nhận phần đã commit/.test(s)))
+  })
+})
+
+describe('main mặc định (Devin)', () => {
+  const sink = () => { const b = []; return { write: (s) => b.push(s), text: () => b.join('') } }
+  test('không --host ⇒ chạy qua vm (Devin), in tiến trình + tổng kết, trả mã thoát; --only đi vào script; ghi một dòng log nếu có ctx', async () => {
+    const timeline = []
+    const f = fake()
+    const vm = fakeVm(timeline)
+    const o = sink()
+    const logFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'mc-log-')), 'devin-vm.log')
+    const ctx = makeCtx({ logFile })
+    const code = await main(['--only', 'hooks/lib/luu.test.mjs'], { repo: REPO, run: f.run, stdout: o, vm, ctx, tmp: { make: () => TMP_DIR, remove() {} } })
+    assert.equal(code, 0)
+    assert.match(o.text(), /Đóng gói bản hiện tại…\nBật máy macOS của Devin…\nChép bản kit lên máy ảo…\nChạy bộ kiểm trên máy macOS của Devin…\nMac \(Devin macOS, node v24\.18\.0\): 2 bài/)
+    assert.ok(vm.calls.run[0].script.includes("tap 'hooks/lib/luu.test.mjs'"))
+    assert.match(fs.readFileSync(logFile, 'utf8'), /^\S+\tmac-check\tdevin-mac123abc\t\d+\t0\n$/)
+    assert.ok(!fs.readFileSync(logFile, 'utf8').includes('luu.test'), 'log không có nội dung lệnh')
+  })
+})
+
+// ---------- tích hợp với lib/devin.mjs: REST/MCP/ssh giả, git thật ----------
+describe('tích hợp: mac-check ⇒ lib/devin.mjs', () => {
+  test('bundle THẬT của HEAD lên qua tệp đính kèm; script tới máy ảo trong đối số base64 (không stdin); máy macOS được tạo không nối kho; xong thì ngủ; khoá/link không ra stdout', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-int-'))
+    const gitIn = (cwd, ...a) => { const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'core.autocrlf=false', ...a], { cwd, encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); return r.stdout.trim() }
+    const repo = path.join(root, 'kit mẫu')
+    fs.mkdirSync(path.join(repo, 'hooks'), { recursive: true })
+    fs.writeFileSync(path.join(repo, 'hooks', 'a.test.mjs'), 'export {}\n')
+    gitIn(repo, 'init', '-q', '-b', 'main')
+    gitIn(repo, 'add', '-A')
+    gitIn(repo, 'commit', '-q', '-m', 'k1')
+    const head = gitIn(repo, 'rev-parse', 'HEAD')
+    fs.mkdirSync(path.join(root, 'devin'))
+    fs.writeFileSync(path.join(root, 'devin', 'credentials.toml'), 'windsurf_api_key = "devin-session-token$KEYSECRET123456"\n')
+    fs.writeFileSync(path.join(root, 'devin', 'config.json'), JSON.stringify({ devin: { org_id: 'org-abcdef123456' } }))
+
+    const sessions = new Map()
+    const calls = []
+    const atts = new Map()
+    const j = (status, o) => new Response(JSON.stringify(o), { status })
+    const fetch = async (url, init = {}) => {
+      const u = new URL(url)
+      const method = init.method ?? 'GET'
+      calls.push({ method, host: u.host, path: u.pathname, body: init.body })
+      if (u.host === 'mcp.devin.ai') {
+        const b = JSON.parse(init.body)
+        if (b.method === 'initialize') return j(200, { jsonrpc: '2.0', id: b.id, result: {} })
+        if (b.method.startsWith('notifications/')) return new Response(null, { status: 202 })
+        // chỉ action "sleep" cho máy ngủ; "message" là ping giữ thức (không được làm máy ngủ)
+        if (b.params.arguments.action === 'sleep') sessions.get(b.params.arguments.session_id).sleepIn = 1
+        return j(200, { jsonrpc: '2.0', id: b.id, result: { content: [] } })
+      }
+      const rest = u.pathname.replace(/^\/v3\/organizations\/[^/]+/, '')
+      if (method === 'POST' && rest === '/sessions') { sessions.set('devin-mac1abcdef', { status: 'running', body: JSON.parse(init.body) }); return j(200, { session_id: 'mac1abcdef' }) }
+      const sm = /^\/sessions\/([^/]+)$/.exec(rest)
+      if (sm) { const s = sessions.get(sm[1]); if (s?.sleepIn && --s.sleepIn === 0) s.status = 'suspended'; return s ? j(200, { status: s.status }) : j(404, {}) }
+      if (method === 'POST' && rest === '/attachments') { const f = init.body.get('file'); atts.set('att1abcdef', Buffer.from(await f.arrayBuffer())); return j(200, { attachment_id: 'att1abcdef', name: f.name }) }
+      if (/^\/attachments\//.test(rest)) return new Response(null, { status: 307, headers: { location: SIGNED } })
+      return j(404, {})
+    }
+    const ssh = []
+    const spawn = async (cmd, args, o = {}) => {
+      if (cmd === 'git') return runProc(cmd, args, o)
+      assert.equal(o.input, undefined, 'không gửi qua stdin')
+      const [, id, command] = args
+      const b = /printf %s '([A-Za-z0-9+/=]*)'/.exec(command)
+      const script = b ? Buffer.from(b[1], 'base64').toString('utf8') : command
+      ssh.push({ id, command, script })
+      if (/devinvm-ready/.test(command)) return { code: 0, stdout: 'devinvm-ready\n', stderr: '' }
+      if (script.includes('SHASUMS256')) return { code: 0, stdout: '@@DEVINVM@@ node v24.9.0\n', stderr: '' }
+      return { code: 0, stdout: OUT(TAP_GREEN), stderr: '' }
+    }
+    let t = 0
+    const logFile = path.join(root, 'devin-vm.log')
+    const ctx = makeCtx({
+      env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/KEY|TOKEN|SECRET|^DEVIN|^FLOW_STATE_DIR$/i.test(k))), DEVIN_CREDENTIALS: path.join(root, 'devin', 'credentials.toml') },
+      home: root, stateDir: path.join(root, 'state'), logFile, devinBin: 'DEVIN', fetch, spawn, sleep: async (ms) => { t += ms }, now: () => (t += 1000),
+    })
+    const buf = []
+    const o = { write: (s) => buf.push(s), text: () => buf.join('') }
+    const code = await main([], { repo, ctx, stdout: o })
+    assert.equal(code, 0, o.text())
+    assert.match(o.text(), /Mac \(Devin macOS, node v24\.18\.0\): 2 bài · 2 đạt · 0 hỏng — xanh/)
+    // máy macOS tạo bằng SWE-2, không nối kho
+    const body = sessions.get('devin-mac1abcdef').body
+    assert.deepEqual([body.platform, body.devin_mode, 'repos' in body], ['macos', 'swe-2-medium', false])
+    // bundle thật: chứa đúng HEAD
+    const bf = path.join(root, 'up.bundle')
+    fs.writeFileSync(bf, atts.get('att1abcdef'))
+    assert.match(gitIn(repo, 'bundle', 'list-heads', bf), new RegExp(head))
+    // script chính nhận đúng link + sha; Node đã được cài lần đầu; máy NGỦ
+    const main_ = ssh.find((s) => s.script.includes('node --test'))
+    assert.ok(main_.script.includes(`'${SIGNED}'`) && main_.script.includes(head))
+    assert.ok(ssh.some((s) => s.script.includes('SHASUMS256')))
+    assert.equal(sessions.get('devin-mac1abcdef').status, 'suspended')
+    // khoá + link ký sẵn không ra stdout hay log
+    const all = `${o.text()}\n${fs.readFileSync(logFile, 'utf8')}`
+    assert.ok(!/SIGSECRET|KEYSECRET|s3\.example/.test(all))
+    assert.match(fs.readFileSync(logFile, 'utf8'), /\tmac-check\tdevin-mac1abcdef\t\d+\t0\n/)
+    fs.rmSync(root, { recursive: true, force: true })
   })
 })
