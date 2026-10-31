@@ -77,6 +77,7 @@ AGENTS.md, `.claude/rules/`) thắng phần này.
 | "khám sức khoẻ app", nhắc khám định kỳ · "app chậm", "chịu được bao nhiêu người" | skill `flow-maintain` · skill `flow-scale` |
 | X ở đâu, chỗ nào dùng Y | tự tìm bằng công cụ Grep có sẵn hoặc `rg` một lệnh nhiều `-e` (không `grep -r`/`find` quét thư mục); thư mục bị git bỏ qua (worktree, thư mục nội bộ) ⇒ thêm `-uu` kẻo tìm sót |
 | giao việc cho worker / chạy song song | skill `flow-team` |
+| mở phiên chat mới / tiếp quản việc phiên cũ | trong Paseo (có biến `PASEO_AGENT_ID`) ⇒ skill `paseo`: `create_workspace` (local, path = worktree) → `create_agent` (cấu hình từ `list_profiles`), prompt đầu ghi hiện trạng; không bảo user tự mở |
 | sắp sửa file trong git repo | skill `flow-worktree` |
 | kiến trúc, cấu trúc thư mục, file/hàm quá dài, tách module; dự án chưa có `docs/arch.json` | skill `flow-architecture` |
 | "cập nhật <công cụ>" / "cập nhật hết"; gọi CLI ngoài bị lỗi kiểu bản cũ | `node ~/.claude/hooks/updates.mjs cmd <công cụ>` (lỗi: `check <công cụ> --fresh`) → hỏi user một câu → chạy; node/git ⇒ đưa lệnh để user tự chạy |
@@ -99,6 +100,7 @@ AGENTS.md, `.claude/rules/`) thắng phần này.
   xem file không mở được file trong worktree); chỉ đưa link khi mở được thật.
 - Gọi CLI/model ngoài (codex, agy, cursor-agent, grok, devin) ⇒ `node ~/.claude/hooks/cli-check.mjs <tên>` trước; chưa
   sẵn sàng ⇒ dùng worker native, chỉ đưa user đúng lệnh đăng nhập khi lý do là chưa đăng nhập (không khi hết lượt/mất mạng).
+- Chạy Playwright test trên máy user ⇒ luôn kèm `--workers=2` (mặc định mở ~14 trình duyệt ngầm, cả máy giật; CI không áp).
 - Không gộp, push, xoá, gửi gì ra ngoài khi user chưa gật.
 
 **Nhắn giữa các phiên** (chốt 2026-10-15) — sắp sửa file phiên khác đang sửa · vừa đổi thứ dùng chung phiên kia gọi tới ·
