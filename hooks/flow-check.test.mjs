@@ -991,8 +991,8 @@ test('arch-size: file vượt trần ⇒ không đạt kèm "tách file, đừng
   assert.match(broken.fix, /docs\/arch\.json/)
 })
 
-test('arch-size có baseline + git: chỉ xét file đổi so với nhánh chính (chưa commit cũng tính); không baseline hoặc không có git ⇒ xét toàn bộ', async () => {
-  const d = repo(webProject({ 'src/features/a/big.ts': BIG, 'docs/arch-baseline.json': BASELINE() }))
+test('arch-size có baseline (có file được miễn) + git: chỉ xét file đổi so với nhánh chính (chưa commit cũng tính); không baseline, mốc rỗng hoặc không có git ⇒ xét toàn bộ', async () => {
+  const d = repo(webProject({ 'src/features/a/big.ts': BIG, 'docs/arch-baseline.json': BASELINE({ size: { 'src/features/a/old.ts': 500 } }) }))
   git(d, 'checkout', '-q', '-b', 'feat')
   put(d, 'src/shared/util.ts', 'export const u = 2\n'); commit(d)
   const r1 = await first(d, 'arch-size')
@@ -1007,7 +1007,15 @@ test('arch-size có baseline + git: chỉ xét file đổi so với nhánh chín
   put(noBaseline, 'src/shared/util.ts', 'export const u = 2\n'); commit(noBaseline)
   assert.equal((await first(noBaseline, 'arch-size')).status, 'fail', 'không baseline ⇒ xét cả file không đổi')
 
-  const noGit = project(webProject({ 'src/features/a/big.ts': BIG, 'docs/arch-baseline.json': BASELINE() }))
+  // mốc rỗng không miễn file nào ⇒ như chưa có mốc (cổng gộp coi thêm mốc rỗng là không nới luật)
+  for (const size of [{}, { 'src/x.ts': 'nhiều' }, null]) {
+    const empty = repo(webProject({ 'src/features/a/big.ts': BIG, 'docs/arch-baseline.json': BASELINE({ size }) }))
+    git(empty, 'checkout', '-q', '-b', 'feat')
+    put(empty, 'src/shared/util.ts', 'export const u = 2\n'); commit(empty)
+    assert.equal((await first(empty, 'arch-size')).status, 'fail', `mốc size=${JSON.stringify(size)} ⇒ xét cả file không đổi`)
+  }
+
+  const noGit = project(webProject({ 'src/features/a/big.ts': BIG, 'docs/arch-baseline.json': BASELINE({ size: { 'src/features/a/old.ts': 500 } }) }))
   assert.equal((await first(noGit, 'arch-size')).status, 'fail', 'không xác định được file đổi ⇒ xét toàn bộ (không bỏ sót)')
 })
 

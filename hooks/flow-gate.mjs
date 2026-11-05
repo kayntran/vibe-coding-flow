@@ -972,7 +972,8 @@ async function mergeGuards(info, base, targets) {
     `Gộp ${names} vào ${base} sẽ kèm:\n${list}\n` +
     'Việc của AI: gỡ phần nới luật/dòng tắt luật trên nhánh, kiểm lại rồi gộp. Không tự lách, KHÔNG đưa lệnh terminal cho user tự chạy (user không code). ' +
     'Đổi luật theo hướng siết đã được cho qua sẵn: thêm module/luật cấm vào docs/arch.json, hạ trần, file sinh lại bằng arch.mjs gen khớp docs/arch.json, ' +
-    'thêm import gói + luật ESLint mức "error" không tuỳ chọn, gỡ khối miễn/tắt luật. ' +
+    'thêm import gói + luật ESLint mức "error" không tuỳ chọn, luật ESLint mới hoàn toàn (plugin mới, trần cỡ hàm/độ phức tạp) kèm tuỳ chọn hoặc tắt cho một phần file, ' +
+    'gỡ khối miễn/tắt luật, mốc/miễn trừ rỗng hoặc bớt mục. Cổng chỉ đọc cấu hình viết thẳng: luật tính bằng biến/hàm thì viết thẳng từng luật. ' +
     'File do máy sinh (Wails wailsjs/, có dấu "DO NOT EDIT"…) đã được bỏ qua sẵn; nếu chỗ bị nêu thật sự không gỡ được hoặc user nói rõ muốn đổi luật ' +
     '⇒ kể user một câu đời thường (chỗ nào, vì sao kit chặn) rồi dừng việc gộp, chờ sửa kit.')
 }

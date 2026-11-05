@@ -2591,9 +2591,14 @@ describe('đợt 2: cổng gộp chống lách (file luật, dòng tắt luật,
     ['docs/arch.json', 'docs/arch-baseline.json', '.dependency-cruiser.cjs', '.dependency-cruiser-known-violations.json', '.go-arch-lint.yml', '.golangci.yml', '.golangci.yaml', 'kit/rules/no-foo.yml'],
     ['eslint.config.js', 'eslint.config.mjs', '.eslintrc.json', '.eslintrc', 'biome.json', 'biome.jsonc', 'sgconfig.yml', 'web/eslint.config.ts'],
   ]
+  // Mốc / vi phạm cũ rỗng không miễn gì (ca riêng dưới) ⇒ cho chúng nội dung miễn thật; vi phạm cũ chỉ có hiệu lực khi mốc trỏ tới.
+  const LOOSE = {
+    'docs/arch-baseline.json': '{"size":{"src/big.ts":900},"depcruise":".dependency-cruiser-known-violations.json"}\n',
+    '.dependency-cruiser-known-violations.json': '[{"type":"dependency","from":"src/a.ts","to":"src/b.ts","rule":{"severity":"error","name":"x"}}]\n',
+  }
   for (const files of RULE_SETS) {
     test(`thêm file luật (${files[0]}, ${files[4]}…) ⇒ mọi host (Claude/Codex/Devin): deny liệt kê từng file, không đưa lệnh cho user`, () => {
-      const fx = ruleFx({ feat: Object.fromEntries(files.map((f) => [f, '{}\n'])) })
+      const fx = ruleFx({ feat: Object.fromEntries(files.map((f) => [f, LOOSE[f] ?? '{}\n'])) })
       for (const sh of [claudeSh, codexSh, devinSh]) {
         const reason = assertDeny(sh(fx, fx.main, MERGE))
         assertPlainOpening(reason)
@@ -2604,6 +2609,18 @@ describe('đợt 2: cổng gộp chống lách (file luật, dòng tắt luật,
       }
     })
   }
+
+  test('thêm mốc / vi phạm cũ / eslint-suppressions rỗng (không miễn gì) ⇒ qua; vi phạm cũ không phải danh sách mà mốc trỏ tới ⇒ chặn', () => {
+    const empty = {
+      'docs/arch-baseline.json': '{"size":{},"depcruise":".dependency-cruiser-known-violations.json"}\n',
+      '.dependency-cruiser-known-violations.json': '[]\n',
+      'eslint-suppressions.json': '{}\n',
+    }
+    const fx = ruleFx({ feat: empty })
+    assertPass(claudeSh(fx, fx.main, MERGE))
+    const bad = ruleFx({ feat: { ...empty, '.dependency-cruiser-known-violations.json': '{}\n' } })
+    assert.match(assertDeny(claudeSh(bad, bad.main, MERGE)), /phải là danh sách JSON/)
+  })
 
   // Review đợt 2 (Codex :790, Grok :679): cấu hình điều khiển cổng/checker cũng là file luật; @ts-nocheck / squawk-ignore / # type: ignore cũng tắt luật.
   test('thêm .claude/flow.json (miễn test, uiPattern, trustedDepSources, prodRefs) và kit/checkers.json ⇒ mọi host: deny liệt kê từng file', () => {
@@ -2765,13 +2782,15 @@ describe('đợt 2: cổng gộp chống lách (file luật, dòng tắt luật,
     assertPass(claudeSh(unexempt, unexempt.main, MERGE))
   })
 
-  test('eslint.config: thêm luật mức error vào khối có sẵn ⇒ qua; mức warn, kèm tuỳ chọn, ghi đè luật đã có trong cùng khối, khối chỉ có ignores ⇒ chặn', () => {
+  test('eslint.config: thêm luật mức error, hoặc luật đo cỡ mới hoàn toàn kèm tuỳ chọn, vào khối có sẵn ⇒ qua; mức warn, tuỳ chọn cho luật preset có thể đang bật, ghi đè luật đã có trong cùng khối, khối chỉ có ignores ⇒ chặn', () => {
     const add = (line) => ESLINT().replace("      'no-console': 'error',", `      'no-console': 'error',\n${line}`)
-    const ok = ruleFx({ main: { 'eslint.config.js': ESLINT() }, feat: { 'eslint.config.js': add("      'no-debugger': 'error',") } })
-    assertPass(claudeSh(ok, ok.main, MERGE))
+    for (const line of ["      'no-debugger': 'error',", "      complexity: ['error', 30],"]) {
+      const ok = ruleFx({ main: { 'eslint.config.js': ESLINT() }, feat: { 'eslint.config.js': add(line) } })
+      assertPass(claudeSh(ok, ok.main, MERGE))
+    }
     for (const [line, why] of [
       ["      'no-debugger': 'warn',", /mức "error"/],
-      ["      complexity: ['error', 30],", /mức "error"/],
+      ["      'no-unused-vars': ['error', { args: 'none' }],", /có thể đang bật/],
       ["      'no-console': 'error',", /đã có trong cùng khối/],
     ]) {
       const fx = ruleFx({ main: { 'eslint.config.js': ESLINT() }, feat: { 'eslint.config.js': add(line) } })
@@ -3415,14 +3434,20 @@ describe('đợt 3: dấu QA đòi MỖI mã quyền P-nn của SPEC đang mở 
 describe('đợt 3: cổng gộp dùng danh sách file luật MỘT nguồn (lib/rule-files.mjs) — thêm .claude/ui.json, docs/ui-baseline.json, .claude/luu.json', () => {
   const FILES = ['.claude/ui.json', 'docs/ui-baseline.json', '.claude/luu.json']
 
-  function ruleFx(files) {
+  // ui.json thêm mới chấm như sửa từ rỗng: chỉ nút miễn chữ (whitelistIcons) là nới ⇒ cho nó một nút để vẫn bị chặn.
+  function ruleFx(files, text = { '.claude/ui.json': '{"whitelistIcons":["more"]}\n' }) {
     const fx = fixture()
-    for (const f of files) write(fx.wt, f, '{}\n')
+    for (const f of files) write(fx.wt, f, text[f] ?? '{}\n')
     git(fx.wt, 'add', '-A')
     git(fx.wt, 'commit', '-m', 'feat')
     stampBoth(fx)
     return fx
   }
+
+  test('thêm .claude/ui.json không có nút miễn chữ ⇒ qua (thêm máy kiểm giao diện là siết)', () => {
+    const fx = ruleFx(['.claude/ui.json'], { '.claude/ui.json': '{"routes":["/"]}\n' })
+    assertPass(hook(fx, 'bash', bashIn(fx.main, 'git merge feat')))
+  })
 
   test('thêm ba file luật mới ⇒ deny liệt kê từng file bằng nhãn đời thường ở Claude; Codex cũng deny, không đưa lệnh cho user', () => {
     const fx = ruleFx(FILES)

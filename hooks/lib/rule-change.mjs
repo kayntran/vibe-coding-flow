@@ -10,16 +10,19 @@
 //     arch.json của nhánh trong thư mục tạm dựng lại đúng phần cây gen đọc (arch.json, tsconfig.json, go.mod, thư mục Go) rồi so từng chữ. Khớp ⇒ không tính (đánh giá
 //     nằm ở arch.json); lệch / không có dấu ⇒ nới. Xoá file kit sinh ⇒ chỉ qua khi kit không còn sinh tên đó và (depcruise) .dependency-cruiser.mjs của nhánh khớp.
 //   eslint.config.* (sửa)  eslintLoosening. .claude/ui.json (sửa)  uiLoosening (thêm màn/trạng thái ⇒ qua; thêm nút miễn chữ, bỏ màn, đổi start/url… ⇒ nới).
+//   .claude/ui.json (thêm)  chưa có file thì máy kiểm giao diện không chạy (checker ui-rules detect file này) ⇒ file mới chỉ thêm kiểm tra: qua khi đúng dạng và không có nút miễn chữ.
+//   File miễn trừ / mốc (thêm, sửa, xoá): docs/arch-baseline.json, .dependency-cruiser-known-violations.json, eslint-suppressions.json ⇒ so thứ được miễn THẬT SỰ (theo cách
+//     flow-check đọc chúng) giữa hai bản: bản mới chỉ miễn ít hơn hoặc bằng (rỗng, bớt mục, hạ số đếm, xoá file) ⇒ qua; thêm mục miễn, khoá lạ, JSON hỏng ⇒ nới. Xem exemptionVerdict.
 //   eslint.config.* (thêm)  chỉ qua khi cả điểm tách nhánh lẫn nhánh đích chưa có cấu hình ESLint nào (firstEslintConfig): dự án lần đầu có lint.
 //   kit/checkers.json (sửa)  checkersLoosening: chỉ đổi chữ dặn ($comment, title, hint, docs, install, skipWhy), bật exclusive ở checker đứng trước mọi checker exclusive có sẵn, thêm plan
 //     trùng id checker và có trong PLANNERS của hooks/flow-check.mjs (đọc 'head', không chạy), thêm đúng một --noEmit vào args của checker tsc ⇒ qua; đổi thứ tự, bỏ/thêm checker,
 //     bỏ exclusive, đổi required, detect, cmd… ⇒ nới. Chi tiết và chỗ còn hở: xem phần kit/checkers.json bên dưới.
-//   Còn lại (mốc vi phạm cũ, biome, .eslintrc, golangci viết tay, flow.json, kit/rules…) ⇒ nới như trước.
+//   Còn lại (biome, .eslintrc, golangci viết tay, flow.json, kit/rules, docs/ui-baseline.json…) ⇒ nới như trước.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
-import { ARCH_FILE, DEPCRUISE_FILE, GEN_MARK, archLoosening, genFiles, parseArch } from './arch.mjs'
+import { ARCH_FILE, BASELINE_FILE, DEPCRUISE_FILE, GEN_MARK, KNOWN_FILE, archLoosening, genFiles, parseArch } from './arch.mjs'
 import { fold } from './ui-rules.mjs'
 
 const GENERATED = /^(?:\.dependency-cruiser\.[cm]js|\.go-arch-lint(?:\.[a-z0-9-]+)?\.yml|\.golangci\.yml)$/
@@ -50,7 +53,8 @@ function verdict(st, file, read, expected, list, eslintAbove) {
     return list.length ? list.join('; ') : null
   }
   if (GENERATED.test(file)) return generatedVerdict(st, file, read, expected)
-  if (file === UI_FILE) return st === 'M' ? uiLoosening(read('base', file), read('head', file)) : ''
+  if (file === UI_FILE) return st === 'M' ? uiLoosening(read('base', file), read('head', file)) : st === 'A' ? uiLoosening(null, read('head', file), { added: true }) : ''
+  if (file === BASELINE_FILE || file === KNOWN_FILE || SUPPRESSIONS.test(file)) return ['A', 'M', 'D'].includes(st) ? exemptionVerdict(file, read) : ''
   if (file === CHECKERS_FILE) return st === 'M' ? checkersLoosening(read('base', file), read('head', file), () => read('head', PLANNERS_FILE)) : ''
   if (ESLINT_FLAT.test(file) && st === 'M') {
     const before = read('base', file)
@@ -176,11 +180,13 @@ function regenerate(read, list, log) {
 }
 
 // --- .claude/ui.json (máy kiểm giao diện, ui-check.mjs): sửa chỉ qua khi màn/trạng thái cũ còn đủ, nút miễn chữ không thêm, mọi khoá khác giữ nguyên ---------------
-// Thêm mới / xoá ⇒ chấm như cũ (''): file mới có thể trỏ máy kiểm vào một app khác.
+// Thêm mới (added — theo loại thay đổi 'A', không suy từ bản cũ đọc ra rỗng): checker ui-rules chỉ chạy khi có file này (detect .claude/ui.json) nên trước đó không có
+// kiểm tra giao diện nào để trỏ đi app khác — chấm như sửa từ {} nhưng không so start/url/khoá khác: chỉ cần đúng dạng và không có nút miễn chữ.
+// Sửa mà không đọc được bản cũ ⇒ nới. Xoá ⇒ chấm như cũ ('', tắt hẳn máy kiểm).
 const UI_FILE = '.claude/ui.json'
-function uiLoosening(beforeText, afterText) {
+function uiLoosening(beforeText, afterText, { added = false } = {}) {
   const parse = (t) => { try { const j = JSON.parse(lf(t)); return j && typeof j === 'object' && !Array.isArray(j) ? j : null } catch { return null } }
-  const before = beforeText === null ? null : parse(beforeText)
+  const before = added ? {} : beforeText === null ? null : parse(beforeText)
   const after = afterText === null ? null : parse(afterText)
   if (!before || !after) return `không đọc được ${UI_FILE} (JSON hỏng) nên không so được`
   // Bản mới phải đúng dạng mà ui-check.mjs loadConfig nhận; sai ⇒ máy kiểm thoát mã 2, không kiểm màn nào.
@@ -200,11 +206,108 @@ function uiLoosening(beforeText, afterText) {
   for (const s of list(before.states)) if (!states.has(stateKey(s))) out.push(`bỏ trạng thái ${oneLine(s?.s, 20)} (${oneLine(`${s?.route ?? ''}${s?.setup ?? ''}`, 60)}) khỏi states`)
   const white = new Set(list(before.whitelistIcons).map(fold))
   for (const w of list(after.whitelistIcons)) if (!white.has(fold(w))) out.push(`thêm nút được để hình trơn không chữ "${oneLine(w, 40)}" (whitelistIcons)`)
-  for (const k of new Set([...Object.keys(before), ...Object.keys(after)])) {
+  for (const k of added ? [] : new Set([...Object.keys(before), ...Object.keys(after)])) {
     if (k === 'routes' || k === 'states' || k === 'whitelistIcons') continue
     if (JSON.stringify(before[k]) !== JSON.stringify(after[k])) out.push(`đổi "${oneLine(k, 30)}" (máy kiểm có thể mở app khác hoặc kiểm khác đi)`)
   }
   return out.length ? out.join('; ') : null
+}
+
+// --- file miễn trừ / mốc: so thứ được miễn THẬT SỰ ở hai bản (đúng cách flow-check, depcruise, ESLint đọc chúng); bản mới miễn không hơn bản cũ ⇒ không nới ----------
+// Mốc (BASELINE_FILE) — flow-check đọc: size {file: số dòng} (arch-size chỉ miễn file có số nguyên; size có mục ⇒ chỉ xét file đổi so với nhánh chính), depcruise (đường dẫn
+//   file vi phạm cũ ⇒ --ignore-known), go.newFromRev (golangci --new-from-rev), go.archLint (vi phạm go-arch-lint cũ). base, eslint chỉ để ghi nhận (không ai đọc).
+//   Bản mới: mỗi file trong size phải có ở bản cũ với số không nhỏ hơn; depcruise chỉ được trỏ KNOWN_FILE (file khác cổng không theo dõi); newFromRev trùng bản cũ; archLint
+//   nằm trong bản cũ; khoá lạ, JSON hỏng / không phải object ⇒ nới. Không có file (xoá) ⇒ không miễn gì.
+// Vi phạm depcruise cũ: chỉ có hiệu lực qua con trỏ depcruise của mốc ở cùng phía ⇒ so danh sách hiệu lực hai phía (mỗi mục mới phải trùng hẳn một mục cũ).
+// eslint-suppressions.json (ESLint ≥ 9.24 tự đọc ở thư mục chạy): { file: { luật: { count } } } — mỗi cặp file+luật ở bản mới phải có ở bản cũ với count không nhỏ hơn.
+const SUPPRESSIONS = /(^|\/)eslint-suppressions\.json$/
+const BASELINE_KEYS = new Set(['base', 'size', 'depcruise', 'go', 'eslint'])
+const HEX = /^[0-9a-f]{7,64}$/
+const plainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
+// → { j } (j null = không có file) | { bad: lý do }
+function jsonAt(read, side, rel) {
+  const t = read(side, rel)
+  if (t === null) return { j: null }
+  try { return { j: JSON.parse(lf(t)) } } catch { return { bad: `${rel} không phải JSON đọc được` } }
+}
+
+function exemptionVerdict(file, read) {
+  const out = SUPPRESSIONS.test(file) ? [suppressionsLoosening(file, read)] : [baselineLoosening(read), knownLoosening(read)]
+  const list = out.filter(Boolean)
+  return list.length ? list.join('; ') : null
+}
+
+function baselineLoosening(read) {
+  const head = jsonAt(read, 'head', BASELINE_FILE)
+  if (head.bad) return head.bad
+  const h = head.j
+  if (h === null) return null
+  if (!plainObject(h)) return `${BASELINE_FILE} phải là một object JSON`
+  const base = jsonAt(read, 'base', BASELINE_FILE)
+  const b = plainObject(base.j) ? base.j : {} // bản cũ hỏng: flow-check coi như không có mốc
+  const out = []
+  for (const k of Object.keys(h)) if (!BASELINE_KEYS.has(k)) out.push(`khoá lạ "${oneLine(k, 30)}" trong mốc`)
+  if (h.size !== undefined && h.size !== null && !plainObject(h.size)) out.push('"size" phải là object { file: số dòng }')
+  const was = plainObject(b.size) ? b.size : {}
+  for (const [f, n] of Object.entries(plainObject(h.size) ? h.size : {})) {
+    if (Number.isInteger(n) && !(Number.isInteger(was[f]) && n <= was[f])) out.push(`miễn trần dòng cho ${oneLine(f, 60)} (${n} dòng)`)
+  }
+  if (h.depcruise !== undefined && h.depcruise !== null && h.depcruise !== KNOWN_FILE) out.push(`"depcruise" trỏ tới file khác ${KNOWN_FILE} (cổng không theo dõi được file đó)`)
+  if (h.go !== undefined && h.go !== null) {
+    if (!plainObject(h.go)) out.push('"go" phải là object hoặc null')
+    else {
+      const rev = h.go.newFromRev
+      if (typeof rev === 'string' && HEX.test(rev) && rev !== b.go?.newFromRev) out.push(`golangci chỉ báo lỗi mới từ commit ${rev.slice(0, 12)} (lỗi cũ hơn được bỏ qua)`)
+      const old = new Set(Array.isArray(b.go?.archLint) ? b.go.archLint : [])
+      if (h.go.archLint !== undefined && !Array.isArray(h.go.archLint)) out.push('"go.archLint" phải là danh sách')
+      const fresh = (Array.isArray(h.go.archLint) ? h.go.archLint : []).filter((k) => !old.has(k))
+      if (fresh.length) out.push(`thêm ${fresh.length} vi phạm go-arch-lint cũ được bỏ qua`)
+    }
+  }
+  return out.length ? out.join('; ') : null
+}
+
+// Danh sách vi phạm depcruise được bỏ qua ở một phía: theo con trỏ depcruise của mốc phía đó (không có mốc / không trỏ / file không có ⇒ []). → mảng | { bad }
+function knownAt(read, side) {
+  const m = jsonAt(read, side, BASELINE_FILE)
+  const p = plainObject(m.j) ? m.j.depcruise : null
+  if (typeof p !== 'string' || !p.trim()) return []
+  const k = jsonAt(read, side, p.replace(/^\.\//, ''))
+  if (k.bad) return side === 'head' ? k : []
+  return k.j === null ? [] : Array.isArray(k.j) ? k.j : side === 'head' ? { bad: `${p} phải là danh sách JSON` } : []
+}
+
+function knownLoosening(read) {
+  const now = knownAt(read, 'head')
+  if (now.bad) return now.bad
+  const left = [...knownAt(read, 'base')]
+  let fresh = 0
+  for (const v of now) {
+    const i = left.findIndex((w) => isDeepStrictEqual(w, v))
+    if (i < 0) fresh++
+    else left.splice(i, 1)
+  }
+  return fresh ? `thêm ${fresh} vi phạm import cũ được bỏ qua (${KNOWN_FILE})` : null
+}
+
+function suppressionsLoosening(file, read) {
+  const now = jsonAt(read, 'head', file)
+  if (now.bad) return now.bad
+  if (now.j !== null && !plainObject(now.j)) return `${file} phải là object JSON`
+  const before = jsonAt(read, 'base', file)
+  const was = plainObject(before.j) ? before.j : {}
+  const out = []
+  for (const [f, rules] of Object.entries(now.j ?? {})) {
+    if (!plainObject(rules)) { out.push(`mục "${oneLine(f, 60)}" viết kiểu lạ`); continue }
+    for (const [r, v] of Object.entries(rules)) {
+      const n = plainObject(v) ? v.count : undefined
+      const old = was[f]?.[r]?.count
+      if (!Number.isInteger(n) || n < 0) out.push(`"${oneLine(f, 60)}" luật ${oneLine(r, 40)}: count viết kiểu lạ`)
+      else if (!(Number.isInteger(old) && n <= old)) out.push(`bỏ qua ${n} lỗi ${oneLine(r, 40)} ở ${oneLine(f, 60)}`)
+    }
+  }
+  if (!out.length) return null
+  return `thêm chỗ ESLint bỏ qua lỗi: ${out.slice(0, MAX_WHY).join('; ')}${out.length > MAX_WHY ? `; …và ${out.length - MAX_WHY} chỗ nữa` : ''}`
 }
 
 // --- kit/checkers.json (bảng checker của flow-check.mjs): sửa chỉ qua khi chắc là siết ([tbpn]; cổng tự chấm siết/nới, không có nút duyệt) ----------------------------
@@ -308,6 +411,24 @@ function checkersLoosening(beforeText, afterText, readPlanners) {
 // Ngoại lệ bỏ qua file: globalIgnores mới, khối mới chỉ có ignores, mẫu thêm vào ignores/globalIgnores có sẵn ⇒ nhận khi MỌI mẫu là thư mục máy/công cụ sinh (GEN_DIRS).
 // Mức "error" không kèm tuỳ chọn không bao giờ nới: ESLint giữ tuỳ chọn của khối trước khi khối sau chỉ ghi mức (rulesSchema.merge của eslint).
 // Dòng biên giống nhau ("}," "{") làm khúc lệch vài dòng ⇒ thử dời khúc lên/xuống như git. Không đọc chắc được (regex, chuỗi `${}`, file quá dài) ⇒ nới.
+//
+// Luật MỚI HOÀN TOÀN (không thể đang bật ở bản cũ cho file nào) thì đặt gì cũng không nới so với bản cũ: "error" kèm tuỳ chọn bất kỳ, "warn", hay "off" cho một phần file.
+//   Biết chắc "không thể đang bật" chỉ khi bản cũ đọc được hết (profileOf): mọi import là gói trong KNOWN_PKGS (đã soát preset của nó đăng ký namespace nào), file chỉ có
+//   chữ/mảng/object, tên import, lời gọi defineConfig/globalIgnores/x.config — không biến, hàm, phép tính, chuỗi có mã thoát. Khi đó luật R mới khi:
+//   · R không xuất hiện ở đâu trong bản cũ (chữ hay tên), và
+//   · R của plugin (có "/"): không preset nào ở bản cũ bật được nó — namespace của R không thuộc namespace mà preset của các gói đã import đăng ký (KNOWN_PKGS).
+//     Khai plugin (plugins: { ns: x }) không bật luật; luật tắt thì ESLint không cần plugin (bỏ qua kiểm luật mức 0), nên phải chắc từ phía preset: gói lạ như
+//     eslint-plugin-astro có preset đăng ký thêm jsx-a11y ⇒ nằm ngoài KNOWN_PKGS, tức là chặn;
+//   · R lõi (không "/"): chỉ nhận luật đo cỡ (METRIC — complexity, max-lines-per-function…: theo chính sách của ESLint không preset "recommended" nào bật) và
+//     @eslint/js ở bản cũ chỉ dùng configs.recommended (configs.all bật mọi luật lõi). Luật lõi khác có thể đang bật qua preset (no-unused-vars…) ⇒ như cũ.
+//   Còn lại: chỉ "error" không tuỳ chọn như trước.
+// Thêm "plugins"/"rules"/"name" vào một khối cấu hình có sẵn (không có sẵn khoá đó, không có "..."): plugins chỉ khai namespace (không bật luật; trùng tên khác plugin
+//   thì ESLint báo lỗi), rules chấm từng luật như trên. Khối cấu hình = object nằm thẳng trong mảng export / defineConfig(…) / x.config(…) / extends (containers: cfg).
+// Hằng luật kiểu mẫu web của kit — const X = { 'luật': mức, … } rồi `...X` trong rules và rules: Object.fromEntries(Object.keys(X).map((r) => [r, 'off'])) — được thay
+//   bằng luật viết thẳng ở từng chỗ dùng trước khi so (expandConsts); X dùng kiểu khác, khai lại, sửa sau khi khai ⇒ không thay, gặp code ⇒ nới.
+// Bỏ qua file thêm (globalIgnores, khối chỉ có ignores, mẫu thêm vào ignores): chỉ tính mẫu chưa có trong globalIgnores của bản cũ (lời gọi nằm thẳng trong danh sách cấu
+//   hình, bản cũ đọc được hết, không có mẫu "!"), mẫu tính phải là thư mục máy sinh (GEN_DIRS). Bản mới có chuỗi "!" (đưa file trở lại vòng kiểm — mẫu thêm sau che lại),
+//   chuỗi có mã thoát / template, hay dựng bằng code / nạp file ngoài gói (literalProblem) ⇒ thêm mẫu bỏ qua nào cũng là nới (theo review Codex/Gemini nhánh 30/10).
 const MAX_LINES = 2000
 const CLOSE = new Set(['}', ']', ')'])
 const STRICT = ['error', '2']
@@ -318,9 +439,103 @@ const NEGATED = 'có mẫu "!" (đưa file trở lại vòng kiểm) — gỡ đ
 // Thư mục do máy/công cụ sinh (bản build, kiểu route tự sinh, báo cáo test, skill/worktree của AI) — bỏ qua không bớt kiểm code thật của app.
 // Nhận cả dạng có "./", "/", "**/" ở đầu và "/", "/*", "/**", "/**/*" ở cuối; còn lại (src, **/*.tsx, "!…") vẫn là nới.
 // (Ghép 31/10 với 69bf413 làm trên Mac cùng lỗi: giữ cách này — nhận cả "**/build" của dự án nhiều gói — và thêm blob-report của Playwright.)
-const GEN_DIRS = new Set(['dist', 'build', 'out', '.next', '.react-router', '.svelte-kit', '.output', '.nuxt', '.vercel', '.wrangler', 'coverage', 'test-results', 'playwright-report', 'blob-report', '.claude', '.turbo', '.cache'])
+// .astro (kiểu do Astro sinh), wailsjs (Wails), .wxt (WXT): mẫu của kit/templates bỏ qua sẵn.
+const GEN_DIRS = new Set(['dist', 'build', 'out', '.next', '.react-router', '.svelte-kit', '.output', '.nuxt', '.vercel', '.wrangler', 'coverage', 'test-results', 'playwright-report', 'blob-report', '.claude', '.turbo', '.cache', '.astro', 'wailsjs', '.wxt'])
 const genDir = (g) => GEN_DIRS.has(g.replace(/^(?:\.?\/)?(?:\*\*\/)?/, '').replace(/\/(?:\*\*(?:\/\*)?|\*)?$/, ''))
-const notGen = (globs) => { const g = globs.find((x) => !genDir(x)); return g === undefined ? null : `mẫu "${oneLine(g, 40)}" không phải thư mục máy sinh (dist, build, .next, coverage…)` }
+// globs: mẫu bỏ qua MỚI (đã trừ mẫu bản cũ bỏ qua sẵn) · veto: lý do bản mới không chắc (có "!", mã thoát, code) — chỉ tính khi có mẫu mới
+const notGen = (globs, veto = null) => {
+  const g = globs.find((x) => !genDir(x))
+  if (g !== undefined) return `mẫu "${oneLine(g, 40)}" không phải thư mục máy sinh (dist, build, .next, coverage…)`
+  return globs.length && veto ? veto : null
+}
+// Mẫu bỏ qua bị gỡ có "!" hoặc mã thoát (vd '\x21build' = '!build') ⇒ có thể là mẫu đưa file trở lại vòng kiểm (review Gemini nhánh 30/10).
+const negated = (globs) => globs.some((g) => g.startsWith('!') || g.includes('\\'))
+
+// Gói luật đã soát (2026-11-05, node_modules của gonsheets-web: @eslint/js 10.0.1, typescript-eslint 8.72.0, eslint-plugin-react-hooks 7.1.1, eslint-plugin-react-refresh,
+// @shadcn/lint 0.2.1): ns = mọi namespace plugin mà export/preset của gói có thể đăng ký; không preset nào của chúng bật luật đo cỡ (METRIC), trừ @eslint/js configs.all
+// (nên @eslint/js ở bản cũ chỉ được dùng qua configs.recommended). Gói ngoài bảng ⇒ không biết preset của nó bật gì ⇒ không nhận luật mới kèm tuỳ chọn / tắt luật.
+// Thêm gói vào bảng: soát MỌI preset của nó (plugins, rules) rồi ghi namespace; preset bật luật lõi đo cỡ ⇒ không thêm.
+const KNOWN_PKGS = new Map([
+  ['@eslint/js', []], ['typescript-eslint', ['@typescript-eslint']], ['eslint-plugin-react-hooks', ['react-hooks']], ['eslint-plugin-react-refresh', ['react-refresh']],
+  ['@shadcn/lint', []], ['globals', []], ['eslint/config', []], // @shadcn/lint: default === plugin, không có configs (namespace do dự án tự đặt trong plugins)
+])
+const METRIC = new Set(['complexity', 'max-depth', 'max-lines', 'max-lines-per-function', 'max-nested-callbacks', 'max-params', 'max-statements', 'max-classes-per-file'])
+// Gói đọc/chạy code hoặc nạp mẫu bỏ qua từ file ngoài (includeIgnoreFile của @eslint/compat)
+const CODE_LOADERS = /^(?:(?:node:)?(?:fs|fs\/promises|child_process|vm|module|worker_threads)|@eslint\/compat(?:\/.*)?)$/
+const CONFIG_CALLS = new Set(['defineConfig', 'globalIgnores'])
+const LITERALS = new Set(['true', 'false', 'null', 'undefined'])
+// namespace của luật theo parseRuleId của ESLint: "@scope/x/luật" → "@scope/x", "@scope/luật" → "@scope", "ns/luật" → "ns", lõi → null
+const ruleNs = (r) => (!r.includes('/') ? null : r.startsWith('@') ? r.slice(0, r.lastIndexOf('/')) : r.slice(0, r.indexOf('/')))
+
+// File chỉ có cấu hình viết thẳng không? → lý do (chữ) hoặc null; binds nhận tên import → gói. Cho phép: import gói (không phải file dự án / CODE_LOADERS), export default,
+// chữ, số, true/false/null, object, mảng, "...", tên import (kể cả x.y.z), lời gọi defineConfig / globalIgnores / x.config. Còn lại (biến, hàm, mũi tên, phép tính, ?:, gán,
+// chuỗi có mã thoát / template, tên lạ như process, Object) ⇒ không chắc.
+function literalProblem(toks, binds = new Map(), imp = new Set()) {
+  for (let i = 0; i < toks.length;) {
+    const t = toks[i]
+    if (t.k === 'id' && t.t === 'import' && toks[i + 1]?.t !== '(' && toks[i + 1]?.t !== '.') {
+      const c = { toks, p: i }
+      const names = []
+      const out = {}
+      const why = importDecl(c, names, out)
+      if (why) return why
+      if (CODE_LOADERS.test(out.src)) return `import "${oneLine(out.src, 40)}" (đọc/chạy code hoặc nạp mẫu từ file ngoài)`
+      for (const n of names) binds.set(n, out.src)
+      for (; i < c.p; i++) imp.add(i)
+      continue
+    }
+    const prev = toks[i - 1]
+    const next = toks[i + 1]
+    if (t.k === 'str') {
+      if (t.t[0] === '`' || t.v.includes('\\')) return 'chuỗi viết bằng mã thoát hoặc template'
+    } else if (t.k === 'id') {
+      const member = prev?.t === '.' && prev.k === 'p'
+      const key = next?.t === ':' && ['{', ','].includes(prev?.t)
+      if (next?.t === '(' && !(CONFIG_CALLS.has(t.t) && !member && binds.get(t.t) === 'eslint/config') && !(member && t.t === 'config')) return `gọi hàm ${oneLine(t.t, 30)}(…)`
+      if (!member && !key && !LITERALS.has(t.t) && !binds.has(t.t) && !(t.t === 'export' && next?.t === 'default') && !(t.t === 'default' && prev?.t === 'export')) return `tên "${oneLine(t.t, 30)}" không phải import (biến, hàm hay tên dựng sẵn)`
+    } else if (t.k === 'p') {
+      if (!['{', '}', '[', ']', '(', ')', ',', ':', ';', '.', '...'].includes(t.t) && !(t.t === '-' && next?.k === 'num')) return `phép tính hoặc ký hiệu "${t.t}"`
+      if (t.t === ':' && prev?.t === ']') return 'tên thuộc tính tính bằng code ([…]: …)'
+      if (t.t === '(' && prev?.k !== 'id') return 'gọi hàm hoặc biểu thức trong ngoặc'
+    }
+    i++
+  }
+  return null
+}
+
+// Bản cũ đọc được tới đâu: { problem, mentions (mọi chữ và tên), ns (namespace có thể đã đăng ký), metricOk (@eslint/js chỉ qua configs.recommended), ignored (mẫu globalIgnores) }
+function profileOf(toks, ctx) {
+  const binds = new Map()
+  const imp = new Set() // chỉ số token thuộc câu import
+  let problem = literalProblem(toks, binds, imp)
+  const ns = new Set()
+  for (const pkg of binds.values()) {
+    if (!KNOWN_PKGS.has(pkg)) { problem ??= `import gói "${oneLine(pkg, 40)}" chưa có trong danh sách gói luật kit đã soát (không biết preset của nó bật luật gì)`; continue }
+    for (const n of KNOWN_PKGS.get(pkg)) ns.add(n)
+  }
+  const mentions = new Set(toks.filter((t) => t.k === 'str' || t.k === 'id').map((t) => (t.k === 'str' ? t.v : t.t)))
+  // tên import của @eslint/js chỉ được dùng là <tên>.configs.recommended… (configs.all bật mọi luật lõi, kể cả luật đo cỡ)
+  const js = new Set([...binds].filter(([, pkg]) => pkg === '@eslint/js').map(([n]) => n))
+  const metricOk = toks.every((t, k) => imp.has(k) || t.k !== 'id' || !js.has(t.t) || toks[k - 1]?.t === '.'
+    || (toks[k + 1]?.t === '.' && toks[k + 2]?.t === 'configs' && toks[k + 3]?.t === '.' && toks[k + 4]?.t === 'recommended'))
+  const ignored = new Set()
+  const bang = toks.some((t) => t.k === 'str' && t.v.startsWith('!'))
+  if (!problem && !bang) {
+    toks.forEach((t, k) => {
+      if (t.k === 'id' && t.t === 'globalIgnores' && toks[k + 1]?.t === '(' && ctx[k].cfgList) { const globs = strList({ toks, p: k + 2 }); for (const g of globs ?? []) ignored.add(g) }
+    })
+  }
+  return { problem, mentions, ns, metricOk, ignored }
+}
+
+// Luật r có thể đang bật ở bản cũ (cho một file nào đó) không — xem khối chú thích đầu mục. Bản cũ đọc được hết thì luật chỉ bật được bằng một trong hai đường:
+// nêu thẳng tên luật (mentions), hoặc preset của gói đã import (luật plugin: namespace thuộc ns của gói; luật lõi: mọi luật trừ METRIC khi @eslint/js chỉ qua recommended).
+// Khai plugin (plugins: { ns: x }) không bật luật nào.
+function canBeOn(p, r) {
+  if (p.problem || p.mentions.has(r)) return true
+  const ns = ruleNs(r)
+  return ns === null ? !(METRIC.has(r) && p.metricOk) : p.ns.has(ns)
+}
 
 function tokenize(src) {
   const toks = []
@@ -357,7 +572,7 @@ function tokenize(src) {
   return toks
 }
 
-// Gom token theo dòng nguồn: [{ line, first (chỉ số token đầu), toks, key (để so; bỏ dấu phẩy cuối) }]
+// Gom token theo dòng nguồn: [{ line, first (chỉ số token đầu), toks, key (để so; bỏ dấu phẩy cuối; chuỗi so theo chữ bên trong nên 'a' khớp "a") }]
 function tokenLines(toks) {
   const out = []
   toks.forEach((t, k) => {
@@ -366,7 +581,7 @@ function tokenLines(toks) {
     else out.push({ line: t.line, first: k, toks: [t] })
   })
   for (const l of out) {
-    const ts = l.toks.map((t) => t.t)
+    const ts = l.toks.map((t) => (t.k === 'str' ? `\u0002${t.v}` : t.t))
     if (ts[ts.length - 1] === ',') ts.pop()
     l.key = ts.join('\u0001')
   }
@@ -395,9 +610,12 @@ const runsOf = (match) => {
 
 // Hộp chứa của từng token: { open, key, keys, opaque } — key: tên thuộc tính đứng trước `{`/`[` (vd rules) hoặc tên hàm trước `(`; keys: tên thuộc tính trực tiếp
 // trong hộp (kể cả viết tắt `{ react }`); opaque: hộp có "..." hoặc tên tính bằng code (`[x]:`) nên không biết hết tên bên trong.
+// cfgList: hộp là danh sách khối cấu hình (mảng sau export default, ngoặc của defineConfig(…) / x.config(…), mảng extends của khối cấu hình, mảng lồng trong danh sách);
+// cfg: object nằm thẳng trong danh sách đó (hoặc sau export default) — khối cấu hình thật, không phải tuỳ chọn của luật hay đối số của hàm khác.
 const propName = (t) => (t?.k === 'str' ? t.v : t?.k === 'id' ? t.t : null)
 function containers(toks) {
-  const stack = [{ open: null, key: null, keys: [], opaque: false }]
+  const root = { open: null, key: null, keys: [], opaque: false }
+  const stack = [root]
   const at = []
   toks.forEach((t, k) => {
     const top = stack[stack.length - 1]
@@ -408,7 +626,12 @@ function containers(toks) {
       // mảng là đối số đầu của globalIgnores([…]) mang tên globalIgnores (hàm khác thì không — có thể là hàm tự viết trùng tên ignores)
       const key = t.t === '(' ? (toks[k - 1]?.k === 'id' ? toks[k - 1].t : null) : toks[k - 1]?.t === ':' ? propName(toks[k - 2])
         : t.t === '[' && toks[k - 1]?.t === '(' && top.key === 'globalIgnores' ? 'globalIgnores' : null
-      stack.push({ open: t.t, key, keys: [], opaque: false })
+      const node = { open: t.t, key, keys: [], opaque: false }
+      const exported = top === root && toks[k - 1]?.t === 'default'
+      if (t.t === '(') node.cfgList = key === 'defineConfig' || (key === 'config' && toks[k - 2]?.t === '.')
+      else if (t.t === '[') node.cfgList = exported || (key === null && !!top.cfgList) || (key === 'extends' && !!top.cfg)
+      else node.cfg = key === null && (exported || !!top.cfgList)
+      stack.push(node)
     } else if (CLOSE.has(t.t)) { if (stack.length > 1) stack.pop() } else if (t.t === '...') top.opaque = true
     else if (t.t === ':') { if (propName(toks[k - 1]) !== null) top.keys.push(propName(toks[k - 1])); else top.opaque = true }
   })
@@ -494,20 +717,39 @@ function pluginEntry(c) {
   return null
 }
 
-function rulesBlock(c, sev, bad) {
+// rules viết thẳng { "luật": giá trị, … }; judge(c, tên) đọc giá trị → lý do | null. Giá trị không phải object (hàm, biến) ⇒ báo cách viết lại.
+const RULES_LITERAL = 'rules tính bằng hàm/biến (cổng không chạy code nên không biết bật/tắt luật nào) — viết thẳng từng luật: rules: { "luật": "error", … }'
+function rulesBlock(c, judge) {
+  if (at(c)?.t !== '{') return RULES_LITERAL
   const seen = new Set()
   return block(c, (cc) => {
     const k = prop(cc)
-    if (k === null) return at(cc)?.t === '...' ? 'rules có "..." (gộp luật khác vào, không biết bên trong)' : 'cú pháp lạ trong rules'
+    if (k === null) return at(cc)?.t === '...' ? `rules có "..." (gộp luật khác vào, không biết bên trong) — ${RULES_LITERAL.split(' — ')[1]}` : 'cú pháp lạ trong rules'
     if (seen.has(k)) return `luật "${k}" lặp hai lần trong cùng khối`
     seen.add(k)
-    return sev(cc) ? null : bad(k)
+    return judge(cc, k)
   })
 }
 
-const strictRule = (k) => `luật "${k}" không ở mức "error" hoặc kèm tuỳ chọn`
+// Giá trị viết thẳng (chữ, số, true/false/null, mảng, object có tên thuộc tính thường) tới dấu phẩy / ngoặc đóng ngoài cùng — không tên biến, lời gọi, phép tính
+// (một lời gọi trong tuỳ chọn như Object.assign(preset.rules, …) có thể sửa ngầm luật khác).
+function literalValue(c) {
+  const start = c.p
+  if (!skipValue(c)) return false
+  return c.toks.slice(start, c.p).every((t, i, a) => t.k === 'str' || t.k === 'num' || (t.k === 'id' && (LITERALS.has(t.t) || (a[i + 1]?.t === ':' && ['{', ','].includes(a[i - 1]?.t))))
+    || (t.k === 'p' && ['{', '}', '[', ']', ',', ':'].includes(t.t)) || (t.k === 'p' && t.t === '-' && a[i + 1]?.k === 'num'))
+}
 
-function strictObject(c) {
+// Giá trị của luật r ở phần THÊM: luật mới hoàn toàn (canBeOn false) ⇒ mức/tuỳ chọn gì cũng được (viết thẳng); còn lại chỉ "error" không tuỳ chọn.
+function ruleValue(c, r, profile) {
+  if (!canBeOn(profile, r)) return literalValue(c) ? null : `giá trị của luật "${r}" phải viết thẳng (chữ, số, mảng, object) — không tên biến, lời gọi hay phép tính`
+  if (severity(c, STRICT)) return null
+  const why = profile.problem ? `bản cũ ${profile.problem} nên cổng không chứng minh được luật này chưa bật ở đó`
+    : 'luật này có thể đang bật ở bản cũ (preset hoặc plugin có sẵn), đặt mức/tuỳ chọn khác có thể là nới'
+  return `luật "${r}" không ở mức "error" hoặc kèm tuỳ chọn (${why})`
+}
+
+function strictObject(c, env) {
   let ignores = []
   const { why, seen } = configBlock(c, (k, cc) => {
     if (k === 'name') return str(cc) === null ? '"name" phải là chữ' : null
@@ -517,13 +759,27 @@ function strictObject(c) {
       return globs === null ? `"${k}" phải là danh sách chữ` : null
     }
     if (k === 'plugins') return block(cc, pluginEntry)
-    if (k === 'rules') return rulesBlock(cc, (c3) => severity(c3, STRICT), strictRule)
+    if (k === 'rules') return rulesBlock(cc, (c3, r) => ruleValue(c3, r, env.profile))
     return `khối mới có "${k}" (${STRICT_KEYS})`
   })
   if (why) return why
   if (!seen.includes('ignores') || !seen.every((k) => k === 'ignores' || k === 'name')) return null
-  const gen = notGen(ignores)
+  const gen = notGen(ignores.filter((g) => !env.profile.ignored.has(g)), env.veto)
   return gen && `khối chỉ có ignores (bỏ qua file khỏi mọi luật): ${gen}`
+}
+
+// Thêm một thuộc tính vào khối cấu hình có sẵn (ctx.cfg): plugins (chỉ khai namespace), rules (chấm từng luật), name. Khối đã có khoá đó / có "..." ⇒ ghi đè cái cũ.
+function configProp(c, ctx, env) {
+  const k = prop(c)
+  if (k === null) return at(c)?.t === '...' ? 'thêm "..." vào khối cấu hình (gộp cấu hình khác vào, không biết bên trong)' : 'cú pháp lạ trong khối cấu hình'
+  if (k !== 'plugins' && k !== 'rules' && k !== 'name') {
+    return `thêm "${oneLine(k, 30)}" vào khối có sẵn (chỉ nhận plugins, rules, name${k === 'files' || k === 'ignores' ? '; files/ignores thu hẹp những file khối này kiểm' : ''})`
+  }
+  if (ctx.opaque) return `khối có "..." nên không biết đã có "${k}" chưa (thêm vào sẽ ghi đè cái cũ)`
+  if (ctx.keys.filter((x) => x === k).length > 1) return `khối đã có "${k}" (thêm lần nữa sẽ ghi đè cái cũ)`
+  if (k === 'name') return str(c) === null ? '"name" phải là chữ' : null
+  if (k === 'plugins') return block(c, pluginEntry)
+  return rulesBlock(c, (c3, r) => ruleValue(c3, r, env.profile))
 }
 
 // globalIgnores([mẫu, …], 'tên'?) → danh sách mẫu; null khi viết kiểu lạ.
@@ -536,7 +792,7 @@ function globalIgnoresCall(c) {
 function looseObject(c) {
   return configBlock(c, (k, cc) => {
     if (k === 'name') return str(cc) === null ? '"name" phải là chữ' : null
-    if (k === 'ignores') { const globs = strList(cc); return globs === null ? '"ignores" phải là danh sách chữ' : globs.some((g) => g.startsWith('!')) ? NEGATED : null }
+    if (k === 'ignores') { const globs = strList(cc); return globs === null ? '"ignores" phải là danh sách chữ' : negated(globs) ? NEGATED : null }
     if (k === 'files') {
       const files = strList(cc)
       return files && files.every((f) => /\.[cm]?js$/.test(f)) ? null : 'khối bị gỡ có files ngoài .js/.cjs/.mjs (gỡ có thể làm ESLint thôi đọc loại file đó)'
@@ -549,13 +805,13 @@ function looseObject(c) {
         return `languageOptions có "${lk ?? '?'}" (chỉ gỡ được sourceType, globals)`
       })
     }
-    if (k === 'rules') return rulesBlock(cc, (c3) => severity(c3, OFF, { options: true }), (r) => `gỡ luật "${r}" đang bật`)
+    if (k === 'rules') return rulesBlock(cc, (c3, r) => (severity(c3, OFF, { options: true }) ? null : `gỡ luật "${r}" đang bật`))
     return `khối bị gỡ có "${k}" (chỉ gỡ được khối chỉ nới luật)`
   }).why
 }
 
-// names: nhận tên mà import đặt trong file (tên sau "as" nếu có).
-function importDecl(c, names = []) {
+// names: nhận tên mà import đặt trong file (tên sau "as" nếu có); out.src: tên gói.
+function importDecl(c, names = [], out = {}) {
   c.p++ // import
   const name = () => { const n = ident(c); if (n !== null) names.push(n); return n }
   if (at(c)?.k === 'id' && at(c).t !== 'from') { name(); eat(c, ',') }
@@ -573,19 +829,23 @@ function importDecl(c, names = []) {
   const src = str(c)
   if (src === null) return 'import viết kiểu lạ'
   if (!BARE.test(src)) return `import "${oneLine(src, 60)}" không phải gói (file của dự án hoặc nguồn lạ có thể đổi luật)`
+  out.src = src
   eat(c, ';')
   return null
 }
 
-function addItem(c, ctx) {
+// env: { profile (bản cũ — profileOf), veto (lý do bản mới không chắc về mẫu bỏ qua, hoặc null) }
+function addItem(c, ctx, env) {
   const t = at(c)
+  const fresh = (globs) => globs.filter((g) => !env.profile.ignored.has(g)) // mẫu bản cũ chưa bỏ qua
   if (t.k === 'id' && t.t === 'import') return importDecl(c)
-  if (t.k === 'p' && t.t === '{') return strictObject(c)
+  if (t.k === 'p' && t.t === '{') return ctx.cfgList ? strictObject(c, env) : 'thêm object ngoài danh sách khối cấu hình (vd vào tuỳ chọn của một luật) — không chắc là siết'
   if (ctx.open === '{' && ctx.key === 'rules') {
     if (ctx.opaque) return 'khối rules có "..." hoặc tên luật tính bằng code nên không biết luật nào đã có (thêm luật vào một khối mới riêng)'
     const k = prop(c)
     if (k === null) return 'cú pháp lạ trong rules'
-    if (!severity(c, STRICT)) return strictRule(k)
+    const why = ruleValue(c, k, env.profile)
+    if (why) return why
     return ctx.keys.filter((x) => x === k).length > 1 ? `luật "${k}" đã có trong cùng khối (ghi đè làm mất tuỳ chọn cũ)` : null
   }
   if (ctx.open === '{' && ctx.key === 'plugins') {
@@ -593,11 +853,13 @@ function addItem(c, ctx) {
     const name = propName(at(c))
     return pluginEntry(c) ?? (ctx.keys.filter((x) => x === name).length > 1 ? `plugin "${name}" đã có trong cùng khối (ghi đè plugin cũ)` : null)
   }
+  if (ctx.cfg && t.k !== 'p') return configProp(c, ctx, env)
   if (t.k === 'id' && t.t === 'globalIgnores' && at(c, 1)?.t === '(') {
     const globs = globalIgnoresCall(c)
-    return globs === null ? 'globalIgnores viết kiểu lạ' : notGen(globs)
+    return globs === null ? 'globalIgnores viết kiểu lạ' : notGen(fresh(globs), env.veto)
   }
-  if (t.k === 'str' && ctx.open === '[' && (ctx.key === 'ignores' || ctx.key === 'globalIgnores')) return notGen([str(c)])
+  if (t.k === 'str' && ctx.open === '[' && (ctx.key === 'ignores' || ctx.key === 'globalIgnores')) return notGen(fresh([str(c)]), env.veto)
+  if (t.k === 'id' && ['const', 'let', 'var', 'function'].includes(t.t)) return `khai biến/hàm (${t.t} …) — cổng chỉ đọc được cấu hình viết thẳng; viết thẳng giá trị vào chỗ dùng`
   return `chỉ nhận import gói, khối cấu hình mới hoặc luật mức "error" (gặp "${oneLine(t.k === 'str' ? t.v : t.t, 40)}")`
 }
 
@@ -615,7 +877,7 @@ function removeItem(c, ctx, usedAfter) {
   if (t.k === 'id' && t.t === 'globalIgnores' && at(c, 1)?.t === '(') {
     const globs = globalIgnoresCall(c)
     if (globs === null) return 'globalIgnores viết kiểu lạ'
-    return globs.some((g) => g.startsWith('!')) ? NEGATED : null
+    return negated(globs) ? NEGATED : null
   }
   if (ctx.open === '{' && ctx.key === 'rules') {
     const k = prop(c)
@@ -678,35 +940,139 @@ function settle(lines, match, other, [c, d], judge) {
   return best
 }
 
+// Hằng luật của mẫu web (kit/templates/web): `const X = { 'luật': giá trị, … }` ở mức ngoài cùng, chỉ dùng làm `...X` ngay trong rules: { … } và/hoặc
+// `rules: Object.fromEntries(Object.keys(X).map((r) => [r, MỨC]))` ⇒ thay bằng luật viết thẳng (đúng nghĩa JavaScript: spread chép từng mục; Object.keys lấy đủ tên chữ),
+// bỏ câu khai. Mục viết thẳng giữ số dòng của nó trong câu khai nên sửa một luật của X chỉ lệch đúng dòng đó (ở mọi chỗ dùng). Không thay (để phần so gặp code ⇒ nới) khi:
+// X khai lại, khai không phải object chữ (có "...", tên tính bằng code, "__proto__", rỗng), X dùng kiểu khác (gán, truyền vào hàm, x.y, viết tắt { X }), hoặc tên Object
+// xuất hiện ngoài đúng mẫu trên (Object bị đặt lại / sửa thì Object.keys không còn là hàm dựng sẵn).
+function expandConsts(toks) {
+  const ctx = containers(toks)
+  const decls = new Map() // tên → { from, to, entries: [{ key, value: [token…] }], uses: [] } | null (không thay được)
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i]
+    if (!(t.k === 'id' && t.t === 'const' && ctx[i].open === null && toks[i + 1]?.k === 'id' && toks[i + 2]?.t === '=' && toks[i + 3]?.t === '{')) continue
+    const name = toks[i + 1].t
+    const c = { toks, p: i + 4 }
+    const entries = []
+    let ok = true
+    while (ok && !eat(c, '}')) {
+      const key = at(c)
+      const k = prop(c)
+      const start = c.p
+      if (k === null || k === '__proto__' || !skipValue(c)) { ok = false; break }
+      entries.push({ key, value: toks.slice(start, c.p) })
+      if (!eat(c, ',') && at(c)?.t !== '}') ok = false
+    }
+    if (ok) eat(c, ';')
+    decls.set(name, ok && entries.length && !decls.has(name) ? { from: i, to: c.p, entries, uses: [] } : null)
+    if (ok) i = c.p - 1
+  }
+  if (![...decls.values()].some(Boolean)) return toks
+  const inDecl = (k) => [...decls.values()].some((d) => d && k >= d.from && k < d.to)
+  const ids = (s, list) => list.every((x, j) => (x === null ? true : toks[s + j]?.t === x && toks[s + j]?.k !== 'str'))
+  const idioms = new Set() // chỉ số token Object thuộc mẫu
+  // Object . fromEntries ( Object . keys ( X ) . map ( ( P ) => [ P , MỨC ] ) )  — hoặc  P => …  không ngoặc. → chỉ số sau ")" cuối | -1
+  const idiomEnd = (s) => {
+    if (!ids(s, ['Object', '.', 'fromEntries', '(', 'Object', '.', 'keys', '(', null, ')', '.', 'map', '('])) return -1
+    let p = s + 13
+    const paren = toks[p]?.t === '('
+    if (paren) p++
+    const param = toks[p]
+    if (param?.k !== 'id') return -1
+    p++
+    if (paren && toks[p++]?.t !== ')') return -1
+    if (!ids(p, ['=', '>', '[']) || toks[p + 3]?.t !== param.t || toks[p + 3]?.k !== 'id' || toks[p + 4]?.t !== ',') return -1
+    const sev = toks[p + 5]
+    if (!sev || (sev.k !== 'str' && sev.k !== 'num') || !ids(p + 6, [']', ')', ')'])) return -1
+    return toks[s - 1]?.t === ':' && propName(toks[s - 2]) === 'rules' ? p + 9 : -1
+  }
+  for (let k = 0; k < toks.length; k++) {
+    const t = toks[k]
+    if (t.k !== 'id' || inDecl(k) || toks[k - 1]?.t === '.') continue
+    if (t.t === 'Object' && idiomEnd(k) > 0) { idioms.add(k); idioms.add(k + 4); continue }
+    const d = decls.get(t.t)
+    if (!d) continue
+    if (toks[k + 1]?.t === ':' && ['{', ','].includes(toks[k - 1]?.t)) continue // tên thuộc tính trùng tên hằng, không phải dùng hằng
+    // dấu phẩy sau `...X` đi theo mục cuối (cùng dòng) để bản viết thẳng `'luật': mức,` khớp từng dòng
+    if (toks[k - 1]?.t === '...' && ctx[k - 1].open === '{' && ctx[k - 1].key === 'rules' && [',', '}'].includes(toks[k + 1]?.t)) d.uses.push({ kind: 'spread', from: k - 1, to: toks[k + 1].t === ',' ? k + 2 : k + 1, comma: toks[k + 1].t === ',' })
+    else if (idiomEnd(k - 8) > 0) d.uses.push({ kind: 'idiom', from: k - 8, to: idiomEnd(k - 8), sev: toks[idiomEnd(k - 8) - 4] })
+    else decls.set(t.t, null)
+  }
+  const strayObject = toks.some((t, k) => t.k === 'id' && t.t === 'Object' && toks[k - 1]?.t !== '.' && !idioms.has(k))
+  for (const [name, d] of decls) if (d && strayObject && d.uses.some((u) => u.kind === 'idiom')) decls.set(name, null)
+  const good = [...decls.values()].filter(Boolean)
+  // mở ra quá nhiều chữ (hằng to dùng nhiều chỗ) ⇒ không mở, để phần so chặn — cổng không được chạy quá lâu
+  const size = good.reduce((n, d) => n + d.uses.length * d.entries.reduce((m, e) => m + e.value.length + 3, 0), 0)
+  if (!good.length || size > 20000) return toks
+  const skip = new Map() // chỉ số bắt đầu → { to, emit: () => token[] }
+  const comma = (line) => ({ k: 'p', t: ',', line })
+  for (const d of good) {
+    skip.set(d.from, { to: d.to, emit: () => [] })
+    for (const u of d.uses) {
+      skip.set(u.from, {
+        to: u.to,
+        emit: () => {
+          const out = u.kind === 'idiom' ? [{ k: 'p', t: '{', line: toks[u.from].line }] : []
+          d.entries.forEach(({ key, value }, j) => {
+            if (j) out.push(comma(out[out.length - 1].line))
+            if (u.kind === 'spread') out.push({ ...key }, { k: 'p', t: ':', line: key.line }, ...value.map((v) => ({ ...v })))
+            else out.push({ ...key }, { k: 'p', t: ':', line: key.line }, { ...u.sev, line: key.line })
+          })
+          if (u.kind === 'idiom') out.push({ k: 'p', t: '}', line: toks[u.to - 1].line })
+          if (u.comma) out.push(comma(out[out.length - 1].line))
+          return out
+        },
+      })
+    }
+  }
+  const out = []
+  for (let k = 0; k < toks.length;) {
+    const s = skip.get(k)
+    if (s) { out.push(...s.emit()); k = s.to } else out.push(toks[k++])
+  }
+  return out
+}
+
 export function eslintLoosening(before, after) {
-  const A = tokenize(lf(before))
-  const B = tokenize(lf(after))
-  if (!A || !B) return { line: 1, why: 'không đọc chắc được file (có regex hoặc chuỗi `${}`) nên không biết là siết hay nới' }
+  const A0 = tokenize(lf(before))
+  const B0 = tokenize(lf(after))
+  if (!A0 || !B0) return { line: 1, why: 'không đọc chắc được file (có regex hoặc chuỗi `${}`) nên không biết là siết hay nới' }
+  const A = expandConsts(A0)
+  const B = expandConsts(B0)
   const la = tokenLines(A)
   const lb = tokenLines(B)
   if (la.length > MAX_LINES || lb.length > MAX_LINES) return { line: 1, why: 'file quá dài để so từng dòng' }
   const { mo, mn } = align(la.map((l) => l.key), lb.map((l) => l.key))
   const cut = (toks, lines, c, d) => toks.slice(lines[c].first, lines[d - 1].first + lines[d - 1].toks.length)
   const usedAfter = new Set(B.filter((t) => t.k === 'id').map((t) => t.t))
+  const ctxA = containers(A)
+  const code = literalProblem(B)
+  const veto = code ? `bản mới ${code} nên không chắc mẫu bỏ qua thêm vào có che lại file nào không`
+    : B.some((t) => t.k === 'str' && t.v.startsWith('!')) ? 'cấu hình có mẫu "!" (đưa file trở lại vòng kiểm): thêm mẫu bỏ qua có thể che lại chúng' : null
+  const env = { profile: profileOf(A, ctxA), veto }
+  // arg: tham số thứ ba của item — addItem cần biết bản cũ (env), removeItem cần tên còn dùng ở bản mới.
   const sides = [
-    { lines: lb, match: mn, other: mo, toks: B, ctx: containers(B), item: addItem, say: (why, run) => `${hintOf(run)}thêm phần không chắc là siết luật: ${why}` },
-    { lines: la, match: mo, other: mn, toks: A, ctx: containers(A), item: removeItem, say: (why) => `bỏ phần đang siết luật hoặc không chắc là nới (bản cũ): ${why}` },
+    { lines: lb, match: mn, other: mo, toks: B, ctx: containers(B), item: addItem, arg: env, say: (why, run) => `${hintOf(run)}thêm phần không chắc là siết luật: ${why}` },
+    { lines: la, match: mo, other: mn, toks: A, ctx: ctxA, item: removeItem, arg: usedAfter, say: (why) => `bỏ phần đang siết luật hoặc không chắc là nới (bản cũ): ${why}` },
   ]
   for (const s of sides) {
     for (const run of runsOf(s.match)) {
       const bad = settle(s.lines, s.match, s.other, run, (c, d) => {
         const toks = cut(s.toks, s.lines, c, d)
         const ctx = s.ctx[s.lines[c].first]
-        const why = sequence(toks, (cc) => s.item(cc, ctx, usedAfter))
+        const why = sequence(toks, (cc) => s.item(cc, ctx, s.arg))
         return { why: why && s.say(why, toks), balanced: balanced(toks) }
       })
       if (bad) return { line: s.lines[bad.at].line, why: bad.why }
     }
   }
   // dòng khớp chỉ khác dấu phẩy cuối: thêm phẩy ⇒ ngay sau phải là khúc thêm; bỏ phẩy ⇒ ngay sau là khúc bỏ, và bản mới tiếp theo là ngoặc đóng hoặc khúc thêm.
+  // Phẩy cuối đứng ngay trước ngoặc đóng (ở cả hai bản) là phẩy thừa, JavaScript bỏ qua ⇒ không tính.
+  const closes = (lines, k) => k < lines.length && CLOSE.has(lines[k].toks[0].t)
   for (let i = 0; i < la.length; i++) {
     const j = mo[i]
     if (j < 0 || la[i].toks.length === lb[j].toks.length) continue
+    if (closes(la, i + 1) && closes(lb, j + 1)) continue
     const added = lb[j].toks.length > la[i].toks.length
     const ok = added
       ? j + 1 < lb.length && mn[j + 1] === -1

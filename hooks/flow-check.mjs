@@ -473,11 +473,13 @@ export const INTERNALS = {
     return { status: 'fail', message: `${r.problems.length} chỗ lệch giữa docs/arch.json, thư mục code và Codemap`, detail: r.problems.map((p) => p.msg), fix: joinFixes(r.problems.map((p) => p.fix)) || checker.hint }
   },
 
-  // Trần dòng của file (sizeCheck). Có docs/arch-baseline.json và hỏi được git ⇒ chỉ file đổi so với nhánh chính; còn lại xét toàn bộ (không bỏ sót).
+  // Trần dòng của file (sizeCheck). Mốc docs/arch-baseline.json có file được miễn (size có mục) và hỏi được git ⇒ chỉ file đổi so với nhánh chính; còn lại xét toàn bộ
+  // (không bỏ sót). Mốc rỗng (size {}) không miễn file nào nên xét như dự án chưa có mốc — cổng gộp (lib/rule-change.mjs) dựa vào điều này để coi mốc rỗng là không nới luật.
   'arch-size': async ({ dir, checker, ctx }) => {
     const { arch, errors } = loadArch(dir)
     if (!arch) return archBroken(errors, checker, ctx)
-    const changed = loadBaseline(dir) !== null ? ctx.changed() : null
+    const size = loadBaseline(dir)?.size
+    const changed = size && typeof size === 'object' && Object.values(size).some(Number.isInteger) ? ctx.changed() : null
     const r = sizeCheck(dir, changed ? { changedOnly: changed } : {})
     if (r.ok) return { status: 'pass', message: changed ? `file đổi so với ${ctx.getBase().ref} đều trong trần dòng` : 'mọi file code trong trần dòng' }
     return { status: 'fail', message: `${r.problems.length} file vượt trần dòng`, detail: r.problems.map((p) => p.msg), fix: joinFixes(r.problems.map((p) => p.fix)) || checker.hint }

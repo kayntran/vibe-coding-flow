@@ -17,7 +17,7 @@ const CFG = (extra = '', head = '') => [
   'export default defineConfig([', "  globalIgnores(['dist']),", '  js.configs.recommended,', '  {', "    files: ['**/*.ts'],", '    rules: {',
   "      'no-console': 'error',", "      complexity: ['error', 10],", '    },', '  },', extra, '])', '',
 ].filter((l) => l !== null).join('\n')
-const ok = (before, after) => assert.equal(eslintLoosening(before, after), null, `đáng lẽ là siết:\n${after}`)
+const ok = (before, after) => { const r = eslintLoosening(before, after); assert.equal(r, null, `đáng lẽ là siết (${r && `dòng ${r.line}: ${r.why}`}):\n${after}`) }
 const bad = (before, after, re) => { const r = eslintLoosening(before, after); assert.ok(r, `đáng lẽ bị tính là nới:\n${after}`); assert.match(`dòng ${r.line}: ${r.why}`, re); return r }
 
 describe('eslintLoosening — chỉ cho qua khi CHẮC là siết', () => {
@@ -62,7 +62,8 @@ describe('eslintLoosening — chỉ cho qua khi CHẮC là siết', () => {
   test('mức warn, kèm tuỳ chọn, ghi đè luật đã có trong cùng khối, khối chỉ có ignores, globalIgnores mới ⇒ nới', () => {
     const add = (line) => CFG().replace("      'no-console': 'error',", `      'no-console': 'error',\n${line}`)
     bad(CFG(), add("      'no-alert': 'warn',"), /mức "error"/)
-    bad(CFG(), add("      'max-depth': ['error', 4],"), /mức "error"/)
+    // luật lõi có thể đang bật qua preset (js.configs.recommended có no-unused-vars) ⇒ ghi đè tuỳ chọn có thể là nới
+    bad(CFG(), add("      'no-unused-vars': ['error', { args: 'none' }],"), /mức "error".*có thể đang bật/)
     bad(CFG(), add("      complexity: 'error',"), /đã có trong cùng khối/)
     bad(CFG(), CFG("  { ignores: ['src/legacy/**'] },"), /bỏ qua file/)
     bad(CFG(), CFG().replace("  globalIgnores(['dist']),", "  globalIgnores(['dist']),\n  globalIgnores(['src/**']),"), /bỏ qua file/)
@@ -244,11 +245,18 @@ describe('looseRuleChanges', () => {
     for (const bad of [{ routes: ['/', 'x'] }, { states: [{ route: '/', s: 'S-01' }, { route: '/', s: 'S-01', setup: 'x' }] }, { states: [{ route: '/', s: 'S-01' }, { route: '/x' }] }, { whitelistIcons: null }, { whitelistIcons: [1] }, { routes: 'x' }]) {
       assert.match(ui(UI(), UI(bad)), /sai dạng/, JSON.stringify(bad))
     }
-    assert.equal(ui(null, UI(), 'A'), '')
+    // thêm mới: chưa có file thì máy kiểm giao diện không chạy ⇒ file đúng dạng, không có nút miễn chữ là thêm kiểm tra (start/url gì cũng được)
+    assert.equal(ui(null, UI(), 'A'), null)
+    assert.equal(ui(null, UI({ start: 'npx serve dist', url: 'http://localhost:9999', ...more }), 'A'), null)
+    assert.match(ui(null, UI({ whitelistIcons: ['Chia sẻ'] }), 'A'), /"Chia sẻ"/)
+    assert.match(ui(null, UI({ routes: ['x'] }), 'A'), /sai dạng/)
+    assert.match(ui(null, '{', 'A'), /không đọc/)
+    // sửa mà không đọc được bản cũ ⇒ không được coi là file mới (review Gemini Flash)
+    assert.match(ui(null, UI({ routes: [] , states: [{ route: '/x', s: 'S-09' }], url: 'http://localhost:1' })), /không đọc/)
     assert.equal(ui(UI(), null, 'D'), '')
   })
-  test('baseline, biome, eslint mới khi đã có cấu hình ESLint, xoá arch.json ⇒ vẫn nới như cũ', () => {
-    const r = judge({ 'docs/arch.json': ARCH(MODS), '.eslintrc.json': '{}' }, { 'docs/arch-baseline.json': '{}', 'biome.json': '{}', 'web/eslint.config.js': 'export default []' }, [
+  test('baseline có file được miễn, biome, eslint mới khi đã có cấu hình ESLint, xoá arch.json ⇒ vẫn nới như cũ', () => {
+    const r = judge({ 'docs/arch.json': ARCH(MODS), '.eslintrc.json': '{}' }, { 'docs/arch-baseline.json': '{"size":{"src/a.ts":500}}', 'biome.json': '{}', 'web/eslint.config.js': 'export default []' }, [
       { st: 'A', file: 'docs/arch-baseline.json' }, { st: 'A', file: 'biome.json' }, { st: 'A', file: 'web/eslint.config.js' }, { st: 'D', file: 'docs/arch.json' },
     ])
     assert.deepEqual([...r.keys()].sort(), ['biome.json', 'docs/arch-baseline.json', 'docs/arch.json', 'web/eslint.config.js'])
@@ -480,5 +488,292 @@ describe('looseRuleChanges — kit/checkers.json', () => {
     const why = ck(CK(), many)
     assert.match(why, /checker "tsc": đổi "required"/)
     assert.match(why, /…và \d+ chỗ nữa/)
+  })
+})
+
+// --- luật mới hoàn toàn, hằng luật của mẫu web, mẫu bỏ qua có sẵn ---------------------------------------------------------------------------
+
+// Ca thật gonsheets-web (2026-11-05): main = khung Vite, nhánh nen-web thêm shadcn (hằng luật + khối tắt) và khối trần cỡ hàm của arch.mjs gen.
+const VITE = `import js from "@eslint/js"
+import globals from "globals"
+import reactHooks from "eslint-plugin-react-hooks"
+import reactRefresh from "eslint-plugin-react-refresh"
+import tseslint from "typescript-eslint"
+import { defineConfig, globalIgnores } from "eslint/config"
+
+export default defineConfig([
+  globalIgnores(["dist", ".astro"]),
+  {
+    files: ["**/*.{ts,tsx}"],
+    extends: [
+      js.configs.recommended,
+      tseslint.configs.recommended,
+      reactHooks.configs.flat.recommended,
+      reactRefresh.configs.vite,
+    ],
+    languageOptions: {
+      globals: globals.browser,
+    },
+    rules: {
+      "react-refresh/only-export-components": "off",
+    },
+  },
+])
+`
+const SHADCN_RULES = `const shadcnRules = {
+  "shadcn/no-restyle": ["error", { allow: ["layout"] }],
+  "shadcn/no-raw-colors": "error",
+  "shadcn/no-arbitrary-values": "error",
+  "shadcn/no-inline-styles": "error",
+  "shadcn/no-unknown-classes": "error",
+  "shadcn/require-static-classes": "error",
+}
+`
+const KIT_BLOCK = `  // Trần cỡ hàm và độ phức tạp theo docs/arch.json (sinh bằng arch.mjs gen).
+  {
+    files: [
+      "src/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+      "worker/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+      "apps-script/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+    ],
+    ignores: ["**/*.test.*", "**/*.spec.*", "**/*.d.ts"],
+    rules: {
+      "max-lines-per-function": ["error", { max: 60, skipBlankLines: true, skipComments: true }],
+      complexity: ["error", 15],
+    },
+  },
+`
+// on: cách bật luật shadcn trong khối chính; off: giá trị rules của khối tắt cho src/components/ui
+const NEN_WEB = ({ on = '      ...shadcnRules,\n', off = 'Object.fromEntries(Object.keys(shadcnRules).map((rule) => [rule, "off"]))', consts = SHADCN_RULES, kit = KIT_BLOCK } = {}) => `import js from "@eslint/js"
+import { plugin as shadcn } from "@shadcn/lint"
+import globals from "globals"
+import reactHooks from "eslint-plugin-react-hooks"
+import reactRefresh from "eslint-plugin-react-refresh"
+import tseslint from "typescript-eslint"
+import { defineConfig, globalIgnores } from "eslint/config"
+
+// Luật giao diện shadcn (@shadcn/lint) chạy trong bước eslint: bắt class Tailwind tự chế, màu thô, giá trị tuỳ ý, style inline.
+${consts}
+export default defineConfig([
+  // test-results / playwright-report: Playwright tạo và xoá khi test chạy song song với eslint ⇒ quét trúng thì lỗi ENOENT.
+  globalIgnores(["dist", ".astro", "test-results", "playwright-report", ".claude"]),
+  {
+    files: ["**/*.{ts,tsx}"],
+    extends: [
+      js.configs.recommended,
+      tseslint.configs.recommended,
+      reactHooks.configs.flat.recommended,
+      reactRefresh.configs.vite,
+    ],
+    languageOptions: {
+      globals: globals.browser,
+    },
+    plugins: { shadcn },
+    rules: {
+      "react-refresh/only-export-components": "off",
+${on}    },
+  },
+  {
+    // Thành phần do shadcn sinh ra viết theo thiết kế riêng của nó: không soát bằng luật dành cho code của app.
+    files: ["src/components/ui/**"],
+    rules: ${off},
+  },
+${kit}])
+`
+const NAMES = ['no-restyle', 'no-raw-colors', 'no-arbitrary-values', 'no-inline-styles', 'no-unknown-classes', 'require-static-classes']
+const INLINE_ON = `      "shadcn/no-restyle": ["error", { allow: ["layout"] }],\n${NAMES.slice(1).map((n) => `      "shadcn/${n}": "error",\n`).join('')}`
+const INLINE_OFF = `{\n${NAMES.map((n) => `      "shadcn/${n}": "off",\n`).join('')}    }`
+const INLINE = (o = {}) => NEN_WEB({ on: INLINE_ON, off: INLINE_OFF, consts: '', ...o })
+
+describe('eslintLoosening — luật mới hoàn toàn, hằng luật của mẫu web, mẫu bỏ qua có sẵn', () => {
+  test('ca thật gonsheets-web main → nen-web: plugin mới + luật kèm tuỳ chọn, khối tắt luật vừa thêm, khối trần cỡ hàm của kit, globalIgnores thêm thư mục máy sinh ⇒ siết', () => {
+    ok(VITE, NEN_WEB())
+    ok(VITE, INLINE())
+    // đổi qua lại giữa hằng luật và viết thẳng: ESLint chạy y hệt
+    ok(NEN_WEB(), INLINE())
+    ok(INLINE(), NEN_WEB())
+    // thêm một luật shadcn vào hằng (bật ở khối chính, tự tắt ở khối ui) ⇒ vẫn là luật mới
+    ok(NEN_WEB(), NEN_WEB({ consts: SHADCN_RULES.replace('}\n', '  "shadcn/no-x": ["error", { a: 1 }],\n}\n') }))
+    // luật "warn" của plugin mới cũng không nới gì so với bản cũ (chưa có luật đó)
+    ok(VITE, INLINE({ on: `${INLINE_ON}      "shadcn/no-y": "warn",\n` }))
+    ok(VITE, INLINE({ on: `${INLINE_ON}      "shadcn/no-y": ["error", { max: -1, list: ["a", { deep: true }], none: null }],\n` }))
+  })
+  test('luật mới mà giá trị có tên biến, lời gọi, phép tính (có thể sửa ngầm luật khác) ⇒ nới', () => {
+    for (const v of ['["error", Object.assign(tseslint.configs.recommended[1].rules, { "no-var": "off" })]', '["error", opts]', '["error", { max: 1 + 1 }]', 'level']) {
+      bad(INLINE(), INLINE({ on: `${INLINE_ON}      "shadcn/no-y": ${v},\n` }), /phải viết thẳng/)
+    }
+  })
+  test('luật mới kèm tuỳ chọn / tắt luật bị chặn khi bản cũ không đọc hết được: gói luật ngoài danh sách đã soát, biến, phép chọn, hàm', () => {
+    const astro = (t) => t.replace('import tseslint', 'import astro from "eslint-plugin-astro"\nimport tseslint').replace('      reactRefresh.configs.vite,\n', '      reactRefresh.configs.vite,\n      astro.configs.recommended,\n')
+    bad(astro(VITE), astro(INLINE()), /eslint-plugin-astro.*chưa có trong danh sách/)
+    bad(astro(VITE), astro(NEN_WEB({ on: '' })), /eslint-plugin-astro/)
+    const ternary = VITE.replace('"react-refresh/only-export-components": "off",', '"react-refresh/only-export-components": "off",\n      "no-console": isCI ? "error" : "off",')
+    bad(ternary, ternary.replace('])\n', `${KIT_BLOCK}])\n`), /chứng minh/)
+    const env = VITE.replace('globals: globals.browser,', 'globals: process.env.CI ? globals.node : globals.browser,')
+    bad(env, env.replace('])\n', `${KIT_BLOCK}])\n`), /chứng minh/)
+    const computed = VITE.replace('"react-refresh/only-export-components": "off",', '"react-refresh/only-export-components": "off",\n      [globals.rule]: "error",')
+    bad(computed, computed.replace('])\n', `${KIT_BLOCK}])\n`), /tên thuộc tính tính bằng code/)
+  })
+  test('hằng luật mở ra quá lớn ⇒ không mở (cổng không chạy quá lâu), gặp code ⇒ nới', () => {
+    const many = `const big = {\n${Array.from({ length: 400 }, (_, i) => `  "shadcn/r${i}": ["error", { a: [1, 2, 3] }],\n`).join('')}}\n`
+    const uses = Array.from({ length: 10 }, (_, i) => `  {\n    files: ["p${i}/**"],\n    rules: { ...big },\n  },\n`).join('')
+    bad(VITE, NEN_WEB({ consts: many, on: '', off: '{ "shadcn/r0": "off" }', kit: uses }), /khai biến/)
+    ok(VITE, NEN_WEB({ consts: many, on: '', off: '{ "shadcn/r0": "off" }', kit: uses.slice(0, uses.indexOf('  {\n    files: ["p1/**"]')) }))
+  })
+  test('luật có thể đang bật ở bản cũ ⇒ kèm tuỳ chọn / tắt / warn vẫn nới: namespace của gói có sẵn, luật lõi ngoài nhóm đo cỡ, luật đã nêu trong bản cũ, configs.all', () => {
+    const add = (line) => VITE.replace('"react-refresh/only-export-components": "off",', `"react-refresh/only-export-components": "off",\n      ${line}`)
+    bad(VITE, add('"react-hooks/exhaustive-deps": ["error", { additionalHooks: "x" }],'), /react-hooks\/exhaustive-deps.*có thể đang bật/)
+    bad(VITE, add('"@typescript-eslint/no-unused-vars": "off",'), /@typescript-eslint\/no-unused-vars/)
+    bad(VITE, add('"no-console": ["error", { allow: ["warn"] }],'), /no-console/)
+    const block = (rules) => VITE.replace('])\n', `  {\n    files: ["src/legacy/**"],\n    rules: { ${rules} },\n  },\n])\n`)
+    bad(VITE, block('"react-hooks/rules-of-hooks": "off"'), /rules-of-hooks/)
+    bad(VITE, block('"no-debugger": "off"'), /no-debugger/)
+    bad(VITE, block('"react-refresh/only-export-components": "warn"'), /only-export-components/)
+    // luật đo cỡ: bản cũ đã nêu tên luật / dùng configs.all (bật mọi luật lõi) ⇒ không biết chắc
+    bad(CFG(), CFG("  { files: ['src/**'], rules: { complexity: ['error', 30] } },"), /complexity/)
+    const all = VITE.replace('js.configs.recommended', 'js.configs.all')
+    bad(all, all.replace('])\n', `${KIT_BLOCK}])\n`), /max-lines-per-function|complexity/)
+    // luật plugin đã bật thẳng ở bản cũ ⇒ tắt cho một phần file là nới; luật khác cùng plugin chưa bật ở đâu ⇒ tắt không nới gì
+    const named = INLINE()
+    bad(named, named.replace('])\n', '  { files: ["src/ui/**"], rules: { "shadcn/no-inline-styles": "off" } },\n])\n'), /shadcn\/no-inline-styles/)
+    ok(named, named.replace('])\n', '  { files: ["src/ui/**"], rules: { "shadcn/no-z": "off" } },\n])\n'))
+  })
+  test('thêm vào khối cấu hình có sẵn: chỉ plugins/rules/name chưa có; files, ignores, khoá đã có, khối có "...", object chèn vào tuỳ chọn của luật ⇒ nới', () => {
+    const into = (prop) => VITE.replace('    languageOptions: {', `    ${prop}\n    languageOptions: {`)
+    ok(VITE, into('name: "chính",'))
+    ok(VITE, into('plugins: { shadcn },').replace('import globals', 'import { plugin as shadcn } from "@shadcn/lint"\nimport globals'))
+    bad(VITE, into('files: ["src/**"],'), /files\/ignores thu hẹp/)
+    bad(VITE, into('ignores: ["src/legacy/**"],'), /files\/ignores thu hẹp/)
+    bad(VITE, into('settings: { react: { version: "18" } },'), /settings/)
+    bad(VITE, into('rules: { "no-eval": "error" },'), /đã có "rules"/)
+    const spread = VITE.replace('    languageOptions: {', '    ...tseslint.configs.base,\n    languageOptions: {')
+    bad(spread, spread.replace('    languageOptions: {', '    plugins: { x },\n    languageOptions: {'), /có "\.\.\."/)
+    const opt = CFG("  { rules: { 'no-restricted-imports': ['error', { paths: ['a'] }] } },")
+    bad(opt, opt.replace("{ paths: ['a'] }", "{ paths: ['a'] },\n    { files: ['x'] }"), /ngoài danh sách khối cấu hình|không chắc/)
+  })
+  test('hằng luật dùng kiểu khác (gán thêm, truyền vào hàm, khai lại, có "...", Object bị đặt lại) ⇒ không thay, gặp code ⇒ nới', () => {
+    bad(VITE, NEN_WEB({ consts: `${SHADCN_RULES}shadcnRules["shadcn/no-raw-colors"] = "off"\n` }), /không chắc/)
+    bad(VITE, NEN_WEB({ consts: `${SHADCN_RULES}Object.assign(shadcnRules, { "no-console": "off" })\n` }), /không chắc/)
+    bad(VITE, NEN_WEB({ consts: SHADCN_RULES.replace('const shadcnRules = {', 'const shadcnRules = {\n  ...base,') }), /không chắc|khai biến/)
+    bad(VITE, NEN_WEB().replace('import globals', 'import Object from "globals-x"\nimport globals'), /không chắc/)
+    bad(VITE, NEN_WEB({ off: 'Object.fromEntries(Object.keys(shadcnRules).map((rule) => [rule.toUpperCase(), "off"]))' }), /khai biến|rules tính bằng hàm\/biến/)
+    bad(VITE, INLINE({ off: 'Object.fromEntries(["shadcn/no-raw-colors"].map((rule) => [rule, "off"]))' }), /rules tính bằng hàm\/biến|"Object" không phải import/)
+    bad(INLINE(), INLINE({ off: 'Object.fromEntries(["shadcn/no-raw-colors"].map((rule) => [rule, "off"]))' }), /rules tính bằng hàm\/biến/)
+    // thêm luật lõi (có thể đang bật qua preset) vào hằng ⇒ khối ui TẮT nó ⇒ nới
+    bad(NEN_WEB(), NEN_WEB({ consts: SHADCN_RULES.replace('}\n', '  "no-console": "error",\n}\n') }), /no-console/)
+  })
+  test('mẫu bỏ qua: chỉ tính mẫu bản cũ chưa bỏ qua; bản mới có "!", mã thoát, code ⇒ thêm thư mục máy sinh cũng nới; gỡ mẫu viết bằng mã thoát ⇒ nới', () => {
+    const own = CFG().replace("globalIgnores(['dist'])", "globalIgnores(['dist', 'src/legacy'])")
+    ok(own, own.replace("'src/legacy']", "'src/legacy', 'build', '.astro']"))
+    bad(own, own.replace("'src/legacy']", "'src/legacy', 'src/old']"), /"src\/old"/)
+    const bang = CFG("  { files: ['**/*.ts'], ignores: ['!keep.ts'], rules: { 'no-eval': 'error' } },")
+    bad(bang, bang.replace("globalIgnores(['dist'])", "globalIgnores(['dist', 'build'])"), /mẫu "!"/)
+    bad(CFG(), CFG().replace("globalIgnores(['dist'])", "globalIgnores(['dist', 'build', 'x\\u0041'])"), /không phải thư mục máy sinh|mã thoát/)
+    bad(CFG("  { files: ['a'], rules: { a: 'error' }, name: 'x\\u0041' },"), CFG("  { files: ['a'], rules: { a: 'error' }, name: 'x\\u0041' },").replace("globalIgnores(['dist'])", "globalIgnores(['dist', 'build'])"), /mã thoát/)
+    bad(CFG().replace("globalIgnores(['dist'])", "globalIgnores(['dist', '\\x21build'])"), CFG(), /"!"/)
+  })
+})
+
+describe('mọi file luật kit tự sinh phải qua được cổng của chính kit', () => {
+  const KIT = path.resolve(import.meta.dirname, '..', '..', 'kit', 'templates')
+  const templates = ['web/overlay/eslint.config.js', 'extension/overlay/eslint.config.js', 'desktop/overlay/frontend/eslint.config.js']
+  test('eslint.config.js của từng mẫu: là cấu hình ESLint đầu tiên của dự án ⇒ siết; mẫu web thay khung Vite ⇒ siết', () => {
+    for (const t of templates) {
+      const text = fs.readFileSync(path.join(KIT, ...t.split('/')), 'utf8')
+      assert.deepEqual([...judge({ 'package.json': '{"name":"app"}' }, { 'eslint.config.js': text }, [{ st: 'A', file: 'eslint.config.js' }])], [], t)
+    }
+    ok(VITE, fs.readFileSync(path.join(KIT, 'web', 'overlay', 'eslint.config.js'), 'utf8'))
+  })
+  test('ghép khối ESLint mà arch.mjs gen in ra vào mẫu web ⇒ siết', () => {
+    const tpl = fs.readFileSync(path.join(KIT, 'web', 'overlay', 'eslint.config.js'), 'utf8')
+    const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'rule-change-block-')))
+    roots.push(d)
+    fs.mkdirSync(path.join(d, 'docs'))
+    fs.writeFileSync(path.join(d, 'docs', 'arch.json'), ARCH(MODS))
+    const block = A.genFiles(d).blocks.find((b) => /ESLint/.test(b.title)).text
+    const end = tpl.lastIndexOf('])')
+    ok(tpl, `${tpl.slice(0, end)}${block}${tpl.slice(end)}`)
+  })
+  test('mốc rỗng arch.mjs baseline ghi (size {}, vi phạm cũ [], eslint-suppressions {}) và .claude/ui.json của mẫu ⇒ không file nào bị tính là nới', () => {
+    const ui = fs.readFileSync(path.join(KIT, 'web', 'overlay', '.claude', 'ui.json'), 'utf8').replace('{{PM_DEV}}', 'pnpm dev')
+    const head = {
+      'docs/arch-baseline.json': `${JSON.stringify({ base: 'abc1234', size: {}, depcruise: A.KNOWN_FILE, go: null, eslint: true }, null, 2)}\n`,
+      [A.KNOWN_FILE]: '[]\n', 'eslint-suppressions.json': '{\n}', '.claude/ui.json': ui,
+    }
+    assert.deepEqual([...judge({}, head, Object.keys(head).map((file) => ({ st: 'A', file })))], [])
+  })
+})
+
+describe('looseRuleChanges — file miễn trừ / mốc', () => {
+  const B = (o = {}) => `${JSON.stringify({ base: 'abc1234', size: {}, depcruise: A.KNOWN_FILE, go: null, eslint: true, ...o }, null, 2)}\n`
+  const one = (file, base, head, st = 'M') => judge(base, head, [{ st, file }]).get(file) ?? null
+  const V1 = { type: 'dependency', from: 'src/a.ts', to: 'src/b.ts', rule: { name: 'x', severity: 'error' } }
+  const V2 = { ...V1, to: 'src/c.ts' }
+  test('vi phạm import cũ (.dependency-cruiser-known-violations.json): rỗng, bớt mục, xoá ⇒ qua; thêm mục mà mốc trỏ tới, JSON hỏng ⇒ nới', () => {
+    const K = A.KNOWN_FILE
+    const known = (list) => `${JSON.stringify(list)}\n`
+    assert.equal(one(K, {}, { [K]: known([]), 'docs/arch-baseline.json': B() }, 'A'), null)
+    assert.match(one(K, {}, { [K]: known([V1]), 'docs/arch-baseline.json': B() }, 'A'), /thêm 1 vi phạm/)
+    // không có mốc trỏ tới thì file này không có tác dụng
+    assert.equal(one(K, {}, { [K]: known([V1]) }, 'A'), null)
+    const base = { [K]: known([V1, V2]), 'docs/arch-baseline.json': B() }
+    assert.equal(one(K, base, { ...base, [K]: known([V2]) }), null)
+    assert.match(one(K, base, { ...base, [K]: known([V1, V2, { ...V1, from: 'src/z.ts' }]) }), /thêm 1 vi phạm/)
+    assert.match(one(K, base, { ...base, [K]: known([V1, V1]) }), /thêm 1 vi phạm/)
+    assert.equal(one(K, base, { 'docs/arch-baseline.json': B() }, 'D'), null)
+    assert.match(one(K, base, { ...base, [K]: '[' }), /không phải JSON/)
+    assert.match(one(K, base, { ...base, [K]: '{}' }), /danh sách/)
+  })
+  test('mốc docs/arch-baseline.json: rỗng, bớt/hạ mục, xoá ⇒ qua; miễn file mới, nâng số dòng, trỏ file lạ, newFromRev mới, archLint mới, khoá lạ, hỏng ⇒ nới', () => {
+    const F = 'docs/arch-baseline.json'
+    const m = (before, after, st = 'M') => one(F, before === null ? {} : { [F]: before }, after === null ? {} : { [F]: after }, st)
+    assert.equal(m(null, B(), 'A'), null)
+    assert.equal(m(null, '{}', 'A'), null)
+    assert.match(m(null, B({ size: { 'src/big.ts': 500 } }), 'A'), /miễn trần dòng cho src\/big\.ts/)
+    const old = B({ size: { 'src/big.ts': 500, 'src/old.ts': 450 }, go: { newFromRev: 'abc1234', archLint: ['k1', 'k2'] } })
+    assert.equal(m(old, B({ size: { 'src/big.ts': 480 }, go: { newFromRev: 'abc1234', archLint: ['k2'] } })), null)
+    assert.equal(m(old, B({ size: { 'src/big.ts': 'nhiều' } })), null) // flow-check chỉ miễn số nguyên
+    assert.equal(m(old, null, 'D'), null)
+    assert.match(m(old, B({ size: { 'src/big.ts': 501 } })), /src\/big\.ts/)
+    assert.match(m(old, B({ size: { 'src/new.ts': 401 } })), /src\/new\.ts/)
+    assert.match(m(old, B({ depcruise: 'src/known.json' })), /trỏ tới file khác/)
+    assert.match(m(old, B({ go: { newFromRev: 'def5678', archLint: [] } })), /def5678/)
+    assert.match(m(null, B({ go: { newFromRev: 'abc1234', archLint: [] } }), 'A'), /abc1234/)
+    assert.match(m(old, B({ go: { newFromRev: 'abc1234', archLint: ['k3'] } })), /go-arch-lint/)
+    assert.match(m(old, B({ ignoreAll: true })), /khoá lạ "ignoreAll"/)
+    assert.match(m(old, B({ size: ['src/big.ts'] })), /"size" phải là object/)
+    assert.match(m(old, '['), /không phải JSON/)
+    assert.match(m(old, '[]'), /phải là một object/)
+    // vi phạm import cũ có sẵn nhưng chưa có mốc trỏ tới: thêm mốc trỏ tới nó là bắt đầu bỏ qua chúng
+    const K = A.KNOWN_FILE
+    assert.match(one(F, { [K]: `${JSON.stringify([V1])}\n` }, { [K]: `${JSON.stringify([V1])}\n`, [F]: B() }, 'A'), /thêm 1 vi phạm/)
+  })
+  test('eslint-suppressions.json: rỗng, hạ số đếm, bỏ mục, xoá ⇒ qua; thêm file/luật, nâng số, viết kiểu lạ, hỏng ⇒ nới (cả ở thư mục con)', () => {
+    const S = (o) => `${JSON.stringify(o, null, 2)}\n`
+    const s = (before, after, st = 'M', file = 'eslint-suppressions.json') => one(file, before === null ? {} : { [file]: before }, after === null ? {} : { [file]: after }, st)
+    assert.equal(s(null, '{\n}', 'A'), null)
+    assert.match(s(null, S({ 'src/a.ts': { complexity: { count: 1 } } }), 'A'), /bỏ qua 1 lỗi complexity ở src\/a\.ts/)
+    const old = S({ 'src/a.ts': { complexity: { count: 3 }, 'max-lines-per-function': { count: 1 } } })
+    assert.equal(s(old, S({ 'src/a.ts': { complexity: { count: 2 } } })), null)
+    assert.equal(s(old, null, 'D'), null)
+    assert.match(s(old, S({ 'src/a.ts': { complexity: { count: 4 } } })), /complexity/)
+    assert.match(s(old, S({ 'src/a.ts': { 'no-eval': { count: 1 } } })), /no-eval/)
+    assert.match(s(old, S({ 'src/b.ts': { complexity: { count: 1 } } })), /src\/b\.ts/)
+    assert.match(s(old, S({ 'src/a.ts': { complexity: { count: '1' } } })), /count viết kiểu lạ/)
+    assert.match(s(old, S({ 'src/a.ts': [] })), /viết kiểu lạ/)
+    assert.match(s(old, '{'), /không phải JSON/)
+    assert.match(s(null, S({ 'a.ts': { x: { count: 1 } } }), 'A', 'frontend/eslint-suppressions.json'), /bỏ qua 1 lỗi x/)
+  })
+  test('ca thật gonsheets-web: thêm arch.json + .dependency-cruiser.mjs sinh khớp + mốc rỗng + ui.json + sửa eslint.config.js ⇒ không file nào bị tính là nới', () => {
+    const tree = { 'docs/arch.json': ARCH(MODS), 'tsconfig.json': '{}' }
+    const g = gen(tree)
+    const head = {
+      ...tree, '.dependency-cruiser.mjs': g['.dependency-cruiser.mjs'], 'eslint.config.js': NEN_WEB(),
+      'docs/arch-baseline.json': `${JSON.stringify({ base: '80e7d940ec663dd2bd8854a7dcf596a38d388266', size: {}, depcruise: A.KNOWN_FILE, go: null, eslint: true }, null, 2)}\n`,
+      [A.KNOWN_FILE]: '[]', 'eslint-suppressions.json': '{\n}',
+      '.claude/ui.json': `${JSON.stringify({ start: 'pnpm dev --port {PORT}', url: 'http://localhost:{PORT}', routes: ['/'], states: [{ route: '/', s: 'S-01' }] }, null, 2)}\n`,
+    }
+    const changes = Object.keys(head).filter((f) => f !== 'tsconfig.json').map((file) => ({ st: file === 'eslint.config.js' ? 'M' : 'A', file }))
+    assert.deepEqual([...judge({ 'eslint.config.js': VITE, 'tsconfig.json': '{}' }, head, changes)], [])
   })
 })
