@@ -4,8 +4,8 @@
 //          KHÔNG hộp hỏi (ask) nào [chốt 2026-10-14: user no code luôn bấm Allow]: push thường lên nhánh chính cho qua; git merge mà nhánh đích nới
 //          luật — đổi file luật (kể cả .claude/flow.json, kit/checkers.json) theo hướng nới hoặc không chắc là siết (lib/rule-change.mjs: thêm module/luật
 //          vào docs/arch.json, hạ trần, file kit sinh lại khớp arch.json, thêm luật ESLint mức error ⇒ qua), hoặc thêm dòng tắt luật ngoài file máy sinh — ⇒ deny nhắn AI tự gỡ
-//          (không lối AI tự mở, không đẩy lệnh terminal sang user [chốt 2026-10-15]), chép repo "chỉ học" ⇒ deny, không so được
-//          diff base...<đích> ⇒ deny; pull ., cherry-pick, rebase, fetch ., push ., branch -f, update-ref, checkout -B, switch -C đưa nhánh vào main
+//          (không lối AI tự mở, không đẩy lệnh terminal sang user [chốt 2026-10-15]), không so được
+//          diff base...<đích> ⇒ deny (kiểm chép repo "chỉ học" đã tắt 2026-11-05 theo lệnh user: bắt nhầm dãy import/khai báo); pull ., cherry-pick, rebase, fetch ., push ., branch -f, update-ref, checkout -B, switch -C đưa nhánh vào main
 //          ⇒ qua đúng cổng như git merge) · stop (Stop) ·
 //          subagent-stop (SubagentStop: receipt + audit phạm vi làn)
 //   CLI  : stamp review <file.json> · stamp qa <file.md> · stamp test -- <lệnh…> · status      (chạy trong worktree)
@@ -889,21 +889,16 @@ function mergeDiff(info, base, sha) {
 
 const showName = (s) => String(s).replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, 80)
 
-// Có thể có thẻ chi-hoc không (docs/research ở thư mục làm việc hoặc trong cây của sha)? git lỗi ⇒ coi như có.
-function hasResearchDir(info, sha) {
-  return fs.existsSync(path.join(info.toplevel, 'docs', 'research')) || (git(info.dir, ['ls-tree', '-d', '--name-only', sha, 'docs/research']) ?? 'lỗi').trim() !== ''
-}
-
 const GUARD_OPENINGS = {
-  unknown: 'Chưa kiểm được nhánh sắp gộp có nới luật của dự án hay chép code từ repo chỉ-được-học hay không nên AI dừng lại, chưa gộp; AI sẽ kiểm lại rồi gộp sau.',
-  copy: 'Phần mới của nhánh này có đoạn giống code của repo mà dự án chỉ được đọc để học, không được chép, nên AI dừng lại; AI sẽ viết lại đoạn đó bằng cách của mình rồi gộp lại.',
-  missing: 'Chưa kiểm được nhánh này có chép code từ repo chỉ-được-học hay không nên AI dừng lại; AI sẽ khôi phục bản sao repo đó (hoặc báo bạn nếu không tự làm được) rồi gộp lại.',
+  unknown: 'Chưa kiểm được nhánh sắp gộp có nới luật của dự án hay không nên AI dừng lại, chưa gộp; AI sẽ kiểm lại rồi gộp sau.',
 }
 
-// Mọi merge target: so base...<target> (không phải base...HEAD). Trả deny khi không kiểm được (fail closed) hoặc chép repo chỉ-học;
+// Mọi merge target: so base...<target> (không phải base...HEAD). Trả deny khi không kiểm được (fail closed);
 // trả deny (mọi host) nhắn AI gỡ phần nới luật khi nhánh nới luật hoặc thêm dòng tắt luật; null khi sạch.
+// Kiểm chép repo "chỉ học" (lib/kho.mjs chiHocMatches) KHÔNG còn chạy ở đây: tắt 2026-11-05 theo lệnh user — so theo khung câu lệnh
+// (tên biến, chuỗi bị bỏ) nên mọi dãy import / khai báo interface đều "giống" một repo lớn (RuntoTalk: 14 đoạn khớp nhầm Sokuji).
 async function mergeGuards(info, base, targets) {
-  const stops = [] // { kind: 'unknown'|'copy'|'missing', msg }
+  const stops = [] // { kind: 'unknown', msg }
   const loosen = [] // việc nới luật, mỗi mục một câu đời thường
   const multi = targets.length > 1
   const safeName = (t) => (SAFE_REF.test(t) ? t : '(tên có ký tự lạ)')
@@ -940,29 +935,8 @@ async function mergeGuards(info, base, targets) {
       if (isNoteJson(info, sha, s.file)) continue
       loosen.push(`thêm dòng tắt luật ở ${s.file}:${s.line} (${s.what})${at}`)
     }
-    // chép repo chỉ-học: chỉ khi dự án có thẻ chi-hoc (chiHocMatches trả ngay khi không có thẻ); lỗi bất ngờ ⇒ chặn nếu dự án có docs/research
-    let hoc
-    try {
-      hoc = (await import('./lib/kho.mjs')).chiHocMatches(info, base, sha)
-    } catch (e) {
-      log(`chiHocMatches ${target}: ${e?.stack ?? e}`)
-      if (hasResearchDir(info, sha)) stops.push({ kind: 'missing', msg: `phần kiểm chép code từ repo chỉ-học bị lỗi (${showName(e?.message ?? e)}) nên chưa biết nhánh ${showName(target)} có chép hay không` })
-      continue
-    }
-    if (hoc.matches.length > 0) {
-      const shown = hoc.matches.slice(0, 8).map((x) => `${x.file}:${x.line}-${x.end_line} (${x.so_dong} dòng, giống ${Math.round(x.ty_le * 100)}% repo chỉ-học "${x.the}")`).join('; ')
-      stops.push({ kind: 'copy', msg: `nhánh ${showName(target)} có ${hoc.matches.length} đoạn giống repo chỉ-học: ${shown}${hoc.matches.length > 8 ? `; …và ${hoc.matches.length - 8} đoạn nữa` : ''} ` +
-        '— tự viết lại theo cách của dự án (đổi tên biến hay khoảng trắng thì vẫn bị bắt)' })
-    }
-    for (const x of hoc.missing) {
-      stops.push({ kind: 'missing', msg: `repo chỉ-học "${x.the}": ${x.ly_do}${x.lenh ? ` — khôi phục bằng: ${x.lenh}` : ''}` })
-    }
-    if (hoc.loi) stops.push({ kind: 'missing', msg: `không so được với repo chỉ-học: ${hoc.loi}` })
   }
-  if (stops.length > 0) {
-    const kind = ['unknown', 'copy', 'missing'].find((k) => stops.some((s) => s.kind === k))
-    return permission('deny', `${GUARD_OPENINGS[kind]}\n${stops.map((s) => `- ${s.msg}`).join('\n')}`)
-  }
+  if (stops.length > 0) return permission('deny', `${GUARD_OPENINGS.unknown}\n${stops.map((s) => `- ${s.msg}`).join('\n')}`)
   if (loosen.length === 0) return null
   const list = loosen.slice(0, 10).map((s) => `- ${s}`).join('\n') + (loosen.length > 10 ? `\n- …và ${loosen.length - 10} mục nữa` : '')
   const names = targets.map(safeName).join(' ')

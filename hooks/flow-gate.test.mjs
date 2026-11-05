@@ -3215,40 +3215,19 @@ export function findPath(g, a, b) {
     return { fx, slug: card.slug, env: { FLOW_CHI_HOC_DIR: cache } }
   }
 
-  test('đoạn chép (đã đổi tên biến, khoảng trắng) từ repo chỉ-học ⇒ deny kèm file:dòng + thẻ, mọi host', () => {
-    const { fx, slug, env } = hocFx({ 'src/route.js': DISGUISED })
-    for (const sh of [claudeSh, codexSh, devinSh]) {
-      const reason = assertDeny(sh(fx, fx.main, MERGE, env))
-      assertPlainOpening(reason)
-      assert.match(reason, /src\/route\.js:\d+/)
-      assert.ok(reason.includes(slug), reason)
-    }
+  // Kiểm chép chỉ-học đã TẮT ở cổng gộp (user, 2026-11-05: bắt nhầm dãy import/khai báo) — cổng không còn chặn vì nó.
+  test('đã tắt: đoạn giống repo chỉ-học, có hay chưa có bản sao ⇒ gộp vẫn qua, mọi host', () => {
+    const copied = hocFx({ 'src/route.js': DISGUISED })
+    for (const sh of [claudeSh, codexSh, devinSh]) assertPass(sh(copied.fx, copied.fx.main, MERGE, copied.env))
+    const noCopy = hocFx({ 'src/ok.js': UNRELATED }, { lay: false })
+    assertPass(claudeSh(noCopy.fx, noCopy.fx.main, MERGE, noCopy.env))
   })
 
-  test('FAIL CLOSED: có thẻ chỉ-học mà chưa có bản sao ⇒ deny kèm lệnh khôi phục kho.mjs lay', () => {
-    const { fx, slug, env } = hocFx({ 'src/ok.js': UNRELATED }, { lay: false })
-    for (const sh of [claudeSh, codexSh]) {
-      const reason = assertDeny(sh(fx, fx.main, MERGE, env))
-      assertPlainOpening(reason)
-      assert.match(reason, /kho\.mjs lay /)
-      assert.ok(reason.includes(slug), reason)
-      assert.match(reason, /chưa có bản sao/)
-    }
-  })
-
-  test('có bản sao nhưng nhánh chỉ thêm code khác hẳn ⇒ qua; thẻ lay-dung (MIT) hoặc không có thẻ ⇒ bỏ qua như cũ', () => {
-    const ok = hocFx({ 'src/ok.js': UNRELATED })
-    assertPass(claudeSh(ok.fx, ok.fx.main, MERGE, ok.env))
-    const mit = hocFx({ 'src/route.js': DISGUISED }, { licence: 'MIT', lay: false })
-    assertPass(claudeSh(mit.fx, mit.fx.main, MERGE, mit.env))
-    const none = ruleFx({ feat: { 'src/route.js': DISGUISED } })
-    assertPass(claudeSh(none, none.main, MERGE))
-  })
-
-  test('chép chỉ-học thắng việc nới luật: cùng lúc có cả hai ⇒ deny nêu đoạn chép', () => {
+  test('đã tắt: nhánh vừa giống repo chỉ-học vừa nới luật ⇒ chỉ chặn vì nới luật', () => {
     const { fx, env } = hocFx({ 'src/route.js': DISGUISED, 'eslint.config.js': 'export default []\n' })
     const reason = assertDeny(claudeSh(fx, fx.main, MERGE, env))
-    assert.match(reason, /src\/route\.js:\d+/)
+    assert.match(reason, /eslint\.config\.js/)
+    assert.doesNotMatch(reason, /src\/route\.js:\d+/)
   })
 })
 
