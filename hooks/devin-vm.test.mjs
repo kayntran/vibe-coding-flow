@@ -490,6 +490,56 @@ describe('up (AC-05, 06, 14)', () => {
     api.fail = (r) => (r.method === 'POST' && r.path.endsWith('/sessions') ? new Response('bad platform https://leak.example/?sig=ZZZ', { status: 400 }) : null)
     await assert.rejects(D.up(ctx, { dir: mkRepo() }), (e) => e instanceof D.ToolError && !/leak\.example|ZZZ/.test(e.message))
   })
+  describe('Devin không cho dùng chế độ', () => {
+    // Thân lỗi thật của Devin (đo 05/11) · chế độ hết hẳn trong danh sách của Devin trả 422
+    const refuse = (api, refused, status = 400) => {
+      api.fail = (r) => {
+        if (r.method !== 'POST' || !r.path.endsWith('/sessions')) return null
+        const m = JSON.parse(r.body).devin_mode ?? null
+        if (!refused.includes(m)) return null
+        return new Response(JSON.stringify({ type: 'about:blank', title: 'Bad Request', status, detail: `devin_mode '${m}' is not available for this user. Available modes: normal, fast, fusion, lite, ultra`, instance: '/v3/organizations/org-x/sessions' }), { status })
+      }
+    }
+    const modes = (api) => api.posts().map((p) => JSON.parse(p.body).devin_mode ?? null)
+
+    test('SWE-2 bị gỡ ⇒ tự tạo bằng lite, giữ nguyên các trường khác, chỉ một máy, ghi một dòng log', async () => {
+      const { ctx, api } = mkCtx()
+      refuse(api, ['swe-2-medium'])
+      const r = await D.up(ctx, { dir: mkRepo({ a: '1' }, { origin: 'https://github.com/kayntran/demo-app.git' }), os: 'windows' })
+      assert.equal(r.created, true)
+      assert.deepEqual(modes(api), ['swe-2-medium', 'lite'])
+      const body = JSON.parse(api.posts()[1].body)
+      assert.deepEqual([body.platform, body.repos, body.title], ['windows', ['kayntran/demo-app'], 'devin-vm demo-app windows'])
+      assert.equal(api.sessions.get(r.id).body.devin_mode, 'lite')
+      assert.equal(fs.readFileSync(ctx.logFile, 'utf8').split('\n').filter((l) => /\tmode-fallback\tlite\t/.test(l)).length, 1)
+    })
+    test('chế độ rẻ cũng bị từ chối ⇒ thử tiếp rồi bỏ trường; không bao giờ thử chế độ đắt', async () => {
+      const { ctx, api } = mkCtx()
+      refuse(api, ['swe-2-medium', 'lite', 'normal'])
+      await D.up(ctx, { dir: mkRepo() })
+      assert.deepEqual(modes(api), ['swe-2-medium', 'lite', 'normal', null])
+      assert.ok(!('devin_mode' in JSON.parse(api.posts()[3].body)), 'lần cuối bỏ hẳn trường')
+    })
+    test('Devin bỏ chế độ khỏi danh sách (422) ⇒ cũng thử tiếp', async () => {
+      const { ctx, api } = mkCtx()
+      refuse(api, ['swe-2-medium'], 422)
+      await D.up(ctx, { dir: mkRepo() })
+      assert.deepEqual(modes(api), ['swe-2-medium', 'lite'])
+    })
+    test('từ chối cả khi bỏ trường ⇒ báo lỗi, không ghi máy vào sổ', async () => {
+      const { ctx, api } = mkCtx()
+      refuse(api, ['swe-2-medium', 'lite', 'normal', null])
+      await assert.rejects(D.up(ctx, { dir: mkRepo() }), (e) => e instanceof D.ToolError && /devin_mode/.test(e.message))
+      assert.equal(api.posts().length, 4)
+      assert.deepEqual(D.readRegistry(ctx), {})
+    })
+    test('lỗi 400 không phải vì chế độ ⇒ không thử lại', async () => {
+      const { ctx, api } = mkCtx()
+      api.fail = (r) => (r.method === 'POST' && r.path.endsWith('/sessions') ? new Response('{"detail":"platform \'x\' is not configured for this org"}', { status: 400 }) : null)
+      await assert.rejects(D.up(ctx, { dir: mkRepo() }), D.ToolError)
+      assert.equal(api.posts().length, 1)
+    })
+  })
   test('Windows: chỉ bật âm thanh khi devin.json audio / --audio, đúng một lần (AC-14); Windows không cài Node', async () => {
     const { ctx, ssh } = mkCtx()
     const repo = mkRepo({ 'package.json': '{"devDependencies":{"electron":"1"}}' })

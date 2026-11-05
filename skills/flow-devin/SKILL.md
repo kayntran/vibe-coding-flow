@@ -59,7 +59,7 @@ Bước 8 không được bỏ, kể cả khi bước trước lỗi.
 
 **Giữ máy thức:** máy do công cụ tạo bị Devin cho ngủ sau ~5 phút không có tin nhắn. Lệnh ssh, app đang chạy hay cổng
 chuyển đều không tính là hoạt động. Ngủ thì app trên máy ảo mất. Vì vậy:
-- `job` và `forward` tự gửi tin "giữ máy" bằng SWE-2 cứ 4 phút một lần;
+- `job` và `forward` tự gửi tin "giữ máy" cứ 4 phút một lần;
 - `run`, `gui`, `sync` gửi khi lần gửi trước đã quá 3 phút.
 
 Lỡ bị ngắt giữa chừng thì cũng nhờ chính cơ chế này mà máy tự ngủ sau ~5 phút.
@@ -107,7 +107,8 @@ Thêm dòng `Nơi chạy: máy ảo Devin <os> (<id>)` hoặc `Nơi chạy: máy
   `job`) thì không có giữ chỗ ⇒ đừng chạy song song với job khác của cùng dự án.
 - User nói "xoá máy ảo của dự án" ⇒ `rm --dir <repo> [--os <os>]`, kể user rằng code và khoá trên máy đó mất theo.
   Devin bỏ qua lệnh xoá khi máy đang ngủ, nên công cụ tự đánh thức máy trước (~30 s) rồi mới xoá.
-- Chỉ dùng SWE-2 để bật máy. Không giao việc cho AI của Devin, không gửi prompt nào khác.
+- Công cụ tự chọn chế độ rẻ nhất Devin còn cho khi tạo máy (`swe-2-medium` → `lite` → `normal` → mặc định; đổi chế độ thì
+  ghi `mode-fallback` vào `devin-vm.log`). Không giao việc cho AI của Devin, không gửi prompt nào khác.
 - Phanh hạn mức: hạn mức NGÀY của Devin còn dưới 20% ⇒ `where` trả `runner:"local"` (kèm giờ hồi, giờ Việt Nam) và
   `up` từ chối bật/đánh thức máy, nên `job` tự chạy máy user. Đổi ngưỡng bằng biến `DEVIN_VM_MIN_DAILY`. `status` cho
   thấy `quota` (`daily`/`weekly` %, giờ hồi); không đọc được số thì không chặn. `devin-vm.log` ghi % ngày lúc bắt đầu và

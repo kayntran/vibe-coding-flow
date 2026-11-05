@@ -439,19 +439,40 @@ export function quotaBlock(ctx, q) {
   return `Devin còn ${q.daily}% hạn mức hôm nay (dưới ${min}%)${vn ? `, hồi lúc ${vn}` : ''} — chạy trên máy bạn`
 }
 
-// Dựng body tạo máy (AC-06): luôn SWE-2, không giao việc; nối kho GitHub chỉ khi origin là github.com/kayntran/*.
+// Thứ tự chọn chế độ khi tạo máy, rẻ trước (máy ảo chỉ để chạy lệnh qua ssh). Đo 05/11: Devin đã gỡ swe-2-* khỏi tài khoản (400 "not available for this user"), còn normal/fast/fusion/lite/ultra.
+// Giữ swe-2-medium đứng đầu: bị từ chối không tốn gì và không tạo máy, được mở lại thì tự về miễn phí. null = bỏ trường (chế độ mặc định của tổ chức).
+// Cố ý không có fast (đắt gấp 4 theo tài liệu), fusion, ultra.
+const CREATE_MODES = ['swe-2-medium', 'lite', 'normal', null]
+
+// Dựng body tạo máy (AC-06): không giao việc; nối kho GitHub chỉ khi origin là github.com/kayntran/*.
 export function createBody({ os: osName, name, slug }) {
   return {
     prompt: CREATE_PROMPT,
     platform: osName,
-    devin_mode: 'swe-2-medium',
+    devin_mode: CREATE_MODES[0],
     title: `devin-vm ${name} ${osName}`,
     ...(slug ? { repos: [`${slug.owner}/${slug.repo}`] } : {}),
   }
 }
 
+// POST tới khi có chế độ được nhận. Chỉ thử tiếp khi lỗi nói về devin_mode (Devin chưa tạo máy); lỗi khác ném ngay.
+async function postSession(ctx, login, body) {
+  for (const [i, mode] of CREATE_MODES.entries()) {
+    const { devin_mode: _first, ...rest } = body
+    const payload = mode ? { ...rest, devin_mode: mode } : rest
+    try {
+      return (await http(ctx, login, 'POST', `${API}/${login.org}/sessions`, { body: JSON.stringify(payload), headers: { 'Content-Type': 'application/json' } })).res
+    } catch (e) {
+      const next = CREATE_MODES[i + 1]
+      if (next === undefined || !(e instanceof ToolError) || !/\bdevin_mode\b/.test(e.message)) throw e
+      ctx.warn(`Devin không cho dùng chế độ ${mode} — thử ${next ?? 'mặc định của tổ chức'}`)
+      appendLog(ctx, { cmd: 'mode-fallback', id: next ?? 'default' })
+    }
+  }
+}
+
 async function createSession(ctx, login, body) {
-  const { res } = await http(ctx, login, 'POST', `${API}/${login.org}/sessions`, { body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } })
+  const res = await postSession(ctx, login, body)
   const j = await jsonOf(res)
   const id = fullId(j.session_id)
   if (!ID_RE.test(id)) throw new ToolError('Devin không trả mã máy ảo hợp lệ')
