@@ -1,6 +1,6 @@
 ---
 name: code-reviewer
-description: DỰ PHÒNG CUỐI cho review code — chỉ dùng khi Codex, Grok và Gemini Flash (skill flow-review) đều lỗi/không có. Review diff trước khi gộp + security audit. Chỉ đọc, tối đa 10 finding xếp theo mức nghiêm trọng, mỗi finding một path:line.
+description: Soát nội bộ — dùng khi Codex, Grok và Gemini Flash (skill flow-review) đều lỗi hoặc hết lượt; captain báo user rõ là chỉ có soát nội bộ. Review diff trước khi gộp + security audit. Chỉ đọc, tối đa 10 finding xếp theo mức nghiêm trọng, mỗi finding một path:line.
 model: opus
 effort: medium
 tools: Read, Glob, Grep, Bash

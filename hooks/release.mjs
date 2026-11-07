@@ -7,18 +7,19 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { EXIT, dropDueMarks, formatLogs, formatPreflight, parseSince, preflight, readLogs, readWorkerName, releaseCf, releaseVps, rollbackCf } from './lib/release.mjs'
+import { EXIT, dropDueMarks, formatLogs, formatPreflight, parseSince, preflight, preflightExit, readLogs, readWorkerName, releaseCf, releaseVps, rollbackCf } from './lib/release.mjs'
 import { readState } from './lib/release-state.mjs'
 
 const HOOKS_DIR = path.dirname(fileURLToPath(import.meta.url))
 
 const USAGE = `release.mjs — phát hành, quay lại, xem lỗi sau phát hành
-  preflight [--dir D] [--zap-exit N] [--has-data] [--first-release]
-      Kiểm trước khi phát hành: dấu review/QA/test, khoá trong bản build, kết quả quét bảo mật (--zap-exit = mã thoát của zap-scan),
-      đã thử quay lại (chỉ đòi khi đã phát hành từ 2 lần), sao lưu. Còn mục thiếu ⇒ exit 1 kèm từng mục bằng lời.
+  preflight [--dir D] [--zap-exit N] [--has-data] [--first-release] [--dong-y]
+      Kiểm trước khi phát hành: khoá trong bản build, kết quả quét bảo mật (--zap-exit = mã thoát của zap-scan), đã thử quay lại (chỉ đòi
+      khi đã phát hành từ 2 lần), sao lưu: còn mục thiếu ⇒ exit 1 kèm từng mục bằng lời. Thiếu dấu review/QA/test ⇒ exit 4; chỉ thêm
+      --dong-y sau khi user đã gật trong chat.
       Repo cho sửa thẳng nhánh chính (.claude/allow-direct-edit) không có dấu để kiểm ⇒ in cảnh báo (không chặn).
-  cf [--dir D] [--url https://…] [--worker tên] [--message m] [--zap-exit N] [--has-data] [--first-release]
-      Cloudflare Workers: build (nếu package.json có script build) → tự chạy preflight trên bản vừa build (cùng cờ; chặn ⇒ exit 1, chưa tải gì)
+  cf [--dir D] [--url https://…] [--worker tên] [--message m] [--zap-exit N] [--has-data] [--first-release] [--dong-y]
+      Cloudflare Workers: build (nếu package.json có script build) → tự chạy preflight trên bản vừa build (cùng cờ; chặn ⇒ exit 1, cần gật ⇒ exit 4, chưa tải gì)
       → tải đúng bản đó lên → gắn bản mới vào deployment ở 0% (bản cũ giữ 100%) → xác nhận địa chỉ thật đang phục vụ đúng bản mới (header
       x-flow-version của Worker == mã bản mới, dò tối đa 10 lần × 2 giây; không xác nhận được ⇒ gỡ bản mới, exit 1) → chạy bài thử nhanh
       (@smoke) nhắm đúng bản mới → đạt mới mở 100%; trượt ⇒ gỡ bản mới, bản cũ giữ 100%. Trước khi mở/gỡ đều đọc lại deployment: có lượt
@@ -28,19 +29,19 @@ const USAGE = `release.mjs — phát hành, quay lại, xem lỗi sau phát hàn
       Cloudflare Workers: quay về bản trước (wrangler rollback), thử nhanh lại. Dữ liệu không quay theo.
       --worker chỉ cần khi wrangler.jsonc không có "name".
   vps --mode symlink|docker --host user@máy --root /đường/dẫn [--dist dist] [--service tên] [--sudo] [--sha mã] [--keep 3]
-      [--url https://…] [--rollback] [--run] [--zap-exit N] [--has-data] [--first-release]
-      Không có --run: chỉ in lệnh (phát hành, quay lại một lệnh, liệt kê bản cũ). Có --run: tự chạy preflight (cùng cờ; chặn ⇒ exit 1,
+      [--url https://…] [--rollback] [--run] [--zap-exit N] [--has-data] [--first-release] [--dong-y]
+      Không có --run: chỉ in lệnh (phát hành, quay lại một lệnh, liệt kê bản cũ). Có --run: tự chạy preflight (cùng cờ; chặn ⇒ exit 1, cần gật ⇒ exit 4,
       chưa đụng máy chủ) rồi chạy thật qua ssh và thử nhanh. --rollback --run không qua preflight (cứu hộ).
   logs [--since 24h|7d|90m] [--dir D] [--worker tên] [--account id] [--project-ref mã] [--host …] [--root …] [--service …] [--mode …]
       Đọc nhật ký lỗi theo nơi chạy app (logs.source trong .claude/release.json) và kể bằng lời.
 --first-release chỉ có nghĩa với cf (cho phép tạo Worker lần đầu); preflight và vps nhận cờ này cho tương thích nhưng không dùng.
-exit: 0 đạt · 1 không đạt/chặn/dùng sai · 3 thiếu công cụ hoặc điều kiện (kèm cách xử lý)`
+exit: 0 đạt · 1 không đạt/chặn/dùng sai · 3 thiếu công cụ hoặc điều kiện (kèm cách xử lý) · 4 cần user gật`
 
 const SPEC = {
-  preflight: { value: ['dir', 'zap-exit'], bool: ['has-data', 'first-release'] },
-  cf: { value: ['dir', 'url', 'worker', 'message', 'zap-exit'], bool: ['has-data', 'first-release'] },
+  preflight: { value: ['dir', 'zap-exit'], bool: ['has-data', 'first-release', 'dong-y'] },
+  cf: { value: ['dir', 'url', 'worker', 'message', 'zap-exit'], bool: ['has-data', 'first-release', 'dong-y'] },
   rollback: { value: ['dir', 'url', 'worker', 'message', 'version-id'], bool: [] },
-  vps: { value: ['dir', 'url', 'mode', 'host', 'root', 'dist', 'service', 'sha', 'keep', 'zap-exit'], bool: ['sudo', 'rollback', 'run', 'has-data', 'first-release'] },
+  vps: { value: ['dir', 'url', 'mode', 'host', 'root', 'dist', 'service', 'sha', 'keep', 'zap-exit'], bool: ['sudo', 'rollback', 'run', 'has-data', 'first-release', 'dong-y'] },
   logs: { value: ['dir', 'since', 'worker', 'account', 'project-ref', 'host', 'root', 'service', 'mode'], bool: [] },
 }
 
@@ -123,12 +124,12 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
     zapExit = Number(o['zap-exit'])
   }
   // Cờ của preflight; cf và vps --run tự chạy preflight với đúng các cờ này trước khi đụng Cloudflare/máy chủ.
-  const gate = { hooksDir: deps.hooksDir ?? HOOKS_DIR, zapExit, hasData: !!o['has-data'], firstRelease: !!o['first-release'] }
+  const gate = { hooksDir: deps.hooksDir ?? HOOKS_DIR, zapExit, hasData: !!o['has-data'], firstRelease: !!o['first-release'], accepted: !!o['dong-y'] }
   try {
     if (cmd === 'preflight') {
       const r = preflight({ dir, state: readState(dir, so), now, run, ...gate })
       print(formatPreflight(r))
-      return r.ok ? EXIT.OK : EXIT.FAIL
+      return preflightExit(r)
     }
     if (cmd === 'cf') {
       const r = releaseCf({ dir, url: o.url, worker: o.worker, message: o.message, run, now, clock, sleep: deps.sleep, say: (s) => err.write(`${s}\n`), stateOpts: so, ...gate })

@@ -6,7 +6,7 @@ viết thêm một migration sửa tiến (forward-fix) hoặc khôi phục từ
 ## Luật migration (để lúc nào cũng sửa tiến được)
 - Migration chỉ **thêm** (bảng, cột, chỉ mục). Cần bỏ cái cũ ⇒ làm ở bản sau, khi không còn code nào dùng nó
   ("mở rộng rồi mới thu hẹp").
-- Migration xoá/đổi dữ liệu ⇒ cần sao lưu trước và user gật bằng câu đời thường (SKILL bước 6).
+- Migration xoá/đổi dữ liệu ⇒ cần sao lưu trước và user gật bằng câu đời thường (skill `flow-backup`).
 - Khoá `service_role`/`sb_secret_` không bao giờ vào code chạy ở trình duyệt.
 
 ## Phát hành
@@ -19,7 +19,7 @@ viết thêm một migration sửa tiến (forward-fix) hoặc khôi phục từ
 
 ## Sai sau khi đã áp
 Nói user: "dữ liệu không tự quay lại được". Rồi theo thứ tự: (1) viết migration mới sửa lỗi, thử ở project thử, áp lên;
-(2) nặng quá thì khôi phục từ bản sao lưu — chỉ khi đã có (SKILL bước 6), và hỏi user trước vì sẽ ghi vào dữ liệu thật.
+(2) nặng quá thì khôi phục từ bản sao lưu — chỉ khi đã có (skill `flow-backup`), và hỏi user trước vì sẽ ghi vào dữ liệu thật.
 Quay lại phần mềm của app (không phải database) dùng công thức của nền chạy app.
 
 ## Xem lỗi
@@ -28,4 +28,4 @@ Quay lại phần mềm của app (không phải database) dùng công thức c�
 Sức khoẻ database: `supabase inspect db cache-hit|locks|long-running-queries`.
 
 ## Gói miễn phí và sao lưu
-Gói miễn phí không có sao lưu tự động. Có dữ liệu thật ⇒ chỉ khuyên nâng Pro (nói phí), không tự sao lưu (SKILL bước 6).
+Gói miễn phí không có sao lưu tự động. Có dữ liệu thật ⇒ chỉ khuyên nâng Pro (nói phí), không tự sao lưu (skill `flow-backup`).

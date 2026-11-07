@@ -12,6 +12,7 @@ import { promisify } from 'node:util'
 import {
   EXIT, OVERRIDE_HEADER, PROBE_SRC, VERSION_HEADER, dropDueMarks, findBin, formatLogs, formatPreflight, groupErrors, parseGateStatus, parseLogLines, parseSince,
   parseVersionId, pkgManager, preflight, readLogs, readWorkerName, releaseCf, releaseVps, rollbackCf, scrub, vpsPlan,
+  preflightExit,
 } from './release.mjs'
 import { readState, statePath, writeState } from './release-state.mjs'
 
@@ -173,8 +174,8 @@ function pre(over = {}) {
   const { run, calls } = fakeRun(f, (c) => (c.args[0]?.endsWith('flow-gate.mjs') ? gate : c.args[0]?.endsWith('flow-check.mjs') ? sb : {}))
   const state = 'state' in over ? over.state : { v: 1, rollbackTested: true, backup: { choice: 'off' } }
   const dir = over.setup?.(f) ?? f.dir // setup(f) có thể dựng .git / .claude/allow-direct-edit và trả thư mục dự án khác f.dir
-  const r = preflight({ dir, state, now: NOW, run, hooksDir: HOOKS_DIR, zapExit: over.zapExit, hasData: over.hasData, firstRelease: over.firstRelease })
-  return { r, calls, codes: r.blockers.map((b) => b.code) }
+  const r = preflight({ dir, state, now: NOW, run, hooksDir: HOOKS_DIR, zapExit: over.zapExit, hasData: over.hasData, firstRelease: over.firstRelease, accepted: over.accepted })
+  return { r, calls, codes: r.blockers.map((b) => b.code), needCodes: r.needOk.map((m) => m.code) }
 }
 
 test('preflight: mọi thứ đạt ⇒ ok, không mục thiếu', () => {
@@ -193,12 +194,25 @@ test('parseGateStatus: có / không đòi ⇒ đạt, không ⇒ thiếu, diff r
   assert.equal(parseGateStatus('lạ').valid, false)
 })
 
-test('preflight: thiếu dấu review/qa/test ⇒ từng mục một câu', () => {
-  const { r, codes } = pre({ gate: { stdout: 'pid: x\nreview: không\nqa: không (diff có UI nhưng N/A)\ntest: không\n' } })
-  assert.deepEqual(codes, ['gate-review', 'gate-qa', 'gate-test'])
-  assert.match(r.blockers[1].text, /diff có UI/)
+test('preflight: thiếu dấu review/qa/test ⇒ cần user gật, không phải chặn; đã gật ⇒ đạt và vẫn ghi cảnh báo', () => {
+  const gate = { stdout: 'pid: x\nreview: không\nqa: không (diff có UI nhưng N/A)\ntest: không\n' }
+  const { r, codes } = pre({ gate })
+  assert.deepEqual(codes, [])
+  assert.deepEqual(r.needOk.map((m) => m.code), ['gate-review', 'gate-qa', 'gate-test'])
+  assert.match(r.needOk[1].text, /diff có UI/)
   assert.equal(r.ok, false)
-  assert.match(formatPreflight(r)[0], /còn 3 mục/)
+  assert.equal(preflightExit(r), 4)
+  assert.match(formatPreflight(r).join('\n'), /Cần user gật — còn 3 mục:/)
+  const yes = pre({ gate, accepted: true }).r
+  assert.equal(yes.ok, true)
+  assert.equal(preflightExit(yes), 0)
+  assert.equal(yes.warnings.length, 3)
+})
+
+test('preflight: đã gật vẫn không qua được blocker an toàn (quét bảo mật mức cao)', () => {
+  const r = pre({ gate: { stdout: 'pid: x\nreview: không\nqa: có\ntest: có\n' }, zapExit: 1, accepted: true }).r
+  assert.equal(r.ok, false)
+  assert.equal(preflightExit(r), 1)
 })
 
 test('preflight: diff rỗng (đã gộp) ⇒ không đòi dấu, có ghi chú', () => {
@@ -229,15 +243,16 @@ test('K5 preflight: repo có .claude/allow-direct-edit và không có thay đổ
   const c = pre({ gate: { stdout: GATE_OK }, setup: (f) => { directEdit(f); return f.dir } })
   assert.deepEqual(c.r.warnings, [])
   const d = pre({ gate: { stdout: 'pid: x\nreview: không\nqa: có\ntest: có\n' }, setup: (f) => { directEdit(f); return f.dir } })
-  assert.deepEqual(d.codes, ['gate-review'], 'cổng không đổi')
+  assert.deepEqual(d.r.needOk.map((m) => m.code), ['gate-review'], 'dấu vẫn được kiểm')
   // không phải repo git (không có .git) ⇒ không đoán
   const e = pre({ gate: EMPTY_GATE })
   assert.deepEqual(e.r.warnings, [])
 })
 
-test('preflight: flow-gate lỗi (không phải git) ⇒ chặn, không coi là đạt', () => {
-  const { codes } = pre({ gate: { status: 1, stderr: 'Không phải git repo.' } })
-  assert.deepEqual(codes, ['gate-unreadable'])
+test('preflight: flow-gate lỗi (không phải git) ⇒ cần user gật, không coi là đạt', () => {
+  const { r } = pre({ gate: { status: 1, stderr: 'Không phải git repo.' } })
+  assert.deepEqual(r.needOk.map((m) => m.code), ['gate-unreadable'])
+  assert.equal(r.ok, false)
 })
 
 test('preflight: secret-build chạy riêng checker quét build (file checkers tạm chỉ có internal secret-scan-build)', () => {
@@ -287,21 +302,32 @@ test('preflight: kết quả zap-scan — 1 và 3 chặn, 2 cảnh báo, 0/chưa
 // K3: nghiệm thu thật bị chặn ở lần 2 ("Chưa thử quay lại") dù sau lần 1 chỉ có MỘT bản nên không thể quay lại.
 // Giờ chỉ đòi khi release.json ghi đã có ≥ 2 lần phát hành (đếm bằng releaseCount; file cũ suy từ lastRelease).
 test('K3 preflight: chưa thử quay lại chỉ chặn khi đã phát hành ≥ 2 lần; chưa/mới 1 lần (kể cả file cũ không có releaseCount) thì không', () => {
-  assert.deepEqual(pre({ state: null }).codes, [], 'chưa có release.json = chưa phát hành lần nào')
-  assert.deepEqual(pre({ state: { v: 1, rollbackTested: false } }).codes, [])
-  assert.deepEqual(pre({ state: { v: 1, rollbackTested: false, releaseCount: 1 } }).codes, [])
-  assert.deepEqual(pre({ state: { v: 1, rollbackTested: false, lastRelease: { at: new Date(NOW - DAY).toISOString(), version: ID, smoke: 'pass' } } }).codes, [], 'file cũ có lastRelease ⇒ suy ra 1 lần')
+  assert.deepEqual(pre({ state: null }).needCodes, [], 'chưa có release.json = chưa phát hành lần nào')
+  assert.deepEqual(pre({ state: { v: 1, rollbackTested: false } }).needCodes, [])
+  assert.deepEqual(pre({ state: { v: 1, rollbackTested: false, releaseCount: 1 } }).needCodes, [])
+  assert.deepEqual(pre({ state: { v: 1, rollbackTested: false, lastRelease: { at: new Date(NOW - DAY).toISOString(), version: ID, smoke: 'pass' } } }).needCodes, [], 'file cũ có lastRelease ⇒ suy ra 1 lần')
   const two = pre({ state: { v: 1, rollbackTested: false, releaseCount: 2 } })
-  assert.deepEqual(two.codes, ['rollback'])
-  assert.match(two.r.blockers[0].text, /thử quay lại[\s\S]*release rollback/)
-  assert.doesNotMatch(two.r.blockers[0].text, /first-release/, 'không còn bảo user "thêm --first-release" để lách')
-  assert.deepEqual(pre({ state: { v: 1, rollbackTested: true, releaseCount: 7 } }).codes, [])
-  assert.deepEqual(pre({ state: { v: 1, rollbackTested: false, releaseCount: 2 }, firstRelease: true }).codes, ['rollback'], '--first-release không còn là lối lách')
+  assert.deepEqual(two.needCodes, ['rollback'])
+  assert.deepEqual(two.codes, [], 'chưa thử quay lại là mục cần gật, không phải blocker')
+  assert.equal(two.r.ok, false)
+  assert.equal(preflightExit(two.r), 4)
+  assert.match(two.r.needOk[0].text, /thử quay lại[\s\S]*release rollback/)
+  assert.doesNotMatch(two.r.needOk[0].text, /first-release/, 'không còn bảo user "thêm --first-release" để lách')
+  assert.deepEqual(pre({ state: { v: 1, rollbackTested: true, releaseCount: 7 } }).needCodes, [])
+  assert.deepEqual(pre({ state: { v: 1, rollbackTested: false, releaseCount: 2 }, firstRelease: true }).needCodes, ['rollback'], '--first-release không còn là lối lách')
+  const yes = pre({ state: { v: 1, rollbackTested: false, releaseCount: 2 }, accepted: true }).r
+  assert.equal(yes.ok, true)
+  assert.equal(preflightExit(yes), 0)
 })
 
-test('preflight ↔ backupReady: bật sao lưu mà chưa có lịch/lần chạy/khôi phục thử ⇒ chặn từng lý do', () => {
+test('preflight ↔ backupReady: bật sao lưu mà chưa có lịch/lần chạy/khôi phục thử ⇒ cần gật từng lý do', () => {
   const on = pre({ state: { rollbackTested: true, backup: { choice: 'on' } } })
-  assert.deepEqual(on.codes, ['backup-no-scheduler', 'backup-no-interval', 'backup-no-backup', 'backup-no-restore-check'])
+  assert.deepEqual(on.needCodes, ['backup-no-scheduler', 'backup-no-interval', 'backup-no-backup', 'backup-no-restore-check'])
+  assert.deepEqual(on.codes, [])
+  assert.equal(preflightExit(on.r), 4)
+  const onYes = pre({ state: { rollbackTested: true, backup: { choice: 'on' } }, accepted: true }).r
+  assert.equal(onYes.ok, true)
+  assert.equal(preflightExit(onYes), 0)
   const ready = pre({
     state: {
       rollbackTested: true,
@@ -309,19 +335,37 @@ test('preflight ↔ backupReady: bật sao lưu mà chưa có lịch/lần chạ
     },
   })
   assert.deepEqual(ready.codes, [])
+  assert.deepEqual(ready.needCodes, [])
   const stale = pre({
     state: {
       rollbackTested: true,
       backup: { choice: 'on', scheduler: { kind: 'cron', id: 'x' }, everyHours: 24, lastBackup: new Date(NOW - 3 * DAY).toISOString(), lastRestoreCheck: new Date(NOW - DAY).toISOString() },
     },
   })
-  assert.deepEqual(stale.codes, ['backup-stale'])
+  assert.deepEqual(stale.needCodes, ['backup-stale'])
+  assert.deepEqual(stale.codes, [])
 })
 
-test('preflight --has-data: chưa chọn phương án sao lưu ⇒ chặn; chọn tắt ⇒ qua', () => {
-  assert.deepEqual(pre({ hasData: true, state: { rollbackTested: true } }).codes, ['backup-choice'])
-  assert.deepEqual(pre({ hasData: true, state: { rollbackTested: true, backup: { choice: 'off' } } }).codes, [])
-  assert.deepEqual(pre({ state: { rollbackTested: true } }).codes, [], 'không biết app có dữ liệu ⇒ không tự chặn')
+test('preflight --has-data: chưa chọn phương án sao lưu ⇒ cần gật; chọn tắt ⇒ qua', () => {
+  const none = pre({ hasData: true, state: { rollbackTested: true } })
+  assert.deepEqual(none.needCodes, ['backup-choice'])
+  assert.deepEqual(none.codes, [])
+  assert.equal(preflightExit(none.r), 4)
+  assert.equal(pre({ hasData: true, state: { rollbackTested: true }, accepted: true }).r.ok, true)
+  assert.deepEqual(pre({ hasData: true, state: { rollbackTested: true, backup: { choice: 'off' } } }).needCodes, [])
+  assert.deepEqual(pre({ state: { rollbackTested: true } }).needCodes, [], 'không biết app có dữ liệu ⇒ không tự chặn')
+})
+
+test('preflight: --dong-y (accepted) KHÔNG qua được khoá trong build hoặc ZAP mức cao dù mục cần gật đã gật', () => {
+  const sbFail = { stdout: JSON.stringify({ results: [{ id: 'secret-build', status: 'fail', detail: ['dist/a.js:1 key'] }] }) }
+  const a = pre({ sb: sbFail, state: { rollbackTested: true, releaseCount: 2 }, accepted: true }).r
+  assert.equal(a.ok, false)
+  assert.equal(preflightExit(a), 1)
+  assert.deepEqual(a.blockers.map((b) => b.code), ['secret-build'])
+  const b = pre({ zapExit: 1, state: { rollbackTested: true, releaseCount: 2 }, accepted: true }).r
+  assert.equal(b.ok, false)
+  assert.equal(preflightExit(b), 1)
+  assert.deepEqual(b.blockers.map((x) => x.code), ['zap'])
 })
 
 // ---------- Cloudflare Workers (AC-48, 48a) ----------
@@ -1022,7 +1066,7 @@ test('cf: preflight đã qua mà thiếu wrangler / Playwright / địa chỉ / 
   }
 })
 
-test('BUG-2 cf: preflight chạy TRƯỚC khi kiểm công cụ / địa chỉ / tên Worker — còn mục chặn thì nêu danh sách chặn (exit 1) dù thiếu wrangler', () => {
+test('BUG-2 cf: preflight chạy TRƯỚC khi kiểm công cụ / địa chỉ / tên Worker — thiếu dấu kiểm thì nêu danh sách cần gật (exit 4) dù thiếu wrangler', () => {
   const noMarks = (c) => (c.kind === 'gate' ? { stdout: 'pid: x\nreview: không\nqa: không\ntest: có\n' } : {})
   const cases = [
     [{ wrangler: false }, { url: 'https://a.example.com' }],
@@ -1036,7 +1080,7 @@ test('BUG-2 cf: preflight chạy TRƯỚC khi kiểm công cụ / địa chỉ /
     const { run, kinds } = fakeRun(f, noMarks)
     const r = releaseCf({ dir: f.dir, run, now: NOW, stateOpts: f.so, ...GATE, ...opts })
     const text = r.lines.join('\n')
-    assert.equal(r.code, EXIT.FAIL, `${JSON.stringify(fx)} ${text}`)
+    assert.equal(r.code, EXIT.NEED_OK, `${JSON.stringify(fx)} ${text}`)
     assert.match(text, /Chưa có dấu review/)
     assert.match(text, /Chưa có dấu QA/)
     assert.doesNotMatch(text, /Thiếu wrangler|Thiếu Playwright|--url|--worker/)
@@ -1099,7 +1143,7 @@ test('BUG-5 cf/rollback: gợi ý cài và chạy theo trình quản lý gói c�
   }
 })
 
-test('cf tự chạy preflight: còn mục chặn ⇒ exit 1, KHÔNG gọi versions upload / thử nhanh / deploy, không ghi trạng thái', () => {
+test('cf tự chạy preflight: còn mục chặn ⇒ exit 1 (thiếu dấu kiểm, chưa thử quay lại, sao lưu ⇒ exit 4), KHÔNG gọi versions upload / thử nhanh / deploy, không ghi trạng thái', () => {
   const sbFail = { stdout: JSON.stringify({ results: [{ id: 'secret-build', status: 'fail', detail: ['dist/a.js:1 khoá'] }] }) }
   const cases = [
     ['thiếu dấu review', (c) => (c.kind === 'gate' ? { stdout: 'pid: x\nreview: không\nqa: có\ntest: có\n' } : {}), /dấu review/, GATE],
@@ -1115,11 +1159,23 @@ test('cf tự chạy preflight: còn mục chặn ⇒ exit 1, KHÔNG gọi versi
     const before = readState(f.dir, f.so)
     const { run, kinds } = fakeRun(f, handler)
     const r = releaseCf({ dir: f.dir, url: 'https://app.example.com', run, now: NOW, stateOpts: f.so, ...gate })
-    assert.equal(r.code, EXIT.FAIL, name)
+    const needOk = /^(thiếu dấu|chưa thử quay lại|có dữ liệu)/.test(name)
+    assert.equal(r.code, needOk ? EXIT.NEED_OK : EXIT.FAIL, name)
     assert.match(r.lines.join('\n'), re, name)
     assert.match(r.lines.at(-1), /Chưa tải gì lên Cloudflare/, name)
     assert.deepEqual(kinds(), PRE, `${name}: chỉ chạy preflight, không đụng Cloudflare`)
     assert.deepEqual(readState(f.dir, f.so), before, `${name}: không ghi trạng thái`)
+    // user đã gật (--dong-y): mục cần gật qua được, khoá trong build / ZAP thì vẫn chặn exit 1 và chưa đụng Cloudflare
+    const g = fixture()
+    if (state) writeState(g.dir, state, g.so)
+    const cfh = cfWorld().handler
+    const yes = fakeRun(g, (c) => (c.kind === 'gate' || c.kind === 'check' ? handler(c) : cfh(c)))
+    const ry = releaseCf({ dir: g.dir, url: 'https://app.example.com', run: yes.run, now: NOW, stateOpts: g.so, ...gate, accepted: true })
+    if (needOk) assert.equal(ry.code, EXIT.OK, `${name}: đã gật ⇒ qua\n${ry.lines.join('\n')}`)
+    else {
+      assert.equal(ry.code, EXIT.FAIL, `${name}: --dong-y không qua được`)
+      assert.deepEqual(yes.kinds(), PRE, `${name}: đã gật vẫn không đụng Cloudflare`)
+    }
   }
 })
 
@@ -1154,9 +1210,9 @@ test('K3 cf: lần 1 và lần 2 không cần --first-release; sau lần 2 chưa
   assert.match(nudge[0], /nên thử quay lại một lần[\s\S]*release rollback[\s\S]*vài giây[\s\S]*phát hành lại bản mới/)
   const blocked = fakeRun(f, okHandler)
   const three = releaseCf({ dir: f.dir, url: 'https://app.example.com', run: blocked.run, now: NOW, stateOpts: f.so, hooksDir: HOOKS_DIR })
-  assert.equal(three.code, EXIT.FAIL)
+  assert.equal(three.code, EXIT.NEED_OK)
   assert.match(three.lines.join('\n'), /thử quay lại/)
-  assert.deepEqual(blocked.kinds(), PRE, 'lần 3 bị chặn trước khi đụng Cloudflare')
+  assert.deepEqual(blocked.kinds(), PRE, 'lần 3 chưa được gật nên dừng trước khi đụng Cloudflare')
   assert.equal(rollbackCf({ dir: f.dir, run: fakeRun(f).run, stateOpts: f.so }).code, EXIT.OK)
   const four = releaseOnce(f)
   assert.equal(four.code, EXIT.OK, four.lines.join('\n'))
@@ -1516,7 +1572,7 @@ test('vps --run: một bước lỗi ⇒ dừng ngay, không thử nhanh, không
   assert.equal(readState(f.dir, f.so), null)
 })
 
-test('vps --run tự chạy preflight: còn mục chặn ⇒ exit 1, KHÔNG gọi ssh/scp/thử nhanh nào, không ghi trạng thái', () => {
+test('vps --run tự chạy preflight: còn mục chặn ⇒ exit 1 (thiếu dấu kiểm, chưa thử quay lại, sao lưu ⇒ exit 4), KHÔNG gọi ssh/scp/thử nhanh nào, không ghi trạng thái', () => {
   const cases = [
     ['thiếu dấu QA', (c) => (c.kind === 'gate' ? { stdout: 'pid: x\nreview: có\nqa: không\ntest: có\n' } : {}), /dấu QA/, GATE],
     ['quét bảo mật đỏ', () => ({}), /mức cao/, { ...GATE, zapExit: 1 }],
@@ -1528,11 +1584,22 @@ test('vps --run tự chạy preflight: còn mục chặn ⇒ exit 1, KHÔNG gọ
     if (state) writeState(f.dir, state, f.so)
     const { run, kinds } = fakeRun(f, handler)
     const r = releaseVps({ dir: f.dir, run, ...VPS, ...gate, doRun: true, url: 'https://app.example.com', stateOpts: f.so, now: NOW })
-    assert.equal(r.code, EXIT.FAIL, name)
+    const needOk = /^(thiếu dấu|chưa thử quay lại|sao lưu)/.test(name)
+    assert.equal(r.code, needOk ? EXIT.NEED_OK : EXIT.FAIL, name)
     assert.match(r.lines.join('\n'), re, name)
     assert.match(r.lines.at(-1), /Chưa đụng tới máy chủ/, name)
     assert.deepEqual(kinds(), PRE, `${name}: chỉ chạy preflight`)
     assert.equal(readState(f.dir, f.so)?.lastRelease, undefined, name)
+    // đã gật (--dong-y): mục cần gật qua được preflight (bắt đầu đụng máy chủ); quét bảo mật đỏ thì vẫn chặn exit 1
+    const g = fixture()
+    if (state) writeState(g.dir, state, g.so)
+    const yes = fakeRun(g, handler)
+    const ry = releaseVps({ dir: g.dir, run: yes.run, ...VPS, ...gate, doRun: true, url: 'https://app.example.com', stateOpts: g.so, now: NOW, accepted: true })
+    if (needOk) assert.ok(yes.kinds().length > PRE.length, `${name}: đã gật ⇒ qua preflight\n${ry.lines.join('\n')}`)
+    else {
+      assert.equal(ry.code, EXIT.FAIL, `${name}: --dong-y không qua được`)
+      assert.deepEqual(yes.kinds(), PRE, `${name}: đã gật vẫn không đụng máy chủ`)
+    }
   }
   const g = fixture()
   const none = fakeRun(g)
@@ -1555,7 +1622,7 @@ test('vps --run: preflight đã qua mà thiếu địa chỉ thử nhanh / Playw
   assert.deepEqual(b.kinds(), PRE)
 })
 
-test('BUG-2 vps --run: preflight chạy TRƯỚC khi kiểm địa chỉ / Playwright / --root — còn mục chặn thì nêu danh sách chặn (exit 1), --rollback --run vẫn không qua preflight', () => {
+test('BUG-2 vps --run: preflight chạy TRƯỚC khi kiểm địa chỉ / Playwright / --root — thiếu dấu kiểm thì nêu danh sách cần gật (exit 4), --rollback --run vẫn không qua preflight', () => {
   const noMarks = (c) => (c.kind === 'gate' ? { stdout: 'pid: x\nreview: không\nqa: không\ntest: có\n' } : {})
   const cases = [
     [{ playwright: false }, { url: 'https://app.example.com' }],
@@ -1568,7 +1635,7 @@ test('BUG-2 vps --run: preflight chạy TRƯỚC khi kiểm địa chỉ / Playw
     const { run, kinds } = fakeRun(f, noMarks)
     const r = releaseVps({ dir: f.dir, run, ...VPS, doRun: true, stateOpts: f.so, now: NOW, ...over })
     const text = r.lines.join('\n')
-    assert.equal(r.code, EXIT.FAIL, `${JSON.stringify(over)} ${text}`)
+    assert.equal(r.code, EXIT.NEED_OK, `${JSON.stringify(over)} ${text}`)
     assert.match(text, /Chưa có dấu review/)
     assert.match(text, /Chưa có dấu QA/)
     assert.doesNotMatch(text, /Thiếu Playwright|--url|--root|--host/)

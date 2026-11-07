@@ -1,34 +1,72 @@
 ---
 name: flow-worktree
-description: Tách worktree trước khi sửa file trong git repo và soi các phiên Claude khác để tránh conflict. Dùng ngay trước lần sửa file đầu tiên trong một git repo, khi hook báo "Đang sửa thẳng thư mục chính", hoặc trước khi gộp. KHÔNG dùng khi chỉ hỏi đáp/đọc code/lập plan, thư mục không phải git repo, đã ở trong .claude/worktrees/, hoặc repo có .claude/allow-direct-edit.
+description: Tạo, dùng lại và dọn worktree (bản sao riêng của dự án để sửa không đụng bản đang chạy), soi file các phiên khác đang sửa. Dùng khi sắp sửa file lần đầu trong git repo, khi hook báo "Đang sửa thẳng thư mục chính", trước khi gộp, hoặc khi user muốn dọn bản sao cũ. KHÔNG dùng khi chỉ hỏi đáp, đọc code, lập plan, ngoài git repo, đã ở trong worktree, hay repo có .claude/allow-direct-edit.
 ---
 
 # Worktree
 
-User hay mở nhiều phiên Claude song song trên cùng repo. Dự án có luật worktree riêng (vd `.claude/rules/worktree-flow.md`)
-thì **luật dự án thắng**.
+User hay mở nhiều phiên Claude song song trên cùng repo. Dự án có luật worktree riêng (vd `.claude/rules/worktree-flow.md`) thì
+**luật dự án thắng**.
 
-## Soi phiên khác — trước khi tách và lại trước khi gộp
+## 1. Xem có sẵn chưa
 
-Ở **thư mục chính**: `git worktree list`, rồi với mỗi worktree khác lấy file nó đang đổi =
-`git diff --name-only main...<branch>` + `git -C <wt> status --porcelain`. Việc của mình sắp sửa một file trong đó ⇒
-dừng, hỏi user bằng AskUserQuestion (đợi phiên kia gộp / làm tiếp chịu conflict / né file đó). Sửa file dùng chung thì
-thêm vào cuối, không format lại phần người khác.
+`git worktree list` ở thư mục chính. Đã có worktree đúng việc này (cùng tên việc, hoặc sổ tiến độ đang trỏ tới) ⇒ `EnterWorktree`
+`path` vào làm tiếp, không tạo cái mới. `locked` hoặc đang có phiên khác dùng ⇒ không vào.
 
-## Tách
+## 2. Soi phiên khác — trước khi tách và lại trước khi gộp
+
+Ở **thư mục chính**, với mỗi worktree khác lấy file nó đang đổi = `git diff --name-only main...<branch>` + `git -C <wt> status --porcelain`.
+Việc của mình sắp sửa một file trong đó ⇒ dừng, hỏi user bằng AskUserQuestion (đợi phiên kia gộp / làm tiếp chịu conflict / né file đó).
+Sửa file dùng chung thì thêm vào cuối, không format lại phần người khác.
+
+## 3. Tách
 
 - `EnterWorktree` với `name` kebab-case theo việc (`fix-login-redirect`).
-- Worktree tạo từ commit hiện tại (`worktree.baseRef: head`). File sửa dở chưa commit ở thư mục chính không đi theo —
-  cần chúng thì báo user một dòng trước.
-- Worktree mới chưa có dependencies ⇒ cài lại một lần bằng package manager của dự án. Hai phiên không chạy dev server
-  cùng cổng.
+- Worktree tạo từ commit hiện tại (`worktree.baseRef: head`). File sửa dở chưa commit ở thư mục chính không đi theo — cần chúng thì
+  báo user một dòng trước.
+- Cần chạy app hoặc test mà chưa có thư viện ⇒ cài một lần theo file khoá của dự án, không làm đổi file khoá. Việc không cần thì không cài.
+
+| File khoá | Lệnh |
+|---|---|
+| `pnpm-lock.yaml` | `pnpm install --frozen-lockfile` |
+| `package-lock.json` | `npm ci` |
+| `yarn.lock` | `yarn install --immutable` (bản cũ: `--frozen-lockfile`) |
+| `bun.lock` | `bun install --frozen-lockfile` |
+| `uv.lock` | `uv sync --frozen` |
+| `poetry.lock` | `poetry install --no-update` hoặc `poetry sync` |
+| `go.sum` | `go mod download` |
+| `Cargo.lock` | `cargo fetch --locked` |
+
+Dự án ghi lệnh riêng trong `CLAUDE.md` ⇒ dùng lệnh đó. Lệnh báo file khoá lệch ⇒ báo một dòng, chỉ cập nhật khi việc đang làm có đổi thư viện.
+
+- Hai phiên không chạy dev server cùng cổng: lấy cổng bằng `node ~/.claude/hooks/wt-env.mjs alloc <worktree>`. Ghi lại lệnh và cổng của
+  mọi tiến trình mình bật để còn dừng lúc dọn.
 - Repo user muốn sửa thẳng ⇒ user tạo `.claude/allow-direct-edit` (hook sẽ cho qua).
 
-## Gộp
+## 4. Gộp
 
 Chỉ khi user gật, theo skill `flow-merge`.
 
+## 5. Dọn
+
+Chỉ tự dọn worktree **do phiên mình tạo và đã gộp**. Theo đúng thứ tự:
+
+1. **Xem trước:** `git -C <wt> status --porcelain` (còn file dở?), `git log --oneline main..<branch>` (còn commit chưa gộp?), có repo lồng bên
+   trong không. Có thứ gì chưa gộp ⇒ dừng, kể cho user, không dọn.
+2. **Dừng tiến trình mình đã bật** trong worktree đó (dev server, watcher). Chỉ dừng cái mình ghi lại, không dừng theo tên chung. Windows
+   giữ khoá file khi tiến trình còn chạy nên phải làm trước khi gỡ.
+3. **Gỡ:** `node ~/.claude/hooks/don.mjs "<đường worktree>"` (tự từ chối nếu chưa gộp sạch, bị khoá, có repo lồng), rồi
+   `git branch -d <branch>` và `node ~/.claude/hooks/wt-env.mjs release <đường worktree>`. Không gõ lệnh xoá đệ quy.
+
+### Bản sao cũ bị quên
+
+User muốn dọn, hoặc thấy nhiều worktree cũ: chỉ liệt kê, rồi hỏi. Mỗi dòng ghi bằng lời: tên việc · lần sửa cuối · đã gộp chưa · còn file dở không ·
+có phiên nào đang dùng không (`locked`, tiến trình đang chạy).
+
+Hỏi bằng AskUserQuestion, đưa rõ số lượng và tên, ví dụ "Dọn 4 bản đã gộp xong" hoặc "Giữ lại". Bản chưa gộp hoặc còn file dở không nằm trong
+lựa chọn dọn chung: hỏi riêng từng bản, nói rõ sẽ mất gì. `prune` chỉ xoá ghi chép của thư mục đã mất, không thay được việc xem trước.
+
 ## Không được
 
-- Xoá worktree/branch không do phiên mình tạo (`locked` = phiên khác đang dùng).
+- Xoá worktree/branch không do phiên mình tạo khi user chưa gật (`locked` = phiên khác đang dùng).
 - `git push --force` lên nhánh chính, `git reset --hard` ở thư mục chính.

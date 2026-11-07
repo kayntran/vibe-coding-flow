@@ -105,14 +105,21 @@ test('preflight: đủ điều kiện ⇒ exit 0; còn mục thiếu ⇒ exit 1 
   assert.match(zap.stdout, /còn 1 mục[\s\S]*mức cao/)
   const bare = fixture()
   const r = await cli(bare, ['preflight', '--dir', bare.dir, '--has-data'], { handler: okHandler })
-  assert.equal(r.code, 1)
-  assert.match(r.stdout, /còn 1 mục[\s\S]*sao lưu/)
+  assert.equal(r.code, 4, 'chưa chọn sao lưu là mục cần gật, không phải chặn')
+  assert.match(r.stdout, /Cần user gật — còn 1 mục[\s\S]*sao lưu/)
   assert.doesNotMatch(r.stdout, /quay lại/, 'chưa phát hành lần nào ⇒ chưa đòi đã thử quay lại (K3)')
+  assert.equal((await cli(bare, ['preflight', '--dir', bare.dir, '--has-data', '--dong-y'], { handler: okHandler })).code, 0, '--dong-y qua được mục cần gật')
   const two = fixture()
   writeState(two.dir, { v: 1, releaseCount: 2, rollbackTested: false, backup: { choice: 'off' } }, { logDir: two.logDir })
   const late = await cli(two, ['preflight', '--dir', two.dir], { handler: okHandler })
-  assert.equal(late.code, 1)
-  assert.match(late.stdout, /còn 1 mục[\s\S]*thử quay lại/)
+  assert.equal(late.code, 4)
+  assert.match(late.stdout, /Cần user gật — còn 1 mục[\s\S]*thử quay lại/)
+  assert.equal((await cli(two, ['preflight', '--dir', two.dir, '--dong-y'], { handler: okHandler })).code, 0)
+  const zapYes = await cli(two, ['preflight', '--dir', two.dir, '--zap-exit', '1', '--dong-y'], { handler: okHandler })
+  assert.equal(zapYes.code, 1, '--dong-y không qua được ZAP mức cao')
+  const sbFail = { stdout: JSON.stringify({ results: [{ id: 'secret-build', status: 'fail', detail: ['dist/a.js:1 khoá'] }] }) }
+  const sbYes = await cli(two, ['preflight', '--dir', two.dir, '--dong-y'], { handler: (c) => (c.kind === 'check' ? sbFail : okHandler(c)) })
+  assert.equal(sbYes.code, 1, '--dong-y không qua được khoá trong bản build')
 })
 
 // ---------- cf / rollback ----------
@@ -199,37 +206,55 @@ test('K7 cf: package.json có script build ⇒ chạy build bằng trình quản
   assert.equal(fs.existsSync(statePath(g.dir)), false)
 })
 
-test('cf tự chạy preflight với đúng cờ: chặn ⇒ exit 1, không có lệnh wrangler/Playwright/git nào, không ghi release.json', async () => {
+test('cf tự chạy preflight với đúng cờ: chặn ⇒ exit 1 (chưa thử quay lại / chưa chọn sao lưu ⇒ exit 4, --dong-y qua được), không có lệnh wrangler/Playwright/git nào, không ghi release.json', async () => {
   const blocked = [
-    [['--first-release', '--zap-exit', '1'], okHandler, /mức cao/],
-    [['--first-release', '--zap-exit', '3'], okHandler, /Java/],
-    [[], okHandler, /thử quay lại/, { v: 1, releaseCount: 2, rollbackTested: false }],
-    [['--first-release', '--has-data'], okHandler, /chưa chọn phương án sao lưu/],
-    [['--first-release'], (c) => (c.kind === 'gate' ? { stdout: 'pid: x\nreview: không\nqa: có\ntest: có\n' } : okHandler(c)), /dấu review/],
+    [['--first-release', '--zap-exit', '1'], okHandler, /mức cao/, undefined, 1],
+    [['--first-release', '--zap-exit', '3'], okHandler, /Java/, undefined, 1],
+    [[], okHandler, /thử quay lại/, { v: 1, releaseCount: 2, rollbackTested: false }, 4],
+    [['--first-release', '--has-data'], okHandler, /chưa chọn phương án sao lưu/, undefined, 4],
   ]
-  for (const [flags, handler, re, state] of blocked) {
+  for (const [flags, handler, re, state, code] of blocked) {
     const f = fixture()
     if (state) writeState(f.dir, state, { logDir: f.logDir })
     const r = await cli(f, ['cf', '--dir', f.dir, '--url', 'https://app.example.com', ...flags], { handler })
-    assert.equal(r.code, 1, flags.join(' '))
+    assert.equal(r.code, code, flags.join(' '))
     assert.match(r.stdout, re, flags.join(' '))
     assert.match(r.stdout, /Chưa tải gì lên Cloudflare/)
     assert.deepEqual(r.kinds(), ['gate', 'check'], flags.join(' '))
     assert.deepEqual(readState(f.dir, { logDir: f.logDir }), state ? { ...state } : null, 'không ghi release.json')
+    // --dong-y: mục cần gật qua được; ZAP mức cao / thiếu công cụ vẫn chặn exit 1, chưa đụng Cloudflare
+    const g = fixture()
+    if (state) writeState(g.dir, state, { logDir: g.logDir })
+    const y = await cli(g, ['cf', '--dir', g.dir, '--url', 'https://app.example.com', ...flags, '--dong-y'], { handler })
+    assert.equal(y.code, code === 4 ? 0 : 1, `${flags.join(' ')} --dong-y\n${y.stdout}`)
+    if (code === 1) assert.deepEqual(y.kinds(), ['gate', 'check'], `${flags.join(' ')}: --dong-y không qua được`)
   }
+  // khoá trong bản build: --dong-y cũng không qua được
+  const sb = fixture()
+  const sbFail = (c) => (c.kind === 'check' ? { stdout: JSON.stringify({ results: [{ id: 'secret-build', status: 'fail', detail: ['dist/a.js:1 khoá'] }] }) } : okHandler(c))
+  const sbr = await cli(sb, ['cf', '--dir', sb.dir, '--url', 'https://app.example.com', '--first-release', '--dong-y'], { handler: sbFail })
+  assert.equal(sbr.code, 1, sbr.stdout)
+  assert.match(sbr.stdout, /khoá bí mật/)
+  assert.deepEqual(sbr.kinds(), ['gate', 'check'])
   const f = fixture()
   assert.match((await cli(f, ['cf', '--dir', f.dir, '--zap-exit', 'abc'])).stderr, /--zap-exit phải là số/)
 })
 
-test('BUG-2 cf: chưa cài wrangler mà thay đổi còn thiếu dấu review/QA ⇒ exit 1 + danh sách chặn (không phải "Thiếu wrangler"); hết chặn mới tới exit 3', async () => {
+test('BUG-2 cf: chưa cài wrangler mà thay đổi còn thiếu dấu review/QA ⇒ exit 4 + danh sách cần gật (không phải "Thiếu wrangler"); user gật mới tới exit 3', async () => {
   const noMarks = (c) => (c.kind === 'gate' ? { stdout: 'pid: x\nreview: không\nqa: không\ntest: có\n' } : okHandler(c))
   const f = fixture({ wrangler: false })
   const blocked = await cli(f, ['cf', '--dir', f.dir, '--first-release', '--zap-exit', '0'], { handler: noMarks })
-  assert.equal(blocked.code, 1, blocked.stdout)
+  assert.equal(blocked.code, 4, blocked.stdout)
   assert.match(blocked.stdout, /Chưa có dấu review/)
   assert.match(blocked.stdout, /Chưa có dấu QA/)
+  assert.match(blocked.stdout, /--dong-y/)
+  assert.match(blocked.stdout, /Chưa tải gì lên Cloudflare/)
   assert.doesNotMatch(blocked.stdout, /Thiếu wrangler/)
   assert.deepEqual(blocked.kinds(), ['gate', 'check'])
+  const y = fixture({ wrangler: false })
+  const yes = await cli(y, ['cf', '--dir', y.dir, '--first-release', '--zap-exit', '0', '--dong-y'], { handler: noMarks })
+  assert.equal(yes.code, 3, yes.stdout)
+  assert.match(yes.stdout, /Thiếu wrangler/)
   const g = fixture({ wrangler: false })
   const missing = await cli(g, ['cf', '--dir', g.dir, '--url', 'https://app.example.com', '--first-release'], { handler: okHandler })
   assert.equal(missing.code, 3)
@@ -237,14 +262,22 @@ test('BUG-2 cf: chưa cài wrangler mà thay đổi còn thiếu dấu review/QA
   assert.deepEqual(missing.kinds(), ['gate', 'check'])
 })
 
-test('vps --run tự chạy preflight: chặn ⇒ exit 1, không ssh/scp; --rollback --run không qua preflight', async () => {
+test('vps --run tự chạy preflight: chưa thử quay lại ⇒ exit 4 (--dong-y qua được), không ssh/scp khi chưa gật; --rollback --run không qua preflight', async () => {
   const f = fixture()
   writeState(f.dir, { v: 1, releaseCount: 2, rollbackTested: false }, { logDir: f.logDir })
   const base = ['vps', '--dir', f.dir, '--mode', 'symlink', '--host', 'deploy@h', '--root', '/srv/app', '--sha', 'abc1234', '--url', 'https://app.example.com', '--run']
   const blocked = await cli(f, base, { handler: okHandler })
-  assert.equal(blocked.code, 1)
+  assert.equal(blocked.code, 4)
   assert.match(blocked.stdout, /thử quay lại[\s\S]*Chưa đụng tới máy chủ/)
   assert.deepEqual(blocked.kinds(), ['gate', 'check'])
+  const g = fixture()
+  writeState(g.dir, { v: 1, releaseCount: 2, rollbackTested: false }, { logDir: g.logDir })
+  const baseG = base.map((a) => (a === f.dir ? g.dir : a))
+  const yes = await cli(g, [...baseG, '--dong-y'], { handler: okHandler })
+  assert.ok(yes.kinds().some((k) => k === 'ssh'), `--dong-y ⇒ qua preflight, bắt đầu đụng máy chủ\n${yes.stdout}`)
+  const zap = await cli(g, [...baseG, '--dong-y', '--zap-exit', '1'], { handler: okHandler })
+  assert.equal(zap.code, 1, '--dong-y không qua được ZAP mức cao')
+  assert.deepEqual(zap.kinds(), ['gate', 'check'])
   const rb = await cli(f, [...base, '--rollback'], { handler: okHandler })
   assert.equal(rb.code, 0, rb.stdout)
   assert.deepEqual(rb.kinds(), ['ssh', 'playwright'], 'quay lại là cứu hộ: không chạy preflight')

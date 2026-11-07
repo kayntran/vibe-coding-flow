@@ -1,67 +1,108 @@
 ---
 name: flow-review
-description: Review code bằng Grok (qua Cursor) / Codex Sol mới nhất (+ Gemini Flash mới nhất) — ĐÚNG MỘT LẦN cho cả tính năng, trước khi hỏi user gộp; máy kiểm trước (lint/typecheck/test) rồi mới gọi AI; mức suy luận theo rủi ro; captain chỉ kiểm sâu lỗi nặng; đóng dấu review. Tự chạy khi nhánh đã xanh test và QA. Cũng dùng khi user nói "review", "soát code", "kiểm bảo mật", "code này ổn chưa". KHÔNG dùng cho review plan (nằm trong flow-spec), KHÔNG chạy sau từng giai đoạn/làn.
+description: Soát chất lượng code của cả nhánh bằng model khác, một lần trước khi hỏi gộp — đối chiếu yêu cầu, kiểm từng lỗi rồi mới nhận, đóng dấu review. Dùng khi nhánh đã qua test và QA, hoặc user nói "review", "soát code", "code này ổn chưa". KHÔNG dùng cho riêng bảo mật hay lỗ hổng (flow-security), soát plan (flow-plan), soát giao diện (flow-ui-design), hay sau từng làn.
 ---
 
-# Flow — review code (tiết kiệm token, vẫn kỹ)
+# Flow — soát code
 
-**Một lần cho cả tính năng:** chạy trên nhánh tính năng / nhánh tích hợp ngay trước khi hỏi gộp — không sau từng
-giai đoạn, từng làn, từng commit. Plan chỉ có MỘT bước "review code", ở cuối.
+**Một lần cho cả tính năng:** chạy trên nhánh tính năng hoặc nhánh tích hợp, ngay trước khi hỏi gộp. Không chạy sau từng
+giai đoạn, từng làn, từng commit.
 
-## 0. Máy kiểm trước (bắt buộc, miễn phí)
-`node ~/.claude/hooks/flow-check.mjs --dir <WT>` (lint, typecheck, SAST, lỗ hổng thư viện, khoá trong bản build…) +
-test đủ bộ (dấu test xanh) + `node ~/.claude/hooks/deps-check.mjs --repo <WT> --base main --head HEAD` (thư viện mới) đã
-xanh rồi mới gọi model review — không tốn token cho thứ công cụ đã bắt. Diff đụng database ⇒ dùng
-`review-brief-security.md` (có checklist DB) cho lượt bảo mật.
+Soát chỉ là báo và kiểm. Sửa thuộc bước 4, gộp thuộc skill `flow-merge`; bắt đầu soát không có nghĩa là được gộp.
 
-## 1. Chọn mức theo rủi ro
-**Nhạy cảm** = diff đụng đăng nhập/phân quyền, tiền/license/thanh toán, dữ liệu (migration, xoá, transaction), đồng
-thời, xử lý secret, API công khai/webhook, hoặc > ~400 dòng; dự án có `.claude/flow.json` `"sensitive": [glob…]` thì
-dùng thêm. Captain quyết từ `git diff --stat main...HEAD`, nói một dòng lý do.
+## 0. Máy kiểm trước (miễn phí)
 
-Chọn model theo bài thử 2026-10-01 (10 lỗi cài sẵn, 2 vòng, đều mức high): Codex 8–9/10, Grok 4.7 9/8, Gemini 3.8
-Flash 8/8 (nhanh nhất), không model nào báo nhầm; Gemini 3.1 Pro 7–8 kèm báo nhầm ⇒ không dùng. Hai họ model khác nhau
-bắt lỗi khác nhau ⇒ lượt thứ hai dùng họ khác thay vì chạy Codex lần nữa.
+`node ~/.claude/hooks/flow-check.mjs --dir <WT>` (lint, typecheck, SAST, lỗ hổng thư viện, khoá trong bản build…) + test
+đủ bộ + `node ~/.claude/hooks/deps-check.mjs --repo <WT> --base main --head HEAD` (thư viện mới). Xanh rồi mới gọi model,
+để không tốn lượt cho thứ công cụ đã bắt. Không chạy được bước nào ⇒ ghi lại, báo ở bước 6, không đứng lại.
+
+## 1. Đối chiếu yêu cầu trước
+
+Lấy mục "Bạn duyệt" và tiêu chí nghiệm thu trong SPEC (không có SPEC ⇒ lấy yêu cầu trong hội thoại, ghi một dòng vào `--note`).
+Với mỗi điều user duyệt: code đã làm chưa, làm khác đi ở đâu, có thêm thứ không ai xin không. Việc này do captain làm,
+bằng `git diff main...HEAD`; lệch thì thành finding như mọi lỗi khác. Code đúng mà sai yêu cầu vẫn là sai.
+
+Không đảo quyết định đã có trong sổ chốt chỉ vì một reviewer không thích nó. Muốn đổi ⇒ hỏi user.
+
+## 2. Chọn lượt theo rủi ro
+
+**Nhạy cảm** = diff đụng đăng nhập/phân quyền, tiền/license/thanh toán, dữ liệu (migration, xoá, transaction), đồng thời,
+xử lý secret, API công khai/webhook, hoặc > ~400 dòng; dự án có `.claude/flow.json` `"sensitive": [glob…]` thì dùng thêm.
+Captain quyết từ `git diff --stat main...HEAD`, nói một dòng lý do. Diff đụng database ⇒ lượt bảo mật dùng
+`review-brief-security.md` (có checklist DB).
+
+Bài thử 2026-10-01 (10 lỗi cài sẵn, 2 vòng, đều mức high): Codex 8–9/10, Grok 4.7 9/8, Gemini 3.8 Flash 8/8 (nhanh nhất),
+không model nào báo nhầm; Gemini 3.1 Pro 7–8 kèm báo nhầm ⇒ không dùng. Hai họ model bắt lỗi khác nhau ⇒ lượt thứ hai dùng
+họ khác, không chạy Codex hai lần.
 
 | Diff | Lượt (chạy song song) |
 |---|---|
-| Thường | 1 lượt chất lượng — **Grok high** (brief đã gồm mục bảo mật cơ bản). Không gọi Codex |
-| Nhạy cảm | **Codex Sol `high`** lượt bảo mật + **Grok** lượt chất lượng |
+| Đã ở nhánh chính (phát hành khi chưa soát) | Soát khoảng từ lần phát hành trước tới bản hiện tại, không dùng `main...HEAD` |
+| Thường | 1 lượt chất lượng: **Grok high** (brief đã gồm bảo mật cơ bản). Không gọi Codex |
+| Nhạy cảm | **Codex Sol `high`** lượt bảo mật (cùng commit đã qua `flow-security` thì dùng lại) + **Grok** lượt chất lượng |
 | Tiền / auth / dữ liệu có rủi ro mất mát | như Nhạy cảm + **Gemini Flash** lượt chất lượng thứ hai |
 
-**Dự phòng:** lượt nào lỗi/hết giờ/không ra JSON ⇒ chạy lại lượt đó bằng model kế tiếp CHƯA dùng cho nhánh này theo
-thứ tự Codex → Grok → Gemini Flash → Agent `code-reviewer`; báo user một dòng.
-Model luôn là bản mới nhất của dòng (`kit/roles.json` + `models.mjs`); hết lượt ⇒ wrapper báo "HẾT LƯỢT", exit 1 ⇒ dự phòng.
+Model luôn là bản mới nhất của dòng (`kit/roles.json` + `models.mjs`). Codex có tài khoản dự phòng thì thử trước khi coi
+là hết lượt.
 
-Lệnh (Bash `run_in_background`; `<S>` scratchpad, `<WT>` gốc worktree, `<BRIEF>` = `review-brief.md` hoặc
-`review-brief-security.md`):
+**Dự phòng:** lượt nào lỗi, hết giờ, hết lượt hoặc không ra JSON ⇒ chạy lại bằng model kế tiếp CHƯA dùng cho nhánh này:
+Codex → Grok → Gemini Flash → Agent `code-reviewer`.
 
-MỌI model đi qua MỘT wrapper (`--model grok|flash|codex|opus`): kiểm CLI sẵn sàng, chọn model mới nhất của dòng,
-**gửi sạch** (bỏ file bí mật/dữ liệu riêng khỏi diff và workspace, quét khoá cả dòng đã xoá, reviewer đọc thư mục tạm
-chứ không phải worktree thật, không nhận biến môi trường dạng khoá), bóc JSON đúng `review-schema.json`.
+**Không còn AI ngoài nào chạy được:** dùng Agent `code-reviewer`, không đứng chờ có lượt. Khi báo user phải nói rõ: "Lần này
+chỉ có AI soát nội bộ, cùng hãng với AI viết code nên độ độc lập thấp hơn." Ghi `"reviewers"` thật vào JSON cuối. Agent này
+trả về dạng chữ theo khuôn của `review-brief.md`; captain chép sang `findings` khi đóng dấu.
+
+## 3. Gọi model: gửi sạch và hỏi trung lập
+
+MỌI model ngoài đi qua MỘT wrapper: kiểm CLI sẵn sàng, chọn model, **gửi sạch** (bỏ file bí mật/dữ liệu riêng khỏi diff và
+workspace, quét khoá cả dòng đã xoá, reviewer đọc thư mục tạm, không nhận biến môi trường dạng khoá), bóc JSON đúng
+`review-schema.json`. Chỉ gửi code, không gửi dữ liệu thật và khoá.
+
 ```bash
-node ~/.claude/hooks/review-ext.mjs --model grok|flash|codex|opus --wt "<WT>" --brief <BRIEF>   --out "<S>/review-<tên>.json" --note "<1–2 câu nhánh làm gì>" < /dev/null
+node ~/.claude/hooks/review-ext.mjs --model grok|flash|codex|opus --wt "<WT>" --brief <BRIEF> --out "<S>/review-<tên>.json" --note "<1–2 câu nhánh làm gì>" < /dev/null
 ```
-Exit 0 xong · 1 lỗi/CLI chưa sẵn sàng/hết giờ ⇒ dự phòng · **3 = có khoá/dữ liệu riêng, KHÔNG gửi** ⇒ dừng, gỡ khoá khỏi
-code (và lịch sử nếu đã commit) rồi chạy lại; không lách bằng cách đổi model. Codex >30 phút không ra file ⇒ dự phòng.
+(Bash `run_in_background`; `<S>` scratchpad, `<WT>` gốc worktree, `<BRIEF>` = `review-brief.md` hoặc `review-brief-security.md`.)
 
-## 2. Captain xử lý finding — kiểm sâu chỉ lỗi nặng
-- **BLOCKER/MAJOR:** mở code tại `path:line`, dựng lại kịch bản hỏng. Thật ⇒ Agent `coder` viết test đỏ tái hiện
-  TRƯỚC rồi sửa. Không thật ⇒ một dòng lý do bác.
-- **MINOR:** không kiểm từng cái. Gom hết vào MỘT brief cho `coder-lite` ("sửa nếu đúng, bỏ qua kèm lý do nếu sai").
-- Model hay thổi mức độ lên một bậc ⇒ hạ mức nếu kịch bản không đủ nặng. Nhiều lượt báo cùng chỗ ⇒ gộp làm một.
+Exit 0 xong · 1 lỗi/CLI chưa sẵn sàng/hết giờ ⇒ dự phòng · **3 = có khoá/dữ liệu riêng, KHÔNG gửi** ⇒ dừng, gỡ khoá khỏi code
+rồi chạy lại (đã commit ⇒ skill `flow-key-leak`); không lách bằng cách đổi model. Codex >30 phút không ra file ⇒ dự phòng.
 
-## 3. Đóng dấu
-Sửa xong ⇒ test lại (dấu test; QA lại nếu đụng UI) ⇒ diff đổi nên dấu cũ mất hiệu lực:
-- Đã sửa BLOCKER/MAJOR ⇒ chạy lại MỘT lượt Grok trên diff mới, `--note` thêm "chỉ báo BLOCKER/MAJOR, kiểm các
-  chỗ đã sửa: <danh sách>". Vẫn còn lỗi nặng thật sau lượt này ⇒ dừng, báo user.
-- Chỉ sửa MINOR ⇒ không gọi lại model: captain đọc diff sửa (`git diff <commit đã review>..HEAD`), thêm vào JSON cũ
-  trường `"delta_reviewed_by": "captain", "delta": "<commit đã review>..HEAD"` rồi đóng dấu.
-Gộp các file JSON thành một (`findings` = tất cả, kèm trạng thái sửa/bác, mã AC liên quan, `commit` đã review) rồi:
-`node ~/.claude/hooks/flow-gate.mjs stamp review <S>/review-final.json` + chép bản cuối vào
-`docs/specs/<tính năng>/notes/review-final.json` (lưu cùng tính năng, ghi commit đã kiểm).
+**`--note` chỉ tả nhánh làm gì và yêu cầu là gì.** Không nói "mình nghĩ đã ổn", không nêu nghi ngờ hay kết luận của mình,
+không kể phần đã bác của lượt trước, để reviewer không đồng tình theo. Lượt kiểm lại chỉ nêu chỗ đã sửa.
 
-## 4. Báo user
-Tóm tắt: đã đổi gì · test (số thật) · QA (criteria pass/fail) · review (model + tầng đã chạy + lý do; finding đã sửa / đã bác)
-· hỏi gộp ⇒ skill `flow-merge`. Không tự nâng nhãn: tách rõ **đã biết** (đã chạy/đo) · **quan sát được** · **suy luận** ·
-**cần bạn quyết** · **chưa biết**.
+## 4. Kiểm từng lỗi trước khi nhận
+
+Lời reviewer là gợi ý, không phải lệnh. Lỗi không có `path:line` và kịch bản hỏng cụ thể ⇒ loại.
+
+**Tự bỏ qua, không báo user (giảm báo nhầm):**
+- Style, đặt tên, format không gây lỗi; thứ máy kiểm đã bắt.
+- Code cũ không nằm trong diff (ghi một dòng nếu nặng, tách việc riêng).
+- Mối lo trừu tượng mà code hoặc test hiện có đã chứng minh ngược lại.
+- Đề xuất tính năng mới, "phòng khi sau này cần", hoặc đề xuất viết đầy đủ cho code không ai gọi.
+- Lỗi cùng gốc nhiều lượt cùng báo ⇒ gộp một.
+- Đề xuất ngược quyết định trong sổ chốt ⇒ không tự làm, hỏi user nếu lý do nặng.
+
+**Xử lý phần còn lại:**
+- **BLOCKER/MAJOR:** mở code tại `path:line`, dựng lại kịch bản hỏng. Thật ⇒ Agent `coder` viết test đỏ tái hiện TRƯỚC rồi
+  sửa. Không thật ⇒ một dòng lý do bác. Reviewer hay thổi mức một bậc ⇒ hạ mức nếu kịch bản không đủ nặng.
+- **MINOR:** không kiểm từng cái. Gom vào MỘT brief cho `coder-lite` ("sửa nếu đúng, bỏ qua kèm lý do nếu sai").
+
+## 5. Đóng dấu
+
+Sửa xong ⇒ test lại (QA lại nếu đụng UI); diff đổi nên dấu cũ mất hiệu lực:
+- Đã sửa BLOCKER/MAJOR ⇒ MỘT lượt Grok trên diff mới, `--note` thêm "chỉ báo BLOCKER/MAJOR, kiểm các chỗ đã sửa: <danh sách>".
+- Chỉ sửa MINOR ⇒ không gọi lại model: captain đọc `git diff <commit đã review>..HEAD`, thêm vào JSON cũ
+  `"delta_reviewed_by": "captain", "delta": "<commit đã review>..HEAD"`.
+
+**Vẫn còn lỗi nặng thật sau lượt kiểm lại:** không vá thêm vòng nữa và không tự hạ mức. Kể bằng lời đời thường cho user: người
+dùng sẽ gặp gì, khi nào, sửa thêm tốn gì. Hỏi bằng AskUserQuestion, hai lựa chọn "Sửa tiếp" hoặc "Vẫn gộp". Chọn "Vẫn gộp" ⇒
+finding giữ nguyên mức, trạng thái `"user-chap-nhan"`, nhắc lại một dòng lúc gộp.
+
+Gộp các file JSON thành một (`findings` = tất cả, kèm trạng thái sửa/bác/chấp nhận, mã AC liên quan, `commit` đã review,
+`reviewers`) rồi: `node ~/.claude/hooks/flow-gate.mjs stamp review <S>/review-final.json` + chép bản cuối vào
+`docs/specs/<tính năng>/notes/review-final.json`.
+
+## 6. Báo user
+
+Tóm tắt: đã đổi gì · test (số thật) · QA (criteria đạt/trượt) · soát (ai soát, vì sao chọn mức đó; lỗi đã sửa / đã bác) · lỗi
+đã chấp nhận · phần chưa kiểm được. Rồi hỏi gộp ⇒ skill `flow-merge`. Không tự nâng nhãn: tách rõ **đã biết** (đã chạy/đo) ·
+**quan sát được** · **suy luận** · **cần bạn quyết** · **chưa biết**. Không nói "code đúng" ngoài phần đã đọc.

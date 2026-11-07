@@ -37,7 +37,9 @@ const NA_RE = /^\uFEFF?\s*N\/A/i
 // B\u00E1o c\u00E1o QA c\u1EE7a diff c\u00F3 UI ph\u1EA3i ghi user \u0111\u00E3 xem v\u00E0 g\u1EADt giao di\u1EC7n (AI d\u1EEBng h\u1ECFi "\u0111\u00E3 \u1ED5n ch\u01B0a?" tr\u01B0\u1EDBc khi review/g\u1ED9p).
 // Sau l\u1EDDi g\u1EADt ch\u1EC9 \u0111\u01B0\u1EE3c h\u1EBFt d\u00F2ng ho\u1EB7c k\u00FD t\u1EF1 kh\u00F4ng ph\u1EA3i ch\u1EEF (vd "c\u00F3 (ng\u00E0y, xem g\u00EC)"); "c\u00F3 th\u1EC3\u2026", "ok kh\u00F4ng" kh\u00F4ng t\u00EDnh. So tr\u00EAn b\u1EA3n NFC.
 const UI_OK_RE = /^[ \t>*_-]*User duy\u1EC7t giao di\u1EC7n[ \t*_]*[:\uFF1A][ \t*_]*(c\u00F3|r\u1ED3i|ok|\u0111\u1ED3ng \u00FD)(?![ \t]*[\p{L}\p{N}])/imu
-const uiApproved = (text) => UI_OK_RE.test(String(text).normalize('NFC'))
+// Sửa rất nhỏ (một nhãn, một màu) không dừng chờ [rofm]: AI ghi đã gửi ảnh trước/sau thay cho lời gật.
+const UI_SMALL_RE = /^[ 	>*_-]*Sửa giao diện rất nhỏ[ 	*_]*[:：][ 	*_]*đã gửi ảnh/imu
+const uiApproved = (text) => { const t = String(text).normalize('NFC'); return UI_OK_RE.test(t) || UI_SMALL_RE.test(t) }
 // SPEC đang mở của nhánh có mã quyền P-nn (mục "Ai thấy/sửa được dữ liệu gì") ⇒ báo cáo QA phải có MỖI mã một dòng bằng chứng
 // `P-01: đỏ khi tắt: có — <file test>` (test chặn quyền đỏ khi tắt chặn quyền). Như UI_OK_RE: đầu dòng, bỏ dấu markdown bao quanh, "có" không dính chữ
 // khác (loại "có thể…"), so trên bản NFC; thêm: sau "có" phải có gạch ngang rồi một chữ (tên file test) — dòng cụt không tính. Mã là P-<số> (từ parseSpec) nên ghép vào regex an toàn.
@@ -1365,7 +1367,7 @@ async function cliStamp(kind, file) {
     const ui = uiTouched(info, base, 'HEAD')
     if (NA_RE.test(text) && ui) return fail(`${file} ghi N/A nhưng diff có file UI; cần QA thật.`)
     if (ui && !uiApproved(text)) {
-      return fail(`${file} thiếu dòng "User duyệt giao diện: có". Diff có file UI ⇒ trước khi đóng dấu QA, mở app/ảnh chụp cho user xem và hỏi ` +
+      return fail(`${file} thiếu dòng "User duyệt giao diện: có" (sửa rất nhỏ: "Sửa giao diện rất nhỏ: đã gửi ảnh"). Diff có file UI ⇒ trước khi đóng dấu QA, mở app/ảnh chụp cho user xem và hỏi ` +
         '"giao diện đã ổn chưa?" (AskUserQuestion); user gật thì ghi dòng đó vào báo cáo, chưa ưng thì sửa rồi hỏi lại.')
     }
     // SPEC đang mở của nhánh có mã quyền P-nn ⇒ mỗi mã một dòng bằng chứng (PLAN đợt 3 mục 5)

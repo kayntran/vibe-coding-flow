@@ -310,7 +310,7 @@ function checkGate({ dir, run, hooksDir }, out) {
   const r = run(process.execPath, [path.join(hooksDir, 'flow-gate.mjs'), 'status'], { cwd: dir })
   const g = okRun(r) ? parseGateStatus(r.stdout) : null
   if (!g?.valid) {
-    out.blockers.push({ code: 'gate-unreadable', text: `Chưa kiểm được dấu review/QA/test của thay đổi (${why(r)}) — chạy trong thư mục dự án có git.` })
+    out.needOk.push({ code: 'gate-unreadable', text: `Chưa kiểm được dấu review/QA/test của thay đổi (${why(r)}) — chạy trong thư mục dự án có git.` })
     return
   }
   if (g.empty) {
@@ -319,12 +319,13 @@ function checkGate({ dir, run, hooksDir }, out) {
     if (allowsDirectEdit(dir)) out.warnings.push('Repo này cho sửa thẳng nhánh chính nên không có dấu review/QA/test để kiểm — chắc chắn đã tự kiểm rồi hãy phát hành.')
     return
   }
-  if (!g.review) out.blockers.push({ code: 'gate-review', text: 'Chưa có dấu review (soát code) cho thay đổi này.' })
+  // Thiếu dấu kiểm không còn chặn cứng: kể rủi ro, user gật thì phát hành (--dong-y). Khoá, ZAP mức cao, sao lưu vẫn là blocker.
+  if (!g.review) out.needOk.push({ code: 'gate-review', text: 'Chưa có dấu review (soát code) cho thay đổi này.' })
   if (!g.qa) {
     const note = /\((.*)\)/.exec(g.qaNote ?? '')?.[1]
-    out.blockers.push({ code: 'gate-qa', text: `Chưa có dấu QA (chạy thử như người dùng)${note ? ` — ${note}` : ''}.` })
+    out.needOk.push({ code: 'gate-qa', text: `Chưa có dấu QA (chạy thử như người dùng)${note ? ` — ${note}` : ''}.` })
   }
-  if (!g.test) out.blockers.push({ code: 'gate-test', text: 'Chưa có dấu chạy test đủ bộ.' })
+  if (!g.test) out.needOk.push({ code: 'gate-test', text: 'Chưa có dấu chạy test đủ bộ.' })
 }
 
 // Chạy flow-check CHỈ với checker quét khoá trong bản build (internal=secret-scan-build trong kit/checkers.json).
@@ -371,11 +372,12 @@ function checkSecretBuild({ dir, run, hooksDir }, out) {
   }
 }
 
-// opts: { dir, state (đã đọc hoặc null), now, run, hooksDir, zapExit?, hasData? }
-// Trả { ok, blockers:[{code,text}], warnings:[text], notes:[text] }. Blockers rỗng ⇒ ok.
+// opts: { dir, state (đã đọc hoặc null), now, run, hooksDir, zapExit?, hasData?, accepted? }
+// Trả { ok, blockers:[{code,text}], needOk:[{code,text}], accepted, warnings:[text], notes:[text] }.
+// ok = không blocker và (không có mục cần gật hoặc user đã gật). accepted = user đã gật trong chat (cờ --dong-y).
 export function preflight(opts) {
-  const { state, now = Date.now(), zapExit, hasData = false } = opts
-  const out = { ok: false, blockers: [], warnings: [], notes: [] }
+  const { state, now = Date.now(), zapExit, hasData = false, accepted = false } = opts
+  const out = { ok: false, blockers: [], needOk: [], accepted, warnings: [], notes: [] }
 
   checkGate(opts, out)
   checkSecretBuild(opts, out)
@@ -389,25 +391,34 @@ export function preflight(opts) {
   // Chỉ đòi khi release.json ghi đã phát hành ≥ 2 lần: sau lần 1 chỉ có MỘT bản nên chưa thể quay lại (nghiệm thu đợt 4 K3).
   // Sau lần thứ 2, `release` tự nhắc thử quay lại; tới lần thứ 3 mà vẫn chưa thử thì chặn ở đây.
   if (state?.rollbackTested !== true && releaseCount(state) >= 2) {
-    out.blockers.push({ code: 'rollback', text: 'Đã phát hành từ 2 lần mà chưa thử quay lại bản trước: chạy `release rollback` (Cloudflare) hoặc `release vps --rollback --run` (VPS) một lần, rồi phát hành lại bản mới.' })
+    out.needOk.push({ code: 'rollback', text: 'Đã phát hành từ 2 lần mà chưa thử quay lại bản trước: chạy `release rollback` (Cloudflare) hoặc `release vps --rollback --run` (VPS) một lần, rồi phát hành lại bản mới.' })
   }
 
   const br = backupReady(state, now)
-  if (br.applicable && !br.ready) for (const r of br.reasons) out.blockers.push({ code: `backup-${r.code}`, text: `Sao lưu chưa đạt: ${r.text.toLowerCase()}.` })
+  if (br.applicable && !br.ready) for (const r of br.reasons) out.needOk.push({ code: `backup-${r.code}`, text: `Sao lưu chưa đạt: ${r.text.toLowerCase()}.` })
   if (hasData && !['on', 'off', 'advise-pro'].includes(state?.backup?.choice)) {
-    out.blockers.push({ code: 'backup-choice', text: 'App có dữ liệu mà user chưa chọn phương án sao lưu — hỏi user bật hay tắt sao lưu rồi ghi lại.' })
+    out.needOk.push({ code: 'backup-choice', text: 'App có dữ liệu mà user chưa chọn phương án sao lưu — hỏi user bật hay tắt sao lưu rồi ghi lại.' })
   }
 
-  out.ok = out.blockers.length === 0
+  out.ok = out.blockers.length === 0 && (out.needOk.length === 0 || accepted)
+  if (accepted) for (const m of out.needOk) out.warnings.push(`User đã gật phát hành dù thiếu: ${m.text}`)
   return out
 }
 
+// Mã thoát của preflight: còn blocker ⇒ 1; chỉ còn mục cần gật ⇒ 4; đạt ⇒ 0.
+export const preflightExit = (r) => (r.ok ? EXIT.OK : r.blockers.length ? EXIT.FAIL : EXIT.NEED_OK)
+
 export function formatPreflight(r) {
   const lines = []
-  if (r.ok) lines.push('Đủ điều kiện phát hành.')
-  else {
+  if (r.ok) lines.push(r.needOk?.length ? 'Được phát hành vì user đã gật.' : 'Đủ điều kiện phát hành.')
+  else if (r.blockers.length) {
     lines.push(`Chưa được phát hành — còn ${r.blockers.length} mục:`)
     r.blockers.forEach((b, i) => lines.push(`  ${i + 1}. ${b.text}`))
+  }
+  if (!r.ok && r.needOk?.length) {
+    lines.push(`Cần user gật — còn ${r.needOk.length} mục:`)
+    r.needOk.forEach((b, i) => lines.push(`  ${i + 1}. ${b.text}`))
+    lines.push('Kể rủi ro bằng lời; user gật trong chat thì chạy lại với --dong-y.')
   }
   for (const w of r.warnings) lines.push(`Cảnh báo: ${w}`)
   for (const n of r.notes) lines.push(`Ghi chú: ${n}`)
@@ -453,13 +464,13 @@ const unsaved = (res, what, hint = ' — kiểm quyền ghi thư mục dự án'
   ? `Chưa ghi được ${what} vì .claude/release.json đang hỏng (kit không ghi đè) — sửa hoặc xoá file đó rồi ghi lại.`
   : `Chưa ghi được ${what} vào .claude/release.json${hint}.`)
 
-// Phát hành thật (cf, vps --run) PHẢI qua preflight với cùng cờ (hooksDir, zapExit, hasData): còn mục chặn ⇒ dừng exit 1,
-// chưa đụng Cloudflare/máy chủ. Thiếu hooksDir ⇒ cũng dừng (không kiểm được thì không phát hành). Trả { block } hoặc { warnings }.
+// Phát hành thật (cf, vps --run) PHẢI qua preflight với cùng cờ (hooksDir, zapExit, hasData, accepted): còn mục chặn ⇒ dừng exit 1,
+// chỉ còn mục cần gật ⇒ dừng exit 4; đều chưa đụng Cloudflare/máy chủ. Thiếu hooksDir ⇒ cũng dừng (không kiểm được thì không phát hành). Trả { block } hoặc { warnings }.
 function gateRelease(opts, state, untouched) {
   const { dir, run, now = Date.now(), hooksDir } = opts
   if (!hooksDir) return { block: { code: EXIT.FAIL, lines: ['Chưa kiểm trước phát hành được vì thiếu thư mục hook của kit.', untouched] } }
-  const r = preflight({ dir, state, now, run, hooksDir, zapExit: opts.zapExit, hasData: opts.hasData })
-  if (!r.ok) return { block: { code: EXIT.FAIL, lines: [...formatPreflight(r), untouched] } }
+  const r = preflight({ dir, state, now, run, hooksDir, zapExit: opts.zapExit, hasData: opts.hasData, accepted: opts.accepted })
+  if (!r.ok) return { block: { code: preflightExit(r), lines: [...formatPreflight(r), untouched] } }
   return { warnings: r.warnings.map((w) => `Cảnh báo: ${w}`) }
 }
 

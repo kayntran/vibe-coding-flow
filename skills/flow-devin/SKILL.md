@@ -1,6 +1,7 @@
 ---
 name: flow-devin
 description: Chạy thử app trên máy ảo Devin (Windows/Ubuntu/macOS) thay máy user — chọn máy, đánh thức hoặc tạo máy riêng của dự án, chép code đang sửa, chạy app + Playwright, chụp ảnh qua cổng chuyển, đưa khoá, xong LUÔN cho máy ngủ. Dùng khi flow-qa / qa-tester / debugger cần mở app, chạy test Playwright, thử cài trên máy sạch, kiểm kit trên Mac, hoặc user nói "test trên máy ảo", "dùng Devin", "xoá máy ảo". KHÔNG dùng cho lint/typecheck/unit test (chạy máy user) hay việc cần GPU, mic/loa thật, đo tốc độ.
+user-invocable: false
 ---
 
 # Máy ảo Devin để chạy thử

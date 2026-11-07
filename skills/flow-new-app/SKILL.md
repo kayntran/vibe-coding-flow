@@ -1,12 +1,12 @@
 ---
 name: flow-new-app
-description: Tạo app mới từ số 0 cho người không code — kiểm máy, tạo dự án từ mẫu an toàn (webapp, app máy tính Wails, extension trình duyệt) có sẵn kiến trúc, máy kiểm, header bảo mật, màn đầu trống (không dữ liệu giả), bật điểm lưu, chạy và mở màn đầu. Dùng khi user nói kiểu "làm cho tôi một app…", "tôi muốn có webapp/app máy tính/extension…" mà chưa có thư mục dự án. KHÔNG dùng cho dự án đã có (dùng flow-spec), app điện thoại (chưa có mẫu — nói rõ, đề nghị webapp chạy được trên điện thoại).
+description: Tạo app mới từ số 0 cho người không code — kiểm máy, tạo dự án từ mẫu an toàn (webapp, app máy tính Wails, extension trình duyệt) có sẵn kiến trúc, máy kiểm, header bảo mật, màn đầu trống (không dữ liệu giả), bật điểm lưu, chạy và mở màn đầu. Dùng khi user nói kiểu "làm cho tôi một app…", "tôi muốn có webapp/app máy tính/extension…" mà chưa có thư mục dự án. KHÔNG dùng cho dự án đã có (flow-feature), app điện thoại (chưa có mẫu — nói rõ, đề nghị webapp chạy được trên điện thoại).
 ---
 
 # Flow — app mới từ số 0
 
-Kết thúc skill = user mở được app, thấy màn đầu trống (tên app + một câu mời, không dữ liệu giả), `flow check` xanh. Sau đó sang `flow-spec` (cổng giao
-diện: 5 bản demo ngay trong app này).
+Kết thúc skill = user mở được app, thấy màn đầu trống (tên app + một câu mời, không dữ liệu giả), `flow check` xanh. Sau đó đi theo `flow-feature`,
+bắt đầu bằng hiểu người dùng (`flow-ux`) rồi 5 bản demo (`flow-ui-demo`) ngay trong app này.
 
 ## 1. Hỏi gọn (AskUserQuestion, ≤3 câu, chỉ câu chưa rõ)
 - Loại app: **webapp** (mở bằng trình duyệt, dùng được cả trên điện thoại) · **app máy tính** (cài trên Windows/Mac,
@@ -33,7 +33,7 @@ Mở phiên làm việc trong thư mục app mới (hoặc thêm thư mục vào
 ## 4. Chạy và mở
 Chạy lệnh dev nó in (port riêng: `node ~/.claude/hooks/wt-env.mjs alloc <thư mục>`), mở app cho user (preview/trình
 duyệt; app máy tính: cửa sổ app), chụp màn đầu. `node ~/.claude/hooks/flow-check.mjs --dir <thư mục>` phải xanh.
-Báo user theo khuôn: app đã mở ở đâu · thấy gì · bước tiếp là chọn giao diện (5 bản demo).
+Báo user theo khuôn: app đã mở ở đâu · thấy gì · bước tiếp là chốt luồng và chọn giao diện.
 
 ## 5. Nền dữ liệu
 Áp công thức đã chọn (`recipes/<tên>.md`) như task đầu của PLAN tính năng đầu tiên: đăng nhập, chặn quyền, kiểm dữ

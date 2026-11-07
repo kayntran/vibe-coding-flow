@@ -1,6 +1,7 @@
 ---
 name: flow-team
 description: Đội hình worker và cách giao việc — chọn worker nào (researcher, recon, coder, coder-lite, coder-mini, test-runner, qa-tester, debugger, Codex, Grok, agy), viết brief, đọc receipt, chạy song song nhiều worker, thang leo khi worker hỏng, ghi nhật ký. Dùng khi sắp gọi Agent tool hoặc CLI model ngoài, khi chia làn thi công song song, khi worker trả blocked/sai. KHÔNG cần cho việc captain tự làm (tìm kiếm rg, phỏng vấn, viết plan, UI, việc dưới ~5 phút).
+user-invocable: false
 ---
 
 # Đội hình & giao việc
@@ -17,7 +18,7 @@ description: Đội hình worker và cách giao việc — chọn worker nào (r
 | Kiểm cơ học | `test-runner` (Haiku medium) | lint/typecheck/test/build, trả CHỈ phần đỏ | đoán nguyên nhân, sửa code |
 | Test thực tế | `qa-tester` (Sonnet high) | chạy app, lái Playwright như người dùng theo QA charter | sửa code |
 | Debug | `debugger` (Sonnet xhigh, hỏi thêm **Codex**) | test đỏ, CI đỏ, log server, stack trace ⇒ nguyên nhân gốc | sửa code |
-| Soát plan | chuỗi Codex Sol high → Opus high qua agy → `code-reviewer` opus (đang ở Codex: Sol high), 1 lượt — CHỈ cỡ L (skill `flow-spec` pha 3) | sau khi viết PLAN.md, thay cho việc user duyệt plan | cỡ S/M (captain tự soát) |
+| Soát plan | chuỗi Codex Sol high → Opus high qua agy → `code-reviewer` opus (đang ở Codex: Sol high), 1 lượt — CHỈ cỡ L (skill `flow-plan`) | sau khi viết PLAN.md, thay cho việc user duyệt plan | cỡ S/M (captain tự soát) |
 | Review code + bảo mật + hiệu năng | theo rủi ro (thường: **Grok** · nhạy cảm: **Codex Sol high** + Grok · tiền/dữ liệu: + **Gemini Flash**), tất cả qua `review-ext.mjs --model …` | MỘT lần cho cả tính năng, trước khi gộp (skill `flow-review`) | sau từng giai đoạn/làn |
 | Review dự phòng | Codex → Grok → Gemini Flash → `code-reviewer` (Opus medium) | lượt nào lỗi thì sang model kế chưa dùng | — |
 

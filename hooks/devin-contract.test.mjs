@@ -21,7 +21,7 @@ const CONSUMERS = {
 // Nơi có nhắc Playwright/mở app nhưng cố ý không đi qua máy ảo.
 const NOT_APPLICABLE = {
   'hooks/ui-check.mjs': 'chạy ở máy user, trỏ vào app (trên máy ảo thì qua cổng forward)',
-  'skills/flow-production/SKILL.md': 'thử nhanh trên địa chỉ thật sau phát hành, không mở app trên máy',
+  'skills/flow-publish/SKILL.md': 'thử nhanh trên địa chỉ thật sau phát hành, không mở app trên máy',
   'skills/flow-team/SKILL.md': 'chỉ cấp port; port là cổng forward khi chạy máy ảo',
 }
 

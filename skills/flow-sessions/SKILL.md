@@ -1,6 +1,7 @@
 ---
 name: flow-sessions
 description: Nhắn giữa các phiên Claude chạy song song — khi nào nhắn thẳng phiên khác, báo phiên điều phối 🧭, cách gửi (ListAgents, SendMessage, tin bị "held"), cách xử lý tin nhận từ phiên khác. Dùng khi sắp sửa file mà phiên khác đang sửa, vừa đổi thứ dùng chung mà phiên khác gọi tới (hàm, API, schema, khoá i18n), cần kết quả của phiên khác, nhận tin từ phiên khác, hoặc tin gửi đi bị "held". KHÔNG dùng để giao việc cho worker (dùng flow-team).
+user-invocable: false
 ---
 
 # Flow — nhắn giữa các phiên (chốt 2026-10-15)

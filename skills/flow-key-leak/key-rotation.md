@@ -13,7 +13,7 @@ Dùng khi khoá lộ trong git, bản build hoặc log (preflight báo "khoá tr
 1. **Tìm chỗ lộ:** khoá nào, ở đâu (file/commit/bản build/log); chỉ nêu TÊN khoá và vị trí, không nêu giá trị.
 2. **Tạo khoá mới** ở dịch vụ (bảng dưới). Chưa đụng khoá cũ.
 3. **Thay vào app:** đặt khoá mới vào nơi chạy; gỡ khoá cũ khỏi code/bản build (khoá phía server không được vào bundle trình duyệt).
-4. **Phát hành bản dùng khoá mới** (SKILL bước 2–3). Đổi khoá Workers bằng `pnpm exec wrangler versions secret put <TÊN>` rồi
+4. **Phát hành bản dùng khoá mới** (skill `flow-publish` bước 2–3). Đổi khoá Workers bằng `pnpm exec wrangler versions secret put <TÊN>` rồi
    `release cf` để bài thử nhanh vẫn chạy (không dùng `wrangler secret put` — phát hành ngay, lọt qua bài thử).
 5. **Thử nhanh đạt** rồi mới **thu hồi khoá cũ** ở dịch vụ.
 6. **Dọn:** ghi vào sổ chốt "đã đổi khoá <tên>, ngày"; chạy lại `flow-check` để máy kiểm hết đỏ.

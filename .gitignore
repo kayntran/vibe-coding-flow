@@ -37,3 +37,6 @@
 !/plans/flow-v6-so-chot/
 /plans/flow-v6-so-chot/*
 !/plans/flow-v6-so-chot/*.md
+
+# Thư mục tạm của test cổng
+/hooks/.flow-gate-fx-*

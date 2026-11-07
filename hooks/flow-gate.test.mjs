@@ -620,6 +620,8 @@ describe('stamp & status', () => {
     // chữ tiếng Việt dạng NFD (macOS) vẫn nhận
     assert.equal(cli(fx, fx.wt, 'stamp', 'qa', write(fx.root, 'qd.md', 'QA đạt\nUser duyệt giao diện: có\n'.normalize('NFD'))).status, 0)
     assert.equal(cli(fx, fx.wt, 'stamp', 'qa', write(fx.root, 'q3.md', 'QA đạt\n- **User duyệt giao diện:** có (2026-10-12, ảnh màn chính)\n')).status, 0)
+    // sửa rất nhỏ: gửi ảnh trước/sau, không dừng chờ [rofm]
+    assert.equal(cli(fx, fx.wt, 'stamp', 'qa', write(fx.root, 'qs.md', 'QA đạt\nSửa giao diện rất nhỏ: đã gửi ảnh trước/sau\n')).status, 0)
     const fx2 = fixture()
     commit(fx2.wt, 'feat.go', 'package x\n', 'feat')
     assert.equal(cli(fx2, fx2.wt, 'stamp', 'qa', write(fx2.root, 'q.md', 'ok\n')).status, 0)

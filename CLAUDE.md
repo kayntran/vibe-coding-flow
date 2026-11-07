@@ -52,28 +52,26 @@ tự chọn pha, skill, worker theo yêu cầu — không đợi user gõ slash 
 AGENTS.md, `.claude/rules/`) thắng phần này.
 
 **Phân cỡ** — nói một dòng trước khi làm:
-- **S** (tả diff bằng một câu, 1–2 file, không đổi schema/API): worktree → làm → kiểm → QA nếu đụng UI → review → hỏi gộp.
-- **Đụng giao diện (mọi cỡ) ⇒ DỪNG cho user xem trước khi đi tiếp.** Màn mới / làm lại giao diện ⇒ trước khi code thật,
-  dựng ~5 bản demo khác hướng NGAY TRONG app của dự án chạy local (dữ liệu mẫu; không widget/artifact) + thanh chuyển qua
-  lại giữa các bản (chỉ bật khi chạy dev), mở app cho user chọn; sửa nhỏ ⇒ một bản. Chọn xong ⇒ làm thật, gỡ bản thừa.
-  Làm xong ⇒ mở app/ảnh chụp, hỏi "giao diện đã ổn chưa?" (AskUserQuestion); gật rồi mới review/gộp.
-- **M** (nhiều file một module) / **L** (tính năng mới, schema, nhiều module, bảo mật): đủ pha, bắt đầu bằng `flow-spec`.
+- **S** (tả diff bằng một câu, 1–2 file, không đổi schema/API): worktree → làm → kiểm → QA nếu đụng UI → review (đổi chữ, màu thì bỏ) → hỏi gộp.
+- **Giao diện:** sửa rất nhỏ (nhãn, màu) ⇒ gửi ảnh trước/sau, không dừng chờ. Màn mới / làm lại ⇒ `flow-ux` rồi `flow-ui-demo`
+  (5 bản khi app chưa có gu, 3 bản khi đã có), làm xong mở app hoặc ảnh, hỏi "giao diện đã ổn chưa?"; gật rồi mới review/gộp.
+- **M** (nhiều file một module) / **L** (tính năng mới, schema, nhiều module, bảo mật): đi theo `flow-feature`.
 
 **Định tuyến** — user nói gì thì làm gì:
 
 | User nói (đại ý) | Làm |
 |---|---|
-| app mới từ số 0, "làm cho tôi một app…" chưa có thư mục dự án | skill `flow-new-app` (rồi `flow-spec`) |
-| ý tưởng mới, làm tính năng, thêm chức năng, "tôi muốn app làm được…" | cỡ M/L ⇒ skill `flow-spec` |
+| app mới từ số 0, "làm cho tôi một app…" chưa có thư mục dự án | skill `flow-new-app` (rồi `flow-feature`) |
+| làm tính năng trọn vẹn, thêm chức năng, "tôi muốn app làm được…" | cỡ M/L ⇒ skill `flow-feature`; chỉ một bước ⇒ `flow-spec`, `flow-ux`, `flow-ui-demo`, `flow-ui-design`, `flow-plan`, `flow-build` |
 | "quay về lúc…", "hoàn tác việc vừa rồi", app hỏng sau lần sửa | `node ~/.claude/hooks/luu.mjs tim` → `xem` → đọc lại bằng lời, hỏi gật → `quay`; nói rõ dữ liệu không quay theo |
 | thêm/sửa thứ DÙNG CHUNG: provider, model AI, gói/quyền, cài đặt, tool của AI agent, ngôn ngữ… | skill `flow-impact` (kể cả việc cỡ S) — tìm tính năng anh em, hỏi user, gắn test đối chiếu |
 | có ai làm chưa, tìm repo/thư viện, tham khảo, ý tưởng hay hơn | agent `researcher` |
-| lỗi, bug, crash, không chạy, CI đỏ, đọc log | agent `debugger` (rẻ trước: log/test có sẵn → tự mở app làm lại → đọc code sâu; tả bằng lời/ảnh ⇒ hỏi "có phải chỗ này?" kèm ảnh trước khi sửa) ⇒ `coder` sửa (skill `flow-qa`) |
+| lỗi người dùng gặp, crash · test/CI đỏ, đọc log · lỗi này nghĩa là gì · đang tới đâu, kit làm được gì | skill `flow-bugfix` · `flow-fix` · `flow-explain` · `flow-status` |
 | chạy thử, test thử, kiểm tra như người dùng | skill `flow-qa` (mở app trên máy ảo: skill `flow-devin`) |
-| review, soát code, bảo mật | skill `flow-review` (cũng tự chạy trước mỗi lần gộp) |
+| review, soát code · bảo mật | skill `flow-review` (cũng tự chạy trước mỗi lần gộp) · `flow-security` |
 | gộp, merge, push, "xong rồi đẩy lên" | skill `flow-merge` — chỉ khi user đã gật |
-| "phát hành", "đưa lên mạng", "quay lại bản trước", "app có lỗi không", sao lưu, đổi khoá | skill `flow-production` |
-| "khám sức khoẻ app", nhắc khám định kỳ · "app chậm", "chịu được bao nhiêu người" | skill `flow-maintain` · skill `flow-scale` |
+| "phát hành", "đưa lên mạng" · xem lỗi bản thật · quay lại bản trước · sao lưu · khoá lộ, đổi khoá | skill `flow-release` · `flow-publish` · `flow-rollback` · `flow-backup` · `flow-key-leak` |
+| khám tổng thể · "khám sức khoẻ app", nhắc khám định kỳ · "app chậm", "chịu được bao nhiêu người" | skill `flow-health` · `flow-maintain` · `flow-scale` |
 | X ở đâu, chỗ nào dùng Y | tự tìm bằng công cụ Grep có sẵn hoặc `rg` một lệnh nhiều `-e` (không `grep -r`/`find` quét thư mục); thư mục bị git bỏ qua (worktree, thư mục nội bộ) ⇒ thêm `-uu` kẻo tìm sót |
 | giao việc cho worker / chạy song song | skill `flow-team` |
 | mở phiên chat mới / tiếp quản việc phiên cũ | trong Paseo (có biến `PASEO_AGENT_ID`) ⇒ skill `paseo`: `create_workspace` (local, path = worktree) → `create_agent` (cấu hình từ `list_profiles`), prompt đầu ghi hiện trạng; không bảo user tự mở |
