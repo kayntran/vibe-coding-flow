@@ -1,6 +1,6 @@
 ---
 name: flow-qa
-description: Kiểm và sửa — chạy lint/typecheck/test, tự mở app dùng thử như người thật (Playwright), debug tới nguyên nhân gốc rồi sửa bằng test đỏ, đóng dấu QA. Dùng khi code xong trong worktree (tự chạy, trước review), hoặc khi user nói kiểu "chạy thử", "test giúp", "kiểm tra xem chạy chưa", "bị lỗi", "không chạy", "CI đỏ", "xem log". Bắt buộc khi diff đụng UI/app vì hook chặn gộp nếu thiếu dấu QA. KHÔNG dùng để review code (dùng flow-review).
+description: Kiểm và sửa — chạy lint/typecheck/test, tự mở app dùng thử như người thật (Playwright), debug tới nguyên nhân gốc rồi sửa bằng test đỏ, đóng dấu QA. Dùng khi code xong trong worktree (tự chạy, trước review), hoặc khi user nói kiểu "chạy thử", "test giúp", "kiểm tra xem chạy chưa", "bị lỗi", "không chạy", "CI đỏ", "xem log". Luôn chạy khi diff đụng UI/app. KHÔNG dùng để review code (dùng flow-review).
 ---
 
 # Flow — kiểm, test thực tế, debug

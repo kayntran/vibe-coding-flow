@@ -6,7 +6,7 @@ description: Bản đồ ảnh hưởng — khi thêm/sửa một thứ DÙNG CH
 # Bản đồ ảnh hưởng — không bỏ sót tính năng anh em
 
 Lời dặn bằng chữ không giữ được lâu; **test giữ được**. Mục tiêu cuối của skill này là mỗi thứ dùng chung có một
-bài test đối chiếu, để lần sau thêm thành viên mới mà quên một tính năng thì test đỏ — và dấu "test xanh" chặn gộp.
+bài test đối chiếu, để lần sau thêm thành viên mới mà quên một tính năng thì test đỏ, và AI phải sửa hoặc báo trước khi gộp.
 
 ## 1. Gọi tên thứ dùng chung và nguồn gốc của nó
 - Thứ dùng chung là gì (vd "provider dữ liệu SERP"), danh sách gốc/registry nằm ở đâu (`path:line`).

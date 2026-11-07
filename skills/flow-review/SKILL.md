@@ -1,6 +1,6 @@
 ---
 name: flow-review
-description: Review code bằng Grok (qua Cursor) / Codex Sol mới nhất (+ Gemini Flash mới nhất) — ĐÚNG MỘT LẦN cho cả tính năng, trước khi hỏi user gộp; máy kiểm trước (lint/typecheck/test) rồi mới gọi AI; mức suy luận theo rủi ro; captain chỉ kiểm sâu lỗi nặng; đóng dấu review. Tự chạy khi nhánh đã xanh test và QA (hook chặn gộp nếu thiếu dấu). Cũng dùng khi user nói "review", "soát code", "kiểm bảo mật", "code này ổn chưa". KHÔNG dùng cho review plan (nằm trong flow-spec), KHÔNG chạy sau từng giai đoạn/làn.
+description: Review code bằng Grok (qua Cursor) / Codex Sol mới nhất (+ Gemini Flash mới nhất) — ĐÚNG MỘT LẦN cho cả tính năng, trước khi hỏi user gộp; máy kiểm trước (lint/typecheck/test) rồi mới gọi AI; mức suy luận theo rủi ro; captain chỉ kiểm sâu lỗi nặng; đóng dấu review. Tự chạy khi nhánh đã xanh test và QA. Cũng dùng khi user nói "review", "soát code", "kiểm bảo mật", "code này ổn chưa". KHÔNG dùng cho review plan (nằm trong flow-spec), KHÔNG chạy sau từng giai đoạn/làn.
 ---
 
 # Flow — review code (tiết kiệm token, vẫn kỹ)

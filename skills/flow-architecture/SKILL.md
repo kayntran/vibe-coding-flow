@@ -37,7 +37,7 @@ rồi `gen`. Thêm module mới là bình thường; NỚI luật thì không (d
 Cổng gộp tự phân biệt: thêm module/luật cấm, hạ trần, file sinh lại bằng `gen` khớp `arch.json`, thêm luật ESLint mức
 `error`, gỡ khối miễn ⇒ cho qua. Đổi `limits` lên, bỏ/nới `forbidden`, bỏ module, thêm `mayDependOn` ngược hướng, sửa tay
 file sinh, sửa file mốc, thêm miễn/ignores/tắt luật ESLint, thêm comment tắt luật (`eslint-disable`, `@ts-ignore`,
-`//nolint`…) ⇒ hook chặn gộp tới khi user gật [j21n]. Trước đó tự hỏi: sửa code cho
+`//nolint`…) ⇒ phải báo user lúc gộp. Trước đó tự hỏi: sửa code cho
 đúng luật có được không? Được ⇒ sửa code. Thật sự cần nới ⇒ hỏi user một câu đời thường ("cho phép file này dài 600
 dòng vì đây là bảng dữ liệu sinh tự động?"), ghi sổ chốt.
 

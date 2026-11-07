@@ -13,14 +13,16 @@ Chỉ chạy khi user đã gật trong chat. Nhánh chính tên `master`/khác �
    của việc mình (lạ ⇒ dừng, đừng commit) → `git commit` (squash một commit, message theo quy ước dự án + dòng
    Co-Authored-By). Phiên đang cô lập trong worktree: mỗi lệnh git một dòng, không `cd "$X" && git …` (harness từ chối).
 2. **Test ĐỦ BỘ ngay trong worktree sau rebase** (Agent `test-runner`, chạy qua
-   `node ~/.claude/hooks/flow-gate.mjs stamp test -- <lệnh test đủ bộ>` để đóng **dấu test xanh** — hook chặn gộp nếu thiếu). Gộp là fast-forward nên đây chính là
-   test trên `main` sau gộp. Đỏ ⇒ sửa trên branch, không gộp.
+   `node ~/.claude/hooks/flow-gate.mjs stamp test -- <lệnh test đủ bộ>`). Gộp là fast-forward nên đây chính là
+   test trên `main` sau gộp. Đỏ do việc của mình ⇒ sửa trên branch. Đỏ không liên quan, hoặc không chạy được test/review/QA
+   (hết lượt, thiếu công cụ) ⇒ báo user một dòng phần chưa kiểm; user vẫn muốn gộp thì gộp, ghi lại để kiểm bù.
    Repo là kit (`~/.claude`) ⇒ chạy thêm `node ~/.claude/hooks/mac-check.mjs` (cùng bộ test trên máy macOS Devin — skill
    `flow-devin`, bản đã commit; exit 3 = Devin không dùng được ⇒ báo user một dòng, không chặn gộp).
-   Rebase làm diff đổi nội dung (conflict, main có sửa chạm vùng mình) ⇒ dấu review/QA mất hiệu lực ⇒ hook
-   chặn gộp ⇒ chạy lại `flow-review` (và `flow-qa` nếu đụng UI) cho phần đổi.
+   Rebase làm diff đổi nội dung (conflict, main có sửa chạm vùng mình) ⇒ chạy lại `flow-review` (và `flow-qa` nếu đụng UI)
+   cho phần đổi.
 3. `ExitWorktree` `action: "keep"` → về thư mục chính, soi lại `git worktree list` + file các phiên khác đang đổi,
-   rồi `git merge --ff-only <branch>`.
+   rồi `git merge --ff-only <branch>`. File nằm sẵn ở thư mục chính trùng tên với file của nhánh ⇒ AI so nội dung, cất
+   sang thư mục sao lưu rồi gộp tiếp; không đưa lệnh cho user chép, không sửa kit.
 4. **Đóng sổ (sau gộp, trước push):** có `docs/specs/<YYYY-MM-DD>-<slug>/progress.md` ⇒ chạy
    `node ~/.claude/hooks/lib/so-chot.mjs xong <projectRoot> <YYYY-MM-DD>-<slug>` — ghi `Trạng thái: xong` + `Xong ngày`
    vào progress.md (hook thôi nạp sổ này), cất kho các quyết định ✅ phạm vi tính năng (điều `chung` và điều ⚠️ chờ xem lại giữ nguyên) và sinh

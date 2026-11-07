@@ -533,7 +533,7 @@ export function init(dir, { stack } = {}) {
 
 // --- gen: sinh cấu hình công cụ ----------------------------------------------------------------------------------------------------------
 
-const kitMade = (text) => text !== null && text.split('\n', 1)[0].includes(GEN_MARK) // chỉ dòng đầu, như cổng gộp (lib/rule-change.mjs)
+const kitMade = (text) => text !== null && text.split('\n', 1)[0].includes(GEN_MARK) // chỉ dòng đầu
 const keptWhy = (rel) => `${rel} đã có và không phải do kit sinh — giữ nguyên (muốn dùng luật của kit: xoá file rồi chạy lại gen).`
 
 function genWrite(dir, rel, text, res) {

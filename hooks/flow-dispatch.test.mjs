@@ -82,11 +82,14 @@ function assertPass(r) {
   assert.equal(r.stdout, '', `đáng lẽ cho qua nhưng in: ${r.stdout}`)
 }
 
-function assertDeny(r) {
+// Giao việc không bao giờ bị chặn [chốt 2026-11-07]: thiếu gì thì chỉ nhắc (additionalContext), không có permissionDecision. Trả nội dung nhắc.
+function assertHint(r) {
   assert.equal(r.status, 0)
-  assert.equal(r.json?.hookSpecificOutput?.permissionDecision, 'deny', `đáng lẽ chặn, stdout: ${r.stdout}`)
-  assert.equal(r.json.hookSpecificOutput.hookEventName, 'PreToolUse')
-  return r.json.hookSpecificOutput.permissionDecisionReason
+  assert.equal(r.json?.hookSpecificOutput?.permissionDecision, undefined, `đáng lẽ chỉ nhắc, stdout: ${r.stdout}`)
+  assert.equal(r.json?.hookSpecificOutput?.hookEventName, 'PreToolUse')
+  const ctx = r.json?.hookSpecificOutput?.additionalContext
+  assert.ok(typeof ctx === 'string' && ctx !== '', `đáng lẽ có lời nhắc, stdout: ${r.stdout}`)
+  return ctx
 }
 
 function assertBlock(r) {
@@ -113,16 +116,16 @@ describe('agent: coder/coder-lite có lane=', () => {
     assertPass(agent(fx, 'coder-lite', `plan=${fx.plan} lane=B`))
   })
 
-  test('bảng OVERLAP ⇒ deny kèm dòng OVERLAP', () => {
+  test('bảng OVERLAP ⇒ chỉ nhắc, kèm dòng OVERLAP', () => {
     const fx = repoWithPlan(TABLE(['| A | src/a.txt | - | node a |', '| B | src/a.txt | - | node b |']))
-    const reason = assertDeny(agent(fx, 'coder', `plan=${fx.plan} lane=A`))
-    assert.match(reason, /OVERLAP src\/a\.txt lanes: A B/)
+    const ctx = assertHint(agent(fx, 'coder', `plan=${fx.plan} lane=A`))
+    assert.match(ctx, /OVERLAP src\/a\.txt lanes: A B/)
   })
 
-  test('lane= thiếu plan= ⇒ deny', () => {
+  test('lane= thiếu plan= ⇒ chỉ nhắc', () => {
     const fx = repoWithPlan()
-    assert.match(assertDeny(agent(fx, 'coder', 'outcome=x lane=A base=main')), /lane= phải kèm plan=/)
-    assert.match(assertDeny(agent(fx, 'coder-lite', 'lane=A')), /lane= phải kèm plan=/)
+    assert.match(assertHint(agent(fx, 'coder', 'outcome=x lane=A base=main')), /lane= phải kèm plan=/)
+    assert.match(assertHint(agent(fx, 'coder-lite', 'lane=A')), /lane= phải kèm plan=/)
   })
 
   test('không có lane= ⇒ qua dù có plan= hỏng hay không có plan=', () => {
@@ -131,10 +134,10 @@ describe('agent: coder/coder-lite có lane=', () => {
     assertPass(agent(fx, 'coder', 'outcome=sửa lỗi nhỏ'))
   })
 
-  test('bảng làn hỏng / plan không đọc được ⇒ deny (exit 2 của lane-check)', () => {
+  test('bảng làn hỏng / plan không đọc được ⇒ chỉ nhắc (exit 2 của lane-check)', () => {
     const fx = repoWithPlan('# không có bảng làn\n')
-    assert.match(assertDeny(agent(fx, 'coder', `plan=${fx.plan} lane=A`)), /Không kiểm được bảng làn/)
-    assert.match(assertDeny(agent(fx, 'coder', `plan=${path.join(fx.repo, 'KHONG-CO.md')} lane=A`)), /Không kiểm được bảng làn/)
+    assert.match(assertHint(agent(fx, 'coder', `plan=${fx.plan} lane=A`)), /Không kiểm được bảng làn/)
+    assert.match(assertHint(agent(fx, 'coder', `plan=${path.join(fx.repo, 'KHONG-CO.md')} lane=A`)), /Không kiểm được bảng làn/)
   })
 
   test('plan= tương đối so với cwd của input; có nháy; có dấu cách; theo sau bởi khoá khác / dấu phẩy', () => {
@@ -147,9 +150,9 @@ describe('agent: coder/coder-lite có lane=', () => {
     assertPass(agent(fx, 'coder', `plan=${fx.plan.replace(/\\/g, '/')}\nlane=A`)) // dấu / và xuống dòng
   })
 
-  test('plan= tương đối nhưng sai thư mục ⇒ deny (không tìm thấy)', () => {
+  test('plan= tương đối nhưng sai thư mục ⇒ chỉ nhắc (không tìm thấy)', () => {
     const fx = repoWithPlan(CLEAN_PLAN, 'docs/PLAN.md')
-    assertDeny(agent(fx, 'coder', 'plan=PLAN.md lane=A'))
+    assertHint(agent(fx, 'coder', 'plan=PLAN.md lane=A'))
   })
 })
 
@@ -162,14 +165,14 @@ describe('agent: vai writesCode lấy từ kit/roles.json (coder-mini đi qua đ
     assert.match(src, /roleSet\(['"]writesCode['"]/)
   })
 
-  test('coder-mini có lane= ⇒ cũng đòi plan= và kiểm bảng làn: sạch qua, OVERLAP/thiếu plan/bảng hỏng deny', () => {
+  test('coder-mini có lane= ⇒ cũng kiểm plan= và bảng làn: sạch qua, OVERLAP/thiếu plan/bảng hỏng chỉ nhắc', () => {
     const fx = repoWithPlan()
     assertPass(agent(fx, 'coder-mini', `outcome=x scope=src/a.txt plan=${fx.plan} lane=A base=main`))
-    assert.match(assertDeny(agent(fx, 'coder-mini', 'outcome=x lane=A')), /lane= phải kèm plan=/)
+    assert.match(assertHint(agent(fx, 'coder-mini', 'outcome=x lane=A')), /lane= phải kèm plan=/)
     const bad = repoWithPlan(TABLE(['| A | src/a.txt | - | node a |', '| B | src/a.txt | - | node b |']))
-    assert.match(assertDeny(agent(bad, 'coder-mini', `plan=${bad.plan} lane=A`)), /OVERLAP src\/a\.txt lanes: A B/)
+    assert.match(assertHint(agent(bad, 'coder-mini', `plan=${bad.plan} lane=A`)), /OVERLAP src\/a\.txt lanes: A B/)
     const broken = repoWithPlan('# không có bảng làn\n')
-    assert.match(assertDeny(agent(broken, 'coder-mini', `plan=${broken.plan} lane=A`)), /Không kiểm được bảng làn/)
+    assert.match(assertHint(agent(broken, 'coder-mini', `plan=${broken.plan} lane=A`)), /Không kiểm được bảng làn/)
   })
 
   test('vai không viết code (kể cả vai chỉ có trong roles.json như plan-reviewer) ⇒ qua dù có lane= không plan=', () => {
@@ -318,29 +321,29 @@ describe('agent: researcher được đính thẻ kho nghiên cứu', () => {
   })
 })
 
-// ---------- AC-24: lời chặn mở đầu bằng câu đời thường ----------
+// ---------- giao việc không bao giờ bị chặn ----------
 
-describe('AC-24: lời chặn của flow-dispatch mở đầu bằng một câu đời thường', () => {
-  test('thiếu plan= / bảng làn chồng chéo / bảng hỏng / qa-tester thiếu cổng', () => {
+describe('giao việc không bao giờ bị chặn: thiếu plan= / bảng làn chồng chéo / bảng hỏng / qa-tester thiếu cổng ⇒ chỉ nhắc, việc vẫn được giao', () => {
+  test('mọi ca chỉ trả additionalContext (không có permissionDecision), mở đầu bằng câu nói việc đã giao', () => {
     const fx = repoWithPlan()
-    assertPlainOpening(assertDeny(agent(fx, 'coder', 'outcome=x lane=A')), 'thiếu plan')
+    assert.match(assertHint(agent(fx, 'coder', 'outcome=x lane=A')), /^Việc đã giao nhưng/)
     const bad = repoWithPlan(TABLE(['| A | src/a.txt | - | node a |', '| B | src/a.txt | - | node b |']))
-    assertPlainOpening(assertDeny(agent(bad, 'coder', `plan=${bad.plan} lane=A`)), 'overlap')
+    assert.match(assertHint(agent(bad, 'coder', `plan=${bad.plan} lane=A`)), /^Việc đã giao nhưng/)
     const broken = repoWithPlan('# không có bảng làn\n')
-    assertPlainOpening(assertDeny(agent(broken, 'coder-lite', `plan=${broken.plan} lane=A`)), 'bảng hỏng')
-    assertPlainOpening(assertDeny(agent(fx, 'qa-tester', 'chạy QA, không có cổng')), 'qa-tester')
+    assert.match(assertHint(agent(broken, 'coder-lite', `plan=${broken.plan} lane=A`)), /^Việc đã giao nhưng/)
+    assert.match(assertHint(agent(fx, 'qa-tester', 'chạy QA, không có cổng')), /^Việc kiểm thử đã giao nhưng/)
   })
 })
 
 // ---------- agent: qa-tester ----------
 
 describe('agent: qa-tester', () => {
-  test('thiếu port ⇒ deny', () => {
+  test('thiếu port ⇒ chỉ nhắc', () => {
     const fx = repoWithPlan()
-    assert.match(assertDeny(agent(fx, 'qa-tester', 'chạy QA trên worktree wt-x, không có cổng')), /PORT_BASE=<n>/)
-    assert.match(assertDeny(agent(fx, 'qa-tester', 'PORT_BASE=')), /PORT_BASE=<n>/)
-    assert.match(assertDeny(agent(fx, 'qa-tester', 'port=1')), /PORT_BASE=<n>/) // < 2 chữ số
-    assert.match(assertDeny(agent(fx, 'qa-tester', 'support=4120')), /PORT_BASE=<n>/) // "port" phải đứng riêng
+    assert.match(assertHint(agent(fx, 'qa-tester', 'chạy QA trên worktree wt-x, không có cổng')), /PORT_BASE=<n>/)
+    assert.match(assertHint(agent(fx, 'qa-tester', 'PORT_BASE=')), /PORT_BASE=<n>/)
+    assert.match(assertHint(agent(fx, 'qa-tester', 'port=1')), /PORT_BASE=<n>/) // < 2 chữ số
+    assert.match(assertHint(agent(fx, 'qa-tester', 'support=4120')), /PORT_BASE=<n>/) // "port" phải đứng riêng
   })
 
   test('PORT_BASE=4120 ⇒ qua', () => {

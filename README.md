@@ -11,7 +11,8 @@ skill tự bật theo câu user nói, hook ép các cổng. Thiết kế gốc: 
 | `CLAUDE.md` | Thứ DUY NHẤT nạp vào mọi phiên (~3,6KB): ngôn ngữ, nguyên tắc, phân cỡ, bảng định tuyến "user nói gì → làm gì" |
 | `skills/flow-*` | Quy trình, chỉ nạp khi cần: `flow-spec` (ý tưởng → plan), `flow-impact` (tính năng anh em + test đối chiếu), `flow-team` (worker, brief, song song), `flow-worktree`, `flow-qa` (kiểm, test thực tế, debug), `flow-review` (Codex), `flow-merge`, `flow-production` (phát hành, quay lại, xem lỗi, sao lưu, đổi khoá), `flow-maintain` (khám sức khoẻ định kỳ), `flow-scale` (đo tải khi app chậm), `flow-sessions` (nhắn giữa các phiên chạy song song), `flow-devin` (chạy thử trên máy ảo Devin) |
 | `agents/` | Worker: `researcher` (GitHub + agy), `recon`, `coder`, `coder-lite`, `test-runner`, `qa-tester` (Playwright), `debugger` (+ Codex), `code-reviewer` |
-| `hooks/flow-gate.mjs` | Chặn: sửa thẳng thư mục chính repo, gộp thiếu dấu review/QA, commit/push có secret; bắt worker trả receipt |
+| `hooks/flow-gate.mjs` | Chỉ chặn việc nguy hiểm (sửa thẳng thư mục chính, lộ secret, ép/xoá nhánh chính, bỏ thay đổi ở bản chính, xoá thư mục), có lối ra `FLOW_OK=1` khi user gật; gộp thiếu dấu chỉ nhắc; bắt worker trả receipt |
+| `hooks/don.mjs` | Dọn thư mục có kiểm tra: thư mục tạm, build mà git bỏ qua, worktree đã gộp sạch |
 | `hooks/session-start.mjs` | Mở phiên / sau khi nén ngữ cảnh: tự nạp sổ `progress.md` đang dở; nhắc báo cáo MCP sau 30 ngày |
 | `hooks/lane-check.mjs` | Chạy song song: `plan` kiểm bảng làn trong PLAN.md (trùng file, file nóng, phụ thuộc, chia wave) · `audit` bắt worker sửa ngoài phạm vi (cả file chưa commit) · `conflicts` dò xung đột giữa các nhánh làn |
 | `hooks/wt-env.mjs` | Cấp cửa sổ 20 port riêng cho mỗi worktree (`alloc`/`release`/`list`/`prune`), có khoá chống cấp trùng |

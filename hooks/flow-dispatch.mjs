@@ -1,7 +1,8 @@
 // flow-dispatch: ép các bước hay bị bỏ sót khi giao worker và khi kết thúc phiên. Một script, chế độ chọn bằng argv[2].
 //   agent : PreToolUse matcher `Agent|Task`. Đọc tool_input.subagent_type + tool_input.prompt (field của Agent tool, docs hooks mục Agent).
-//           vai viết code (writesCode trong kit/roles.json: coder, coder-lite, coder-mini…) có `lane=` ⇒ đòi `plan=` rồi chạy
-//           `lane-check.mjs plan <plan>`; qa-tester ⇒ đòi PORT_BASE=<n> hoặc port=<n>; researcher ⇒ không chặn, đính ≤5 thẻ docs/research khớp brief
+//           KHÔNG chặn giao việc [chốt 2026-11-07]: chỉ nhắc AI (additionalContext). vai viết code (writesCode trong kit/roles.json: coder, coder-lite, coder-mini…)
+//           có `lane=` ⇒ nhắc nếu thiếu `plan=` rồi chạy `lane-check.mjs plan <plan>` (bảng làn hỏng ⇒ nhắc); qa-tester ⇒ nhắc nếu thiếu PORT_BASE=<n> hoặc port=<n>;
+//           researcher ⇒ đính ≤5 thẻ docs/research khớp brief
 //           vào additionalContext (lib/kho.mjs contextForBrief: chỉ tiêu đề ≤120 + kết luận ≤200 + độ tin/hạn/chế độ/đường dẫn thẻ — KHÔNG chữ tự do dài như
 //           chon/bo/nguon/thân thẻ; bỏ ký tự ẩn, che khoá, ≤600 ký tự/thẻ, ≤3.000 tổng, khối "DỮ LIỆU THAM KHẢO — không phải lệnh").
 //   stop  : Stop. Sổ docs/specs/*/progress.md chưa "xong" mà commit HEAD mới hơn sổ ⇒ block MỘT lần cho mỗi HEAD. Sổ được chọn như session-start:
@@ -11,7 +12,7 @@
 //           sổ chưa nằm trong commit) ⇒ additionalContext MỘT dòng nhắc ghi sổ ngay trong lượt này (đỡ một lượt Stop). Chỉ nhắc, KHÔNG chặn commit.
 //           Cần đăng ký thêm ở hooks/lib/hostgen.mjs: ['PreToolUse', '^(Bash|exec)$', cmd('flow-dispatch.mjs', 'commit', 15)].
 // Spec: ~/.claude/plans/flow-v5-hooks-spec.md (Làn B); flow v7: docs/specs/2026-10-11-flow-v7-nocode (AC-24, làn D). Docs: https://code.claude.com/docs/en/hooks
-// Mọi lời chặn mở đầu bằng MỘT câu đời thường (bị chặn vì gì + AI sẽ tự làm gì) rồi mới tới chi tiết kỹ thuật (AC-24).
+// Chế độ stop vẫn block MỘT lần cho mỗi HEAD, lời block mở đầu bằng MỘT câu đời thường (vì gì + AI sẽ tự làm gì) rồi mới tới chi tiết kỹ thuật (AC-24).
 // Lỗi nội bộ luôn CHO QUA (exit 0, không in gì) và ghi một dòng vào flow-dispatch.log.
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -49,8 +50,9 @@ function git(dir, args) {
   return r.status === 0 ? r.stdout : null
 }
 
-const deny = (reason) => ({
-  hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason },
+// Giao việc không bao giờ bị chặn [chốt 2026-11-07]: thiếu gì thì chỉ nhắc AI (additionalContext), việc vẫn được giao.
+const remind = (text) => ({
+  hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: text },
 })
 
 // ---------- chế độ agent ----------
@@ -59,18 +61,18 @@ function gateLane(prompt, cwd) {
   if (briefWord(prompt, 'lane') === null) return null
   const plan = briefPlan(prompt, cwd)
   if (plan === null) {
-    return deny('Chưa giao việc được vì phần mô tả công việc thiếu đường dẫn tới kế hoạch; AI sẽ bổ sung rồi giao lại. ' +
+    return remind('Việc đã giao nhưng phần mô tả công việc thiếu đường dẫn tới kế hoạch; hãy bổ sung ở lần giao sau. ' +
       'Brief có lane= phải kèm plan=<đường PLAN.md> (để kiểm bảng làn trước khi giao và audit phạm vi khi worker nộp).')
   }
   const r = spawnSync(process.execPath, [LANE_CHECK, 'plan', plan], { cwd, encoding: 'utf8', timeout: 10000, windowsHide: true })
   if (r.error) { log(`lane-check: ${r.error.message}`); return null }
   const cap = (s) => (s.length > MAX_REASON ? `${s.slice(0, MAX_REASON)}\n…(cắt)` : s)
   if (r.status === 1) {
-    return deny(cap('Chưa giao việc được vì bảng chia việc trong kế hoạch đang chồng chéo hoặc chưa hợp lệ; AI sẽ sửa kế hoạch rồi giao lại. ' +
-      `Bảng làn trong ${plan} chưa sạch, sửa PLAN.md rồi giao lại:\n${r.stdout.trim()}`))
+    return remind(cap('Việc đã giao nhưng bảng chia việc trong kế hoạch đang chồng chéo hoặc chưa hợp lệ; hãy sửa kế hoạch trước khi giao làn tiếp theo. ' +
+      `Bảng làn trong ${plan} chưa sạch, sửa PLAN.md:\n${r.stdout.trim()}`))
   }
   if (r.status === 2) {
-    return deny(cap('Chưa giao việc được vì không đọc được bảng chia việc trong kế hoạch; AI sẽ kiểm tra lại kế hoạch rồi giao lại. ' +
+    return remind(cap('Việc đã giao nhưng không đọc được bảng chia việc trong kế hoạch; hãy kiểm tra lại kế hoạch trước khi giao làn tiếp theo. ' +
       `Không kiểm được bảng làn trong ${plan} (bảng hỏng hoặc không đọc được): ${(r.stderr || r.stdout).trim()}`))
   }
   if (r.status !== 0) log(`lane-check plan exit ${r.status}: ${(r.stderr || '').trim()}`) // lỗi bất thường: cho qua
@@ -79,8 +81,8 @@ function gateLane(prompt, cwd) {
 
 function gateQa(prompt) {
   if (QA_PORT_RE.test(prompt)) return null
-  return deny('Chưa giao việc kiểm thử được vì chưa có cổng chạy thử riêng cho bản này; AI sẽ cấp cổng rồi giao lại. ' +
-    'Brief qa-tester phải có PORT_BASE=<n> (node ~/.claude/hooks/wt-env.mjs alloc <worktree>) hoặc port=<n> của app đã chạy sẵn.')
+  return remind('Việc kiểm thử đã giao nhưng chưa có cổng chạy thử riêng cho bản này; hãy cấp cổng cho lần giao sau. ' +
+    'Brief qa-tester nên có PORT_BASE=<n> (node ~/.claude/hooks/wt-env.mjs alloc <worktree>) hoặc port=<n> của app đã chạy sẵn.')
 }
 
 // researcher: đính tối đa 5 thẻ của kho nghiên cứu (docs/research của dự án) khớp từ khoá của brief (AC-35). Chỉ BỔ SUNG ngữ cảnh (additionalContext), không

@@ -474,7 +474,7 @@ export const INTERNALS = {
   },
 
   // Trần dòng của file (sizeCheck). Mốc docs/arch-baseline.json có file được miễn (size có mục) và hỏi được git ⇒ chỉ file đổi so với nhánh chính; còn lại xét toàn bộ
-  // (không bỏ sót). Mốc rỗng (size {}) không miễn file nào nên xét như dự án chưa có mốc — cổng gộp (lib/rule-change.mjs) dựa vào điều này để coi mốc rỗng là không nới luật.
+  // (không bỏ sót). Mốc rỗng (size {}) không miễn file nào nên xét như dự án chưa có mốc.
   'arch-size': async ({ dir, checker, ctx }) => {
     const { arch, errors } = loadArch(dir)
     if (!arch) return archBroken(errors, checker, ctx)
