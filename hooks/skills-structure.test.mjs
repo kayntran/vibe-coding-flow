@@ -53,6 +53,11 @@ test('skill luồng chỉ ghi thứ tự: ngắn, có cột xử lý', () => {
   for (const n of ['flow-feature', 'flow-bugfix', 'flow-release']) assert.match(read(n), /Hỏng thì/, n)
 })
 
+test('mẫu bàn giao có đủ phần cốt lõi', () => {
+  const t = fs.readFileSync(path.join(DIR, 'flow-sessions/references/handoff.md'), 'utf8')
+  for (const must of ['Bước đầu tiên an toàn', 'Đang chờ user gật', 'Chưa kiểm', 'Che mọi khoá', 'không rõ']) assert.ok(t.includes(must), must)
+})
+
 test('bài đo chọn skill chỉ nhắm tới skill có thật', () => {
   const { cases } = JSON.parse(fs.readFileSync(path.join(ROOT, 'kit/evals/skill-routing.json'), 'utf8'))
   for (const c of cases) if (c.want !== 'none') assert.ok(names.includes(c.want), c.want)

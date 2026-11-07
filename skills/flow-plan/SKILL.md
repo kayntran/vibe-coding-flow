@@ -65,6 +65,12 @@ báo câu chữ, đặt tên, chi tiết code. CẤM đề xuất thêm tính n�
 
 Hợp nhất: kiểm từng mục vào SPEC, PLAN, code; sửa plan; ghi đúng/bác kèm lý do cuối PLAN.md.
 
+## Kiểm plan khớp SPEC và code
+
+`node ~/.claude/hooks/plan-check.mjs <PLAN.md>` phải sạch trước khi tóm tắt cho user. Lệnh kiểm mọi mã AC, S, P trong SPEC có task phủ, file có thật
+(file sắp tạo ghi `(mới)`, sẽ xoá hay đổi tên ghi `(xoá)`, `(đổi tên)`), mỗi task có Verify. Exit 1 ⇒ tự sửa chi tiết kỹ thuật như đường dẫn hay task thiếu theo SPEC đã duyệt; đổi thứ người dùng
+thấy hoặc bỏ yêu cầu thì hỏi user. Lệnh chỉ nhắc, không chặn, và không chạy lệnh trong Verify.
+
 ## Tóm tắt và LUÔN hỏi user
 
 Không có thi công khi user chưa trả lời. Trong tin nhắn, bằng lời đời thường, không bắt mở file:

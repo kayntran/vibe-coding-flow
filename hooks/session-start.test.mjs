@@ -1224,3 +1224,33 @@ describe('nhắc luật ngôn ngữ sau khi nén (source compact / resume)', () 
     assert.ok(!startup.includes('Nhắc lại sau khi nén'))
   })
 })
+
+describe('sổ đang chờ user gật', () => {
+  const big = 'x'.repeat(3000)
+  test('nêu riêng ở đầu, không bị cắt khi sổ dài, nói rõ phải hỏi lại', () => {
+    const fx = fixture()
+    progress(fx, 'feat-a', `Trạng thái: đang làm\n${big}\nĐang chờ user gật: plan màn nhắc email\n`)
+    const ctx = run(fx)
+    assert.ok(ctx.includes('Sổ ghi đang chờ user gật: plan màn nhắc email'))
+    assert.ok(ctx.includes('không coi là đã gật'))
+  })
+
+  test('ghi "không" hoặc chưa có dòng này thì không nhắc', () => {
+    for (const body of ['Đang chờ user gật: không\n', 'Đang chờ user gật: <việc gì, hoặc "không">\n', '']) {
+      const fx = fixture()
+      progress(fx, 'feat-a', `Trạng thái: đang làm\n${body}`)
+      assert.ok(!run(fx).includes('Sổ ghi đang chờ'), body)
+    }
+  })
+
+  test('chữ dài bị cắt, ký tự điều khiển bị bỏ, phần tiến độ vẫn trong trần', () => {
+    const fx = fixture()
+    progress(fx, 'feat-a', `Trạng thái: đang làm\nĐang chờ user gật: a\u0007b${'y'.repeat(500)}\n${big}\n`)
+    const ctx = run(fx)
+    const line = ctx.split('\n').find((l) => l.startsWith('Sổ ghi đang chờ'))
+    assert.ok(line.includes('a b'))
+    assert.ok(!line.includes('y'.repeat(200)))
+    const mark = '…(đã cắt, đọc đủ ở file trên)'
+    assert.ok(ctx.slice(ctx.indexOf(PREFIX), ctx.indexOf(mark) + mark.length).length <= 2000)
+  })
+})

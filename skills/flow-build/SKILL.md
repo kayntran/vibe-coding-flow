@@ -70,6 +70,6 @@ User bảo bỏ test ⇒ làm theo, ghi `Chưa kiểm: <phần nào>` vào `prog
 ## 6. Kết thúc
 
 - Mọi tiêu chí trong plan có bằng chứng, hoặc ghi rõ phần chưa kiểm.
-- Tiêu chí có task phủ và ô tick khớp với code đã commit. Plan hoàn tất nằm cùng commit với code [m2is].
+- `node ~/.claude/hooks/plan-check.mjs <PLAN.md> --done` sạch: tiêu chí có task phủ và ô tick khớp với code. Plan hoàn tất nằm cùng commit với code [m2is].
 - Cập nhật `Bước tiếp theo` trong `progress.md`.
 - Sang `flow-qa`. Báo user theo khuôn: làm được gì · người dùng sẽ thấy gì khác · còn gì cần bạn làm.

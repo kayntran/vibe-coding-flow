@@ -22,6 +22,6 @@ File này chỉ ghi thứ tự. Cách làm từng bước nằm ở skill lẻ. 
 
 **Trước khi sửa file:** `flow-worktree`. Thêm module mới: `flow-architecture` trước khi lập plan.
 
-**Sau khi nén ngữ cảnh:** đọc sổ tiến độ, xác định bước đang dở. Đang chờ user gật thì tóm tắt lại điều cần gật rồi hỏi lại, không coi là đã gật.
+**Sau khi nén ngữ cảnh:** đọc sổ tiến độ, xác định bước đang dở. Sổ ghi `Đang chờ user gật` thì tóm tắt lại điều cần gật rồi hỏi lại, không coi là đã gật.
 
 **Bỏ bước:** chỉ khi cột "Khi nào" không khớp, hoặc user bảo. Bỏ theo lời user thì ghi "chưa kiểm" và nhắc lại lúc gộp.

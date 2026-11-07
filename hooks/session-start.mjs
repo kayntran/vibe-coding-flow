@@ -62,6 +62,10 @@ const LANG_PREFIX = 'Nhắc lại sau khi nén: '
 const LANG_MAX = 400 // dòng luật ngôn ngữ thật chỉ ~150 ký tự; trần này chỉ để file lạ không ăn hết chỗ của các phần khác
 const MCP_REMINDER = 'Đã đủ 30 ngày log MCP: chạy node ~/.claude/hooks/mcp-usage.mjs report, đưa user danh sách MCP không dùng để quyết tắt (không tự tắt).'
 // Dòng `Trạng thái: xong` (chấp nhận markdown bao quanh như `- **Trạng thái:** xong`), không phân biệt hoa thường.
+// Dòng `Đang chờ user gật: <việc>` của sổ: nêu riêng ở đầu để không bị cắt mất khi hết chỗ. Vẫn là dữ liệu repo, không phải lời user.
+const WAIT_RE = /^[ 	>*_-]*Đang chờ (?:user|bạn) gật[ 	*_]*[:：][ 	*_]*(.+)$/imu
+const WAIT_NONE_RE = /^(?:không|chưa|-|<.*>)[.s]*$/iu
+const WAIT_MAX = 160
 const DONE_RE = /^[ \t>*_#-]*Trạng thái[ \t]*[:：]?[ \t*_]*[:：]?[ \t*_]*xong[ \t*_.!]*$/imu
 
 // Chỉ ghi loại lỗi, không ghi message (có thể trích nội dung file).
@@ -118,15 +122,25 @@ function ownSheet(top, branch) {
   }
 }
 
+function waitingLine(open) {
+  const items = open.flatMap((f) => {
+    const m = WAIT_RE.exec(String(f.text).normalize('NFC'))
+    const v = m?.[1].replace(/\p{C}/gu, ' ').replace(/[*_]+$/, '').trim()
+    return v && !WAIT_NONE_RE.test(v) ? [v.slice(0, WAIT_MAX)] : []
+  }).slice(0, 2)
+  return items.length ? `\nSổ ghi đang chờ user gật: ${items.join(' · ')}. Nếu trong hội thoại user chưa trả lời thì tóm tắt lại rồi hỏi lại, không coi là đã gật.` : ''
+}
+
 // Ghép tiền tố + các sổ trong PROGRESS_CAP ký tự TỔNG (sổ đứng trước được ưu tiên). Sổ bị cắt có dấu "đã cắt"; sổ không còn chỗ thì chỉ
 // ghi tên ở dòng cuối. Mọi trường hợp: độ dài ≤ PROGRESS_CAP.
 function fitProgress(open) {
+  const prefix = PROGRESS_PREFIX + waitingLine(open)
   const block = (f, text) => `--- ${f.rel} ---\n${text}`
-  const whole = [PROGRESS_PREFIX, ...open.map((f) => block(f, f.text))].join('\n\n')
+  const whole = [prefix, ...open.map((f) => block(f, f.text))].join('\n\n')
   if (whole.length <= PROGRESS_CAP) return whole
   const blocks = []
   const omitted = []
-  let used = PROGRESS_PREFIX.length
+  let used = prefix.length
   open.forEach((f, i) => {
     const head = block(f, '')
     const reserve = i < open.length - 1 || omitted.length ? OMIT_RESERVE : 0
@@ -140,7 +154,7 @@ function fitProgress(open) {
     used += 2 + head.length + text.length
   })
   const note = omitted.length ? `\n(sổ mở khác không nạp vì hết chỗ: ${omitted.join(', ')})` : ''
-  return [PROGRESS_PREFIX, ...blocks].join('\n\n') + (note.length > OMIT_RESERVE ? `${note.slice(0, OMIT_RESERVE - 1)}…` : note)
+  return [prefix, ...blocks].join('\n\n') + (note.length > OMIT_RESERVE ? `${note.slice(0, OMIT_RESERVE - 1)}…` : note)
 }
 
 // Không sổ nào nhận nhánh này (hoặc sổ kiểu cũ không ghi nhánh): tối đa MAX_FILES sổ chưa xong sửa gần nhất trong MAX_DIRS thư mục mới nhất.

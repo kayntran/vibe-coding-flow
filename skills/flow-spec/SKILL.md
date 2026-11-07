@@ -72,7 +72,7 @@ script, tác vụ nền) ⇒ bỏ bước này, thay bằng **một tình huốn
 ## Kỹ thuật
 ```
 
-- Trong "Làm được gì" và phần kỹ thuật: tiêu chí dạng `KHI <tình huống> THÌ HỆ THỐNG PHẢI <hành vi>`, mỗi dòng dịch thẳng thành test.
+- Trong "Làm được gì" và phần kỹ thuật: mỗi tiêu chí có mã `AC-nn`, dạng `KHI <tình huống> THÌ HỆ THỐNG PHẢI <hành vi>`, mỗi dòng dịch thẳng thành test.
 - Yêu cầu phi chức năng (hiệu năng, offline, i18n…) chỉ khi có thật.
 - Chỗ chưa rõ đánh `[CẦN LÀM RÕ]`; còn dấu này thì chưa xong.
 - App có tài khoản/dữ liệu mà chưa chốt chỗ để ⇒ hỏi một câu "dữ liệu để đâu" [d8dk], không mặc định; gợi ý theo nhu cầu từ

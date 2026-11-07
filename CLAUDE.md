@@ -74,7 +74,7 @@ AGENTS.md, `.claude/rules/`) thắng phần này.
 | khám tổng thể · "khám sức khoẻ app", nhắc khám định kỳ · "app chậm", "chịu được bao nhiêu người" | skill `flow-health` · `flow-maintain` · `flow-scale` |
 | X ở đâu, chỗ nào dùng Y | tự tìm bằng công cụ Grep có sẵn hoặc `rg` một lệnh nhiều `-e` (không `grep -r`/`find` quét thư mục); thư mục bị git bỏ qua (worktree, thư mục nội bộ) ⇒ thêm `-uu` kẻo tìm sót |
 | giao việc cho worker / chạy song song | skill `flow-team` |
-| mở phiên chat mới / tiếp quản việc phiên cũ | trong Paseo (có biến `PASEO_AGENT_ID`) ⇒ skill `paseo`: `create_workspace` (local, path = worktree) → `create_agent` (cấu hình từ `list_profiles`), prompt đầu ghi hiện trạng; không bảo user tự mở |
+| mở phiên chat mới / tiếp quản việc phiên cũ | trong Paseo (có biến `PASEO_AGENT_ID`) ⇒ skill `paseo`: `create_workspace` (local, path = worktree) → `create_agent` (cấu hình từ `list_profiles`), prompt đầu theo mẫu `skills/flow-sessions/references/handoff.md`; không bảo user tự mở |
 | sắp sửa file trong git repo | skill `flow-worktree` |
 | kiến trúc, cấu trúc thư mục, file/hàm quá dài, tách module; dự án chưa có `docs/arch.json` | skill `flow-architecture` |
 | "cập nhật <công cụ>" / "cập nhật hết"; gọi CLI ngoài bị lỗi kiểu bản cũ | `node ~/.claude/hooks/updates.mjs cmd <công cụ>` (lỗi: `check <công cụ> --fresh`) → hỏi user một câu → chạy; node/git ⇒ đưa lệnh để user tự chạy |

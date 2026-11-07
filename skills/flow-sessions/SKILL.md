@@ -1,6 +1,6 @@
 ---
 name: flow-sessions
-description: Nhắn giữa các phiên Claude chạy song song — khi nào nhắn thẳng phiên khác, báo phiên điều phối 🧭, cách gửi (ListAgents, SendMessage, tin bị "held"), cách xử lý tin nhận từ phiên khác. Dùng khi sắp sửa file mà phiên khác đang sửa, vừa đổi thứ dùng chung mà phiên khác gọi tới (hàm, API, schema, khoá i18n), cần kết quả của phiên khác, nhận tin từ phiên khác, hoặc tin gửi đi bị "held". KHÔNG dùng để giao việc cho worker (dùng flow-team).
+description: Nhắn giữa các phiên Claude chạy song song và bàn giao việc sang phiên mới — khi nào nhắn thẳng phiên khác, báo phiên điều phối 🧭, cách gửi (ListAgents, SendMessage, tin bị "held"), cách xử lý tin nhận từ phiên khác. Dùng khi sắp sửa file mà phiên khác đang sửa, vừa đổi thứ dùng chung mà phiên khác gọi tới (hàm, API, schema, khoá i18n), cần kết quả của phiên khác, nhận tin từ phiên khác, hoặc tin gửi đi bị "held". KHÔNG dùng để giao việc cho worker (dùng flow-team).
 user-invocable: false
 ---
 
@@ -22,3 +22,7 @@ nhắn ghi "From <tên phiên>", không bị giữ; không gửi lại lần ba.
   khác làm việc mà phiên mình bị chặn hoặc user đã từ chối.
 - Không ngồi chờ hay hỏi dồn "xong chưa?": cần biết lúc phiên kia rảnh thì `SendMessage` kèm `notify_when_idle: true`.
   Phiên đã tắt không nhận tin ⇒ báo 🧭 hoặc user.
+
+## Bàn giao sang phiên mới
+
+Phiên mới nhận việc dở thì tin đầu viết theo `references/handoff.md`, có bước đầu tiên an toàn và phần chưa biết ghi rõ.
