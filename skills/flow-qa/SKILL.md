@@ -45,6 +45,7 @@ Test giả tính là chưa kiểm.
 | Màn mới, làm lại giao diện, đổi bố cục hay luồng | DỪNG: mở app (máy ảo thì ảnh chụp hoặc cổng `forward`; xong cho máy ngủ) hoặc 2-3 ảnh màn chính, hỏi "giao diện đã ổn chưa?" bằng AskUserQuestion. Chưa ưng ⇒ sửa, QA lại phần đổi, hỏi lại |
 | Rất nhỏ: một nhãn, một màu | Gửi ảnh trước/sau, không dừng chờ [rofm] |
 
+Đang ở Paseo ⇒ mở app cho user xem trong trình duyệt của Paseo (skill `flow-paseo`, mục "Cho user xem app").
 User gật ⇒ ghi vào báo cáo `User duyệt giao diện: có (<ngày>, <xem gì>)`. Chưa gật thì không ghi dòng này. Sửa rất nhỏ ghi `Sửa giao diện rất nhỏ: đã gửi ảnh`.
 Kiểm luôn: bản demo thừa và thanh chuyển demo đã gỡ hết.
 

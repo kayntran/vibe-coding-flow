@@ -11,7 +11,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveBin } from './lib/clis.mjs'
 import { runWithAccounts } from './lib/codex-accounts.mjs'
-import { runReviewer } from './review-ext.mjs'
+import { runReviewer, WIN_SANDBOX } from './review-ext.mjs'
 
 const SAFE_ARG = /^[\w.:=/-]+$/
 const OUT_FLAGS = new Set(['-o', '--output-last-message'])
@@ -22,7 +22,7 @@ const CD_FLAGS = new Set(['-C', '--cd'])
  * File -o tạm nằm trong thư mục tạo độc quyền (mkdtemp ⇒ không ai đặt sẵn symlink vào tên đó). Thư mục Temp của máy có dấu
  * cách/chữ có dấu (C:\Users\Nguyễn\…) thì cmd.exe không nhận ⇒ tạo thư mục tạm ngay trong thư mục chạy và truyền đường dẫn tương đối.
  */
-export function plan(argv, { cwd = process.cwd(), tmp = os.tmpdir(), stdinPrompt = null } = {}) {
+export function plan(argv, { cwd = process.cwd(), tmp = os.tmpdir(), stdinPrompt = null, winSandbox = WIN_SANDBOX } = {}) {
   const args = []
   let dir = cwd, outFile = null, prompt = stdinPrompt
   for (let i = 0; i < argv.length; i++) if (CD_FLAGS.has(argv[i]) && i + 1 < argv.length) dir = path.resolve(cwd, argv[i + 1])
@@ -44,6 +44,8 @@ export function plan(argv, { cwd = process.cwd(), tmp = os.tmpdir(), stdinPrompt
     prompt = last
     args[args.length - 1] = '-'
   }
+  // Windows: sandbox không nâng quyền cho lượt chạy ngầm (xem WIN_SANDBOX ở review-ext.mjs), trừ khi người gọi đã tự đặt.
+  if (args[0] === 'exec' && !args.some((x) => typeof x === 'string' && x.startsWith('windows.sandbox'))) args.splice(1, 0, ...winSandbox)
   return { args, cwd: dir, outFile, tmpOut, tmpDir, prompt }
 }
 

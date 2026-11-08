@@ -10,7 +10,7 @@ const DIR = path.join(ROOT, 'skills')
 const names = fs.readdirSync(DIR).filter((n) => n.startsWith('flow-') && fs.existsSync(path.join(DIR, n, 'SKILL.md')))
 const read = (n) => fs.readFileSync(path.join(DIR, n, 'SKILL.md'), 'utf8')
 const FLOWS = ['flow-feature', 'flow-bugfix', 'flow-release', 'flow-health']
-const INTERNAL = ['flow-team', 'flow-sessions', 'flow-devin']
+const INTERNAL = ['flow-team', 'flow-sessions', 'flow-devin', 'flow-paseo']
 
 test('đủ bộ skill đã chốt, flow-production đã tách', () => {
   for (const n of [...FLOWS, 'flow-new-app', 'flow-spec', 'flow-ux', 'flow-ui-demo', 'flow-ui-design', 'flow-plan', 'flow-build', 'flow-fix', 'flow-qa', 'flow-review', 'flow-security', 'flow-merge', 'flow-worktree', 'flow-impact', 'flow-architecture', 'flow-explain', 'flow-status', 'flow-publish', 'flow-rollback', 'flow-backup', 'flow-key-leak', 'flow-maintain', 'flow-scale', ...INTERNAL]) {

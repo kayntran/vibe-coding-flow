@@ -17,7 +17,7 @@
 //     scanDir({outbound:true}) phải sạch (file nhị phân quét không được thì bị xoá khỏi workspace); xoá sau khi xong (kể cả khi lỗi).
 //  4. kết quả: output của reviewer (raw + JSON) quét scanText trước khi ghi file; có khoá ⇒ exit 3, không ghi gì (prompt injection).
 import { spawn, spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, existsSync, readdirSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve, basename, relative, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -71,12 +71,13 @@ export function extractReview(text) {
   return null;
 }
 
-export function buildPrompt({ brief, schema, base, note, diff, diffFile }) {
+// resultFile (phiên Paseo, --prepare): không có stdout để thu ⇒ AI soát ghi JSON vào đúng file này, ngoài ra không sửa/tạo file nào.
+export function buildPrompt({ brief, schema, base, note, diff, diffFile, resultFile }) {
   const head = `${brief}
 
 Phạm vi: git diff ${base}...HEAD (bỏ qua file sinh tự động, lockfile). ${note}
-Chỉ đọc: không sửa/tạo file, không commit. Thư mục làm việc là bản sao HEAD đã lọc (không có .git; file nhạy cảm/dữ liệu riêng đã bị bỏ) — được đọc thêm file khác trong đó khi cần (chỗ gọi, registry dùng chung).
-Trả lời DUY NHẤT một JSON hợp lệ theo schema sau (không markdown, không chữ khác), bỏ qua khuôn markdown ở trên:
+${resultFile ? `Chỉ đọc code: không sửa file nào, không commit; được tạo DUY NHẤT file ${resultFile}.` : "Chỉ đọc: không sửa/tạo file, không commit."} Thư mục làm việc là bản sao HEAD đã lọc (không có .git; file nhạy cảm/dữ liệu riêng đã bị bỏ) — được đọc thêm file khác trong đó khi cần (chỗ gọi, registry dùng chung).
+${resultFile ? `Ghi vào ${resultFile} DUY NHẤT` : "Trả lời DUY NHẤT"} một JSON hợp lệ theo schema sau (không markdown, không chữ khác), bỏ qua khuôn markdown ở trên:
 ${schema}
 `;
   return diffFile
@@ -301,6 +302,11 @@ export async function listCursorModels(exec = runReviewer) {
   return r.stdout ?? "";
 }
 
+// Windows: sandbox "elevated" (mặc định trong config Codex) cần UAC lần đầu ⇒ chạy ngầm không ai bấm, mọi lệnh đọc file lỗi 1223
+// (https://github.com/openai/codex/issues/25280). "unelevated" vẫn chặn ghi theo --sandbox read-only, đọc được file [KIỂM 2026-11-08].
+// Chỉ đặt cho lượt kit gọi, không sửa config của user. Không có dấu nháy để qua được cmd.exe (TOML không parse ⇒ Codex dùng chuỗi thô).
+export const WIN_SANDBOX = process.platform === "win32" ? ["-c", "windows.sandbox=unelevated"] : [];
+
 // Lệnh gọi từng model. Mọi đường dẫn đưa cho reviewer đều tương đối với workspace (cwd) — không lộ đường dẫn máy, không dẫn ra ngoài workspace.
 function buildCall(model, { ws, prompt, resolved, timeout, cursorModel }) {
   const m = resolved?.model ?? null; // null = không chọn được ⇒ để CLI dùng mặc định (không đoán id)
@@ -309,7 +315,7 @@ function buildCall(model, { ws, prompt, resolved, timeout, cursorModel }) {
       cmd: resolveBin("codex") ?? "codex",
       input: prompt, // qua stdin: không dính giới hạn dòng lệnh, không phải quote
       label: `${m ?? "codex (model mặc định)"}${resolved?.effort ? ` ${resolved.effort}` : ""}`,
-      args: ["exec", "--sandbox", "read-only", "--ephemeral", "--skip-git-repo-check", "--output-schema", `${IN_DIR}/review-schema.json`,
+      args: ["exec", "--sandbox", "read-only", "--ephemeral", "--skip-git-repo-check", ...WIN_SANDBOX, "--output-schema", `${IN_DIR}/review-schema.json`,
         ...(m ? ["-m", m] : []), ...(resolved?.effort ? ["-c", `model_reasoning_effort=${resolved.effort}`] : []), "-"],
     };
   }
@@ -360,6 +366,13 @@ export function reviewerEnv(parent, model) {
 export async function run(argv, deps = {}) {
   const io = deps.io ?? { out: (s) => console.log(s), err: (s) => console.error(s) };
   const o = parseArgs(argv);
+  if (o.collect) {
+    if (!o.out) { io.err("Thiếu: --collect <file kết quả của AI soát> --out <file.json>"); return 1; }
+    return collect(o, io);
+  }
+  if (o.prepare && MODELS.includes(o.model) && o.wt) {
+    try { return await review(o, io, deps); } catch (e) { io.err(`${o.model}: lỗi không mong đợi: ${e.message}`); return 1; }
+  }
   if (!MODELS.includes(o.model) || !o.wt || !o.out) {
     io.err("Thiếu/sai: --model grok|flash|codex|opus --wt <worktree> --out <file.json> [--role <vai>]");
     return 1;
@@ -372,13 +385,34 @@ export async function run(argv, deps = {}) {
   }
 }
 
+// Kết quả do AI soát chạy thành phiên Paseo ghi ra file (--prepare ở trên): đầu vào không tin cậy như stdout của CLI ⇒ cùng bước
+// bóc JSON và quét khoá trước khi ghi --out.
+function collect(o, io) {
+  const out = resolve(o.out);
+  let raw;
+  try { raw = readFileSync(resolve(o.collect), "utf8"); } catch (e) { io.err(`Không đọc được ${o.collect}: ${e.message}`); return 1; }
+  const result = extractReview(raw);
+  const leaked = [...scanText(raw), ...(result ? scanText(JSON.stringify(result, null, 2)) : [])];
+  if (leaked.length) {
+    io.err(`kết quả review chứa khoá — có thể bị prompt injection (${[...new Set(leaked.map((f) => f.name))].join(", ")}). Không ghi kết quả; dùng model dự phòng.`);
+    return 3;
+  }
+  if (!result) { io.err(`${o.collect}: không có JSON review (thiếu mảng "findings").`); return 1; }
+  result.reviewer = o.reviewer ?? `${o.model ?? "AI soát"} (phiên Paseo)`;
+  mkdirSync(dirname(out), { recursive: true });
+  writeFileSync(out, JSON.stringify(result, null, 2));
+  io.out(`${result.reviewer}: ${result.findings.length} finding → ${out}`);
+  return 0;
+}
+
 async function review(o, io, deps) {
   const check = deps.check ?? checkCli;
   const exec = deps.exec ?? runReviewer;
-  const wt = resolve(o.wt), out = resolve(o.out), stem = out.replace(/\.json$/i, "");
+  const prep = o.prepare ? resolve(o.prepare) : null; // chỉ dựng bản sao đã lọc + prompt cho phiên Paseo, không gọi model
+  const wt = resolve(o.wt), out = resolve(o.out ?? join(prep ?? ".", "review.json")), stem = out.replace(/\.json$/i, "");
   const cli = CLI_OF[o.model];
 
-  const st = await check(cli);
+  const st = prep ? { ready: true } : await check(cli);
   if (!st.ready) {
     io.err(`${st.message}${st.loginCmd ? `. Đăng nhập: ${st.loginCmd}` : ""}${st.installHint ? `. Cài: ${st.installHint}` : ""} ⇒ dùng model dự phòng.`);
     return 1;
@@ -396,7 +430,7 @@ async function review(o, io, deps) {
     cursorModel = pickCursorModel(listed);
     if (!cursorModel) { cursorModel = CURSOR_FALLBACK; io.err(`! Không đọc được danh sách model của Cursor (${why}), dùng ${CURSOR_FALLBACK}.`); }
   }
-  mkdirSync(dirname(out), { recursive: true });
+  if (!prep) mkdirSync(dirname(out), { recursive: true }); // --prepare: chỉ tạo thư mục ngay trước khi dựng, thoát sớm không để thư mục rỗng
 
   // tầng 1
   let cfg;
@@ -427,8 +461,12 @@ async function review(o, io, deps) {
     brief: readFileSync(join(KIT, "workers", basename(o.brief)), "utf8"),
     schema: readFileSync(join(KIT, "workers", "review-schema.json"), "utf8"),
     base: o.base, note: o.note, diff,
+    ...(prep ? { resultFile: `${IN_DIR}/result.json` } : {}),
   };
-  const ws = mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "flow-review-"));
+  if (prep && existsSync(prep) && readdirSync(prep).length) { io.err(`--prepare ${prep}: thư mục phải chưa có hoặc trống.`); return 1; }
+  if (prep) mkdirSync(prep, { recursive: true });
+  const ws = prep ?? mkdtempSync(join(deps.tmpRoot ?? tmpdir(), "flow-review-"));
+  let keep = false;
   try {
     // tầng 3
     const built = buildWorkspace(wt, ws, cfg, { exclude: dropped });
@@ -450,8 +488,14 @@ async function review(o, io, deps) {
 
     mkdirSync(join(ws, IN_DIR));
     writeFileSync(join(ws, IN_DIR, "review-schema.json"), parts.schema);
-    if (separate) { writeFileSync(join(ws, IN_DIR, "diff.patch"), diff); writeFileSync(`${stem}.diff`, diff); }
-    if (o.model === "grok") writeFileSync(join(ws, IN_DIR, "prompt.txt"), prompt);
+    if (separate) { writeFileSync(join(ws, IN_DIR, "diff.patch"), diff); if (!prep) writeFileSync(`${stem}.diff`, diff); }
+    if (o.model === "grok" || prep) writeFileSync(join(ws, IN_DIR, "prompt.txt"), prompt);
+    if (prep) {
+      // Phiên Paseo làm việc trong đúng thư mục này (đã lọc khoá/dữ liệu riêng, không có .git); kết quả ghi ra RESULT rồi thu bằng --collect.
+      io.out(JSON.stringify({ workspace: ws, prompt: `${IN_DIR}/prompt.txt`, result: `${IN_DIR}/result.json` }));
+      keep = true;
+      return 0;
+    }
     writeFileSync(`${stem}.prompt.txt`, prompt); // bản lưu đúng cái đã gửi
 
     let call = buildCall(o.model, { ws, prompt, resolved, timeout: o.timeout, cursorModel });
@@ -500,7 +544,7 @@ async function review(o, io, deps) {
     io.out(`${result.reviewer}: ${result.findings.length} finding, ${secs}s → ${out}`);
     return 0;
   } finally {
-    try { rmSync(ws, { recursive: true, force: true, maxRetries: 3 }); } catch { io.err(`Không xoá được workspace tạm ${ws} (nội dung đã lọc sạch); xoá tay khi rảnh.`); }
+    if (!keep) try { rmSync(ws, { recursive: true, force: true, maxRetries: 3 }); } catch { io.err(`Không xoá được workspace tạm ${ws} (nội dung đã lọc sạch); xoá tay khi rảnh.`); }
   }
 }
 

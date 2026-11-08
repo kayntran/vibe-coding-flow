@@ -581,6 +581,31 @@ describe('run: chặn trước khi gọi', () => {
     assert.match(errText(h), /đã chuyển sang tài khoản 2/)
   })
 
+  test('--prepare (phiên Paseo): dựng bản sao đã lọc + prompt, không gọi model, giữ thư mục; --collect bóc JSON, chặn kết quả có khoá', async () => {
+    const repo = makeRepo({ base: { 'a.js': '1\n' }, feat: { 'a.js': '2\n', 'data/c.csv': 'x,y\n' } })
+    const h = harness()
+    const dir = path.join(tmp('rx-prep-'), 'ws')
+    assert.equal(await run(['--model', 'codex', '--wt', repo, '--base', 'main', '--prepare', dir], h.deps), 0, errText(h))
+    assert.equal(h.calls.length, 0, 'không được gọi model')
+    const info = JSON.parse(h.logs.out.at(-1))
+    assert.equal(info.workspace, path.resolve(dir))
+    const promptText = fs.readFileSync(path.join(dir, info.prompt), 'utf8')
+    assert.ok(promptText.includes(`Ghi vào ${info.result} DUY NHẤT`), 'prompt phải bảo ghi kết quả ra file, không mâu thuẫn')
+    assert.ok(!promptText.includes('không sửa/tạo file'))
+    assert.ok(!fs.existsSync(path.join(dir, '.git')) && !fs.existsSync(path.join(dir, 'data', 'c.csv')), 'bản sao phải đã lọc')
+    assert.equal(await run(['--model', 'codex', '--wt', repo, '--base', 'main', '--prepare', dir], harness().deps), 1, 'thư mục có sẵn nội dung ⇒ từ chối')
+
+    const res = path.join(dir, info.result)
+    const out = path.join(tmp('rx-col-'), 'review.json')
+    fs.writeFileSync(res, `Kết quả:\n${JSON.stringify({ findings: [], areas_checked: 'a.js' })}`)
+    const h2 = harness()
+    assert.equal(await run(['--collect', res, '--out', out, '--model', 'codex'], h2.deps), 0, errText(h2))
+    assert.deepEqual(JSON.parse(fs.readFileSync(out, 'utf8')).findings, [])
+    fs.writeFileSync(res, JSON.stringify({ findings: [{ summary: ['sk', 'ant', 'A'.repeat(30)].join('-') }] }))
+    assert.equal(await run(['--collect', res, '--out', out + '2', '--model', 'codex'], harness().deps), 3)
+    assert.ok(!fs.existsSync(out + '2'))
+  })
+
   test('diff rỗng ⇒ exit 1', async () => {
     const repo = makeRepo()
     const h = harness()

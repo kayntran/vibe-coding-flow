@@ -7,7 +7,7 @@ import { plan } from './codex-run.mjs'
 
 test('codex-run: -C thành thư mục chạy, -o ghi qua file tạm, prompt có dấu cách chuyển sang stdin', () => {
   const p = plan(['exec', '--sandbox', 'read-only', '-m', 'gpt-x', '-C', 'D:/AI/Vibe Coding/app', '-o', 'D:/AI/Vibe Coding/out/r.md', 'Tìm lỗi ở đây'],
-    { cwd: 'D:/w', tmp: os.tmpdir() })
+    { cwd: 'D:/w', tmp: os.tmpdir(), winSandbox: [] })
   assert.equal(p.cwd, path.resolve('D:/AI/Vibe Coding/app'))
   assert.equal(p.outFile, path.resolve('D:/AI/Vibe Coding/out/r.md'))
   assert.match(p.tmpOut, /\/codex-run-[^/]+\/out\.md$/)
@@ -20,7 +20,7 @@ test('codex-run: -C thành thư mục chạy, -o ghi qua file tạm, prompt có 
 
 test('codex-run: thư mục Temp có dấu cách/chữ có dấu ⇒ file -o tạm nằm trong thư mục chạy, truyền đường dẫn tương đối an toàn', () => {
   const run = fs.mkdtempSync(path.join(os.tmpdir(), 'cr-'))
-  const p = plan(['exec', '-o', 'r.md', '-C', run, '-'], { cwd: run, tmp: 'C:\\Users\\Nguyễn Văn\\Temp' })
+  const p = plan(['exec', '-o', 'r.md', '-C', run, '-'], { cwd: run, tmp: 'C:\\Users\\Nguyễn Văn\\Temp', winSandbox: [] })
   assert.match(p.tmpOut, /^\.codex-run-[^/]+\/out\.md$/)
   assert.equal(path.dirname(p.tmpDir), path.resolve(run))
   assert.deepEqual(p.args, ['exec', '-o', p.tmpOut, '-'])
@@ -28,8 +28,15 @@ test('codex-run: thư mục Temp có dấu cách/chữ có dấu ⇒ file -o t�
 })
 
 test('codex-run: prompt đã qua stdin ("-") giữ nguyên, đối số an toàn không đổi', () => {
-  const p = plan(['exec', '-c', 'model_reasoning_effort=high', '-'], { cwd: 'D:/w', stdinPrompt: 'đề' })
+  const p = plan(['exec', '-c', 'model_reasoning_effort=high', '-'], { cwd: 'D:/w', stdinPrompt: 'đề', winSandbox: [] })
   assert.deepEqual(p.args, ['exec', '-c', 'model_reasoning_effort=high', '-'])
   assert.equal(p.prompt, 'đề')
   assert.equal(p.cwd, 'D:/w')
+})
+
+test('codex-run: Windows ⇒ chèn sandbox không nâng quyền sau exec (đối số an toàn cho cmd.exe), người gọi tự đặt thì giữ', () => {
+  const ws = ['-c', 'windows.sandbox=unelevated']
+  assert.deepEqual(plan(['exec', '-'], { cwd: 'D:/w', winSandbox: ws }).args, ['exec', ...ws, '-'])
+  assert.deepEqual(plan(['exec', '-c', 'windows.sandbox=elevated', '-'], { cwd: 'D:/w', winSandbox: ws }).args, ['exec', '-c', 'windows.sandbox=elevated', '-'])
+  assert.match(ws[1], /^[\w.:=/-]+$/)
 })

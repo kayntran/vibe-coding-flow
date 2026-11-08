@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { label, listHomes, order, quotaText, readState, runWithAccounts, waitMs } from './codex-accounts.mjs'
+import { homeKey, label, listHomes, markSpent, order, quotaText, readState, runWithAccounts, waitMs } from './codex-accounts.mjs'
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'codex-acc-'))
 function world(n = 2) {
@@ -30,6 +30,33 @@ test('waitMs đọc giờ mở lại, không đọc được ⇒ 1 giờ', () =>
   assert.equal(waitMs('try again in 2 hours 30 minutes'), 2.5 * 3600_000)
   assert.equal(waitMs('Usage limit reached. Try again in 3 days.'), 3 * 86_400_000)
   assert.equal(waitMs('usage limit'), 3600_000)
+  const now = new Date(2026, 10, 8, 15, 0).getTime()
+  const msg = "You've hit your usage limit. Upgrade to Plus to continue using Codex, or try again at Dec 5th, 2026 1:53 PM."
+  assert.equal(waitMs(msg, now), new Date(2026, 11, 5, 13, 53).getTime() - now, 'ngày mở lại cụ thể (giờ máy)')
+  assert.equal(waitMs('try again at Jan 1st, 2020 1:00 PM', now), 3600_000, 'ngày đã qua ⇒ 1 giờ')
+  assert.equal(waitMs('Try again at Dec 5th, 2026 1:53 PM UTC.', now), Date.UTC(2026, 11, 5, 13, 53) - now, 'có múi giờ ⇒ theo múi giờ đó')
+})
+
+test('homeKey: Windows không phân biệt hoa thường (sổ ghi C:/Users/admin vẫn khớp C:\\Users\\Admin), máy khác giữ nguyên', () => {
+  assert.equal(homeKey('C:/Users/admin/.codex-2', 'win32'), homeKey('C:\\Users\\Admin\\.codex-2', 'win32'))
+  assert.notEqual(homeKey('/home/A/.codex', 'linux'), homeKey('/home/a/.codex', 'linux'))
+  const w = world()
+  const now = 1000
+  markSpent(w.a.toUpperCase(), 'ERROR: usage limit', { file: w.file, now })
+  if (process.platform === 'win32') {
+    assert.equal(order([w.a, w.b], readState(w.file), now).live[0], w.b, 'mục ghi bằng chữ hoa vẫn được nhận')
+    assert.equal(Object.keys(readState(w.file)).length, 1)
+  }
+})
+
+test('markSpent: ghi tài khoản hết lượt tới ngày mở lại; giữ mục tài khoản khác', () => {
+  const w = world()
+  fs.writeFileSync(w.file, JSON.stringify({ [w.b]: { until: 1 } }))
+  const now = new Date(2026, 10, 8, 15, 0).getTime()
+  const until = markSpent(w.a, 'ERROR: try again at Dec 5th, 2026 1:53 PM', { file: w.file, now })
+  assert.equal(until, new Date(2026, 11, 5, 13, 53).getTime())
+  assert.equal(readState(w.file)[homeKey(w.a)].until, until)
+  assert.ok(readState(w.file)[w.b])
 })
 
 test('quotaText: chỉ dòng lỗi cuối của Codex; chữ "usage limit" trong prompt/nhật ký hay 429 thoáng qua không tính', () => {
@@ -49,7 +76,7 @@ test('hết lượt ⇒ sang tài khoản kế, báo một dòng, nhớ tài kho
   assert.equal(r.home, w.b)
   assert.deepEqual(calls, [w.a, w.b])
   assert.deepEqual(say, ['Codex: tài khoản 1 hết lượt ⇒ đã chuyển sang tài khoản 2.'])
-  assert.equal(readState(w.file)[w.a].until, 1000 + 2.5 * 3600_000)
+  assert.equal(readState(w.file)[homeKey(w.a)].until, 1000 + 2.5 * 3600_000)
 
   calls.length = 0
   await runWithAccounts(run, { env: {}, home: w.home, file: w.file, now: () => 2000 })
@@ -58,7 +85,7 @@ test('hết lượt ⇒ sang tài khoản kế, báo một dòng, nhớ tài kho
   calls.length = 0
   await runWithAccounts(async (env) => { calls.push(env.CODEX_HOME); return OK }, { env: {}, home: w.home, file: w.file, now: () => 1000 + 3 * 3600_000 })
   assert.deepEqual(calls, [w.a], 'qua giờ mở lại ⇒ tài khoản 1 dùng lại, sổ được xoá')
-  assert.equal(readState(w.file)[w.a], undefined)
+  assert.equal(readState(w.file)[homeKey(w.a)], undefined)
 })
 
 test('tài khoản còn lượt duy nhất cũng hết ⇒ không gọi thêm vào tài khoản đã biết là hết lượt', async () => {

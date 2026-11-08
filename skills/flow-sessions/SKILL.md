@@ -6,6 +6,8 @@ user-invocable: false
 
 # Flow — nhắn giữa các phiên (chốt 2026-10-15)
 
+Đang ở Paseo ⇒ tìm phiên bằng `mcp__paseo__list_agents`, nhắn bằng `send_agent_prompt`, bàn giao bằng `create_agent` (skill `flow-paseo`).
+
 Nhiều phiên chạy song song; mỗi dự án có thể có một phiên điều phối, tên bắt đầu bằng 🧭 (vd "🧭 Điều phối 1Scout").
 Tìm địa chỉ bằng `ListAgents`, gửi bằng `SendMessage` (tên đúng như dòng liệt kê; dòng đầu tin tự đủ nghĩa vì người nhận
 chỉ thấy dòng đó). Nhận thông báo tin bị "held" (hai phiên khác chế độ quyền nên tin không tới) ⇒ gửi lại bằng

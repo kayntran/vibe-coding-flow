@@ -41,7 +41,8 @@ function fixture() {
 }
 
 // Môi trường chạy hook: bỏ DEVIN_PROJECT_DIR (nếu máy test đang chạy trong Devin) để kết quả không phụ thuộc máy.
-const RUN_ENV = Object.fromEntries(Object.entries(BASE_ENV).filter(([k]) => k !== 'DEVIN_PROJECT_DIR'))
+// Bỏ biến của máy đang chạy test: Devin, Paseo (test chạy trong phiên Paseo không được làm lệch kết quả).
+const RUN_ENV = Object.fromEntries(Object.entries(BASE_ENV).filter(([k]) => k !== 'DEVIN_PROJECT_DIR' && k !== 'PASEO_AGENT_ID'))
 
 function run(fx, { cwd = fx.repo, input, env = {} } = {}) {
   const r = spawnSync(process.execPath, [SCRIPT], {
@@ -1252,5 +1253,13 @@ describe('sổ đang chờ user gật', () => {
     assert.ok(!line.includes('y'.repeat(200)))
     const mark = '…(đã cắt, đọc đủ ở file trên)'
     assert.ok(ctx.slice(ctx.indexOf(PREFIX), ctx.indexOf(mark) + mark.length).length <= 2000)
+  })
+})
+
+describe('chạy trong Paseo', () => {
+  test('có PASEO_AGENT_ID ⇒ dặn dùng skill flow-paseo; không có ⇒ không nhắc gì về Paseo', () => {
+    const fx = fixture()
+    assert.match(run(fx, { env: { PASEO_AGENT_ID: 'a1' } }) ?? '', /Đang chạy trong Paseo[\s\S]*flow-paseo/)
+    assert.doesNotMatch(run(fx) ?? '', /Paseo/)
   })
 })

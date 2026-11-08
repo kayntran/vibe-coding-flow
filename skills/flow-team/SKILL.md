@@ -6,6 +6,9 @@ user-invocable: false
 
 # Đội hình & giao việc
 
+**Đang chạy trong Paseo** (hook mở phiên báo, hoặc `node ~/.claude/hooks/paseo.mjs on` ra "có") ⇒ chọn vai như dưới, nhưng
+giao bằng phiên Paseo theo skill `flow-paseo` thay cho Agent tool và CLI ngoài.
+
 ## Ai làm gì
 
 | Vai | Ai | Giao khi | Không giao |

@@ -7,7 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 
 const DEFAULT_WAIT_MS = 60 * 60 * 1000
-const MAX_WAIT_MS = 8 * 24 * 60 * 60 * 1000
+const MAX_WAIT_MS = 40 * 24 * 60 * 60 * 1000 // gói miễn phí có thể khoá cả tháng
 const UNIT_MS = { d: 86_400_000, h: 3_600_000, m: 60_000 }
 
 export const statePath = (home = os.homedir()) => path.join(home, '.claude', 'cache', 'codex-het-luot.json')
@@ -34,9 +34,18 @@ export function listHomes({ env = process.env, home = os.homedir(), exists = fs.
   return all.filter((d, i) => (i === 0 && exists(d)) || hasAuth(d))
 }
 
-/** Hết lượt nhưng chữ lỗi không nói giờ mở lại ⇒ chờ 1 giờ. "try again in 2 days 3 hours" / "in 45 minutes" / "in 1h 20m" ⇒ ms; không đọc được ⇒ 1 giờ. */
-export function waitMs(text) {
-  const m = /(?:try again|resets?|available again)[^.\n]*?\bin\s+((?:\d+\s*(?:d(?:ays?)?|h(?:ours?|rs?)?|m(?:in(?:ute)?s?)?)[\s,and]*)+)/i.exec(String(text ?? ''))
+/**
+ * Thời gian chờ tới lúc mở lại: "try again in 2 days 3 hours" / "in 45 minutes" / "in 1h 20m", hoặc ngày cụ thể
+ * "try again at Dec 5th, 2026 1:53 PM" (giờ máy) [KIỂM 2026-11-08, Codex gói miễn phí]. Không đọc được ⇒ 1 giờ.
+ */
+export function waitMs(text, now = Date.now()) {
+  const s = String(text ?? '')
+  const at = /(?:try again|resets?|available again)\s+(?:at|on)\s+([A-Z][a-z]{2,8}\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}(?:,?\s+(?:at\s+)?\d{1,2}:\d{2}\s*(?:[AP]M)?(?:\s*(?:UTC|GMT|[+-]\d{2}:?\d{2}))?)?)/i.exec(s)
+  if (at) {
+    const t = Date.parse(at[1].replace(/(\d)(?:st|nd|rd|th)/i, '$1').replace(/,?\s+at\s+/i, ' ').replace(/\.(?=\s)/, ''))
+    if (Number.isFinite(t) && t > now) return Math.min(Math.max(t - now, 60_000), MAX_WAIT_MS)
+  }
+  const m = /(?:try again|resets?|available again)[^.\n]*?\bin\s+((?:\d+\s*(?:d(?:ays?)?|h(?:ours?|rs?)?|m(?:in(?:ute)?s?)?)[\s,and]*)+)/i.exec(s)
   if (!m) return DEFAULT_WAIT_MS
   let ms = 0
   for (const [, n, u] of m[1].matchAll(/(\d+)\s*([dhm])/gi)) ms += Number(n) * UNIT_MS[u.toLowerCase()]
@@ -51,17 +60,29 @@ export function readState(file = statePath()) {
 }
 
 // Đổi đúng một mục: đọc lại sổ ngay trước khi ghi (lượt Codex khác có thể vừa ghi tài khoản khác), ghi qua file tạm rồi rename.
+/** Khoá sổ cho một thư mục tài khoản: đường dẫn tuyệt đối; Windows không phân biệt hoa thường ⇒ hạ chữ thường. Mọi nơi đọc/ghi sổ dùng hàm này. */
+export const homeKey = (p, platform = process.platform) => (platform === 'win32' ? path.resolve(p).toLowerCase() : path.resolve(p))
+
 function updateState(file, dir, entry) {
   try {
     const state = readState(file)
-    if (entry) state[dir] = entry
-    else if (state[dir]) delete state[dir]
-    else return
+    const k = homeKey(dir)
+    const same = Object.keys(state).filter((x) => homeKey(x) === k)
+    if (!entry && !same.length) return
+    for (const x of same) delete state[x]
+    if (entry) state[k] = entry
     fs.mkdirSync(path.dirname(file), { recursive: true })
     const tmp = `${file}.${process.pid}.${Date.now()}.tmp`
     fs.writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`)
     fs.renameSync(tmp, file)
   } catch {} // không ghi được ⇒ lần sau thử lại từ đầu, không hỏng lượt gọi
+}
+
+/** Ghi tài khoản `dir` hết lượt tới giờ mở lại đọc từ `text` (dùng cả khi phiên Codex trong Paseo báo hết lượt). Trả mốc mở lại. */
+export function markSpent(dir, text, { file = statePath(), now = Date.now() } = {}) {
+  const until = now + waitMs(text, now)
+  updateState(file, path.resolve(dir), { until, at: new Date(now).toISOString() })
+  return until
 }
 
 // Hết lượt thật chỉ nằm ở dòng lỗi cuối của Codex ("ERROR: You've hit your usage limit…"), không phải ở prompt hay đầu ra lệnh
@@ -78,7 +99,8 @@ export function quotaText(r) {
 
 /** Tài khoản còn lượt trước (giữ thứ tự), tài khoản đang hết lượt xếp sau theo giờ mở lại sớm nhất. */
 export function order(homes, state, now = Date.now()) {
-  const until = (d) => Number(state[d]?.until ?? 0)
+  const byKey = new Map(Object.entries(state ?? {}).map(([k, v]) => [homeKey(k), v]))
+  const until = (d) => Number(byKey.get(homeKey(d))?.until ?? 0)
   const live = homes.filter((d) => until(d) <= now)
   const spent = homes.filter((d) => until(d) > now).sort((a, b) => until(a) - until(b))
   return { live, spent, list: [...live, ...spent] }
@@ -106,7 +128,7 @@ export async function runWithAccounts(runOnce, {
       updateState(file, dir, null)
       return { ...r, home: dir }
     }
-    updateState(file, dir, { until: now() + waitMs(quota), at: new Date(now()).toISOString() })
+    markSpent(dir, quota, { file, now: now() })
     const next = list[i + 1]
     say(next
       ? `Codex: tài khoản ${label(dir)} hết lượt ⇒ đã chuyển sang tài khoản ${label(next)}.`

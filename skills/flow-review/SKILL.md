@@ -54,6 +54,9 @@ trả về dạng chữ theo khuôn của `review-brief.md`; captain chép sang 
 
 ## 3. Gọi model: gửi sạch và hỏi trung lập
 
+Đang ở Paseo, trừ Windows ⇒ lượt Codex chạy thành phiên Paseo trên bản sao đã lọc (`review-ext.mjs --prepare` … `--collect`, skill
+`flow-paseo`). Windows ⇒ `review-ext.mjs --model codex` như dưới [8338].
+
 MỌI model ngoài đi qua MỘT wrapper: kiểm CLI sẵn sàng, chọn model, **gửi sạch** (bỏ file bí mật/dữ liệu riêng khỏi diff và
 workspace, quét khoá cả dòng đã xoá, reviewer đọc thư mục tạm, không nhận biến môi trường dạng khoá), bóc JSON đúng
 `review-schema.json`. Chỉ gửi code, không gửi dữ liệu thật và khoá.
