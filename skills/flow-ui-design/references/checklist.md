@@ -16,6 +16,26 @@ Dòng ⚙ do `ui-check` kiểm được khi dự án có `.claude/ui.json`; còn
 - Dùng được bằng bàn phím: thứ tự Tab đúng, thấy focus, Esc đóng hộp thoại.
 - Không dựa vào mỗi màu hay mỗi hover để truyền ý.
 - Font hiển thị đủ dấu tiếng Việt, không vỡ dòng giữa từ.
+- Nút là `<button>`, link là `<a>`, không `div` bấm được; ô nhập có nhãn; nút chỉ icon có tên đọc được. Không `outline: none` mà
+  không có viền focus thay thế.
+
+## Nhập liệu và con số
+
+- Ô nhập đúng loại: số điện thoại, tiền, mã ⇒ bàn phím số (`type`/`inputmode`); email, mật khẩu, địa chỉ có `autocomplete`. Không
+  chặn dán.
+- Đăng nhập: cho dán mật khẩu, có nút hiện/ẩn mật khẩu, trình quản lý mật khẩu điền được (`autocomplete="current-password"`,
+  `"new-password"`).
+- Tiền, số, ngày theo kiểu Việt qua `Intl` (`1.000.000 ₫`, `08/11/2026`), không ghép chuỗi tay.
+- Số trong bảng, tiền, giờ đếm: thẳng cột (`tabular-nums`). Ảnh có kích thước sẵn để màn không nhảy khi tải. Không khoá phóng to;
+  nút sát mép không bị tai thỏ hay thanh điều hướng che (vùng an toàn).
+
+## Token
+
+- ⚙ Màu, cỡ chữ, khoảng cách, bo góc, bóng lấy từ token; không gõ số rời (`#1a2b3c`, `text-[13px]`, `style={{ color: … }}`) — máy
+  `ui-token` của `flow-check` nhắc.
+- Màn chỉ dùng token tầng vai trò hoặc thành phần, không dùng thẳng giá trị gốc (`tokens.md`).
+- Thành phần bấm được thấy rõ đủ 6 trạng thái: mặc định, hover, nhấn, focus (Tab), tắt, đang chọn.
+- Chế độ tối (nếu app có) và chế độ dày đặc (nếu có): soát lại tương phản, vòng focus, vùng bấm.
 
 ## Luật tối giản
 
@@ -39,3 +59,8 @@ nhập. Nhập rỗng, sai, rất dài.
 ## Dọn
 
 Không còn bản demo thừa, thanh chuyển demo, chữ giả, dữ liệu mẫu trong bản thật. Console không có lỗi đỏ.
+
+## Giữ danh sách này gọn
+
+Mỗi dòng ở đây phải bắt được lỗi thật. Dòng nào qua 3 lần soát liền (3 tính năng khác nhau) không bắt được lỗi nào thì đề xuất bỏ
+khi gộp; dòng ⚙ do máy kiểm thì giữ. Lỗi giao diện mới gặp mà danh sách chưa có thì thêm một dòng.

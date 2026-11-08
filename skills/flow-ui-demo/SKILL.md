@@ -5,7 +5,9 @@ description: Dựng các bản giao diện xem thử ngay trong app chạy trên
 
 # Dựng bản xem thử cho user chọn
 
-Luồng đã duyệt (`UX.md`) và SPEC là đầu vào, nếu có. Thiếu luồng mà đây là màn mới thì chạy `flow-ux` trước.
+Luồng đã duyệt (`UX.md`), **tham khảo app thật đã cho user xem** (mục "Tham khảo" trong `UX.md`) và SPEC là đầu vào. Thiếu luồng
+hoặc thiếu tham khảo mà đây là màn mới thì chạy `flow-ux` trước. Mỗi bản ghi app tham khảo nó dựa vào; chỉ học cấu trúc, màu và chữ
+lấy từ token của app.
 Mọi bản theo luật `~/.claude/rules/ui-style.md` (đọc trước nếu chưa nạp).
 
 ## Số bản

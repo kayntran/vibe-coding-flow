@@ -29,6 +29,8 @@ mẫu có `data-s`) + bật git + điểm lưu "Tạo app". Lỗi ⇒ nói lại
 diệt virus) + việc user cần làm; không thử lách.
 Mở phiên làm việc trong thư mục app mới (hoặc thêm thư mục vào phiên) trước khi sửa tiếp — mọi sửa sau đó theo
 `flow-worktree`.
+Ngay sau khi tạo: dựng **bộ token tối thiểu** (`~/.claude/skills/flow-ui-design/references/tokens.md`: 3 tầng, đủ 8 nhóm, trạng thái, sáng/tối, độ dày)
+vào đúng chỗ của stack, màn đầu dùng token đó; chọn xong bản demo thì chốt lại giá trị [zgp6].
 
 ## 4. Chạy và mở
 Chạy lệnh dev nó in (port riêng: `node ~/.claude/hooks/wt-env.mjs alloc <thư mục>`), mở app cho user (preview/trình

@@ -1,0 +1,33 @@
+id: ui-token-hardcoded
+language: Tsx
+severity: error
+message: "Giá trị giao diện gõ cứng thay vì lấy từ token"
+note: |
+  Màu, cỡ chữ, khoảng cách gõ số rời làm app mỗi chỗ một kiểu và khó đổi gu sau này.
+  Sửa: dùng token của dự án (biến CSS, lớp Tailwind theo theme); thiếu thì thêm token rồi dùng. Xem flow-ui-design/references/defaults.md.
+rule:
+  any:
+    - kind: string_fragment
+      regex: '(?:^|\s)[!\w:/-]*-\[(?:#[0-9a-fA-F]{3,8}|(?:rgb|hsl)a?\(|\d+(?:\.\d+)?(?:px|rem))'
+    - kind: pair
+      all:
+        - has:
+            field: key
+            regex: '^(?:color|background|backgroundColor|borderColor|fill|stroke|fontSize|lineHeight|padding|margin|gap|borderRadius|boxShadow|width|height|minWidth|maxWidth|minHeight|maxHeight)$'
+        - has:
+            field: value
+            kind: string
+            regex: '#[0-9a-fA-F]{3,8}|\d+px|(?:rgb|hsl)a?\('
+        - inside:
+            kind: jsx_attribute
+            stopBy: end
+ignores:
+  - '**/node_modules/**'
+  - '**/dist/**'
+  - '**/build/**'
+  - '**/.next/**'
+  - '**/out/**'
+  - '**/kit/rules/**/fixtures/**'
+  - '**/*.test.*'
+  - '**/*.spec.*'
+  - '**/*.stories.*'

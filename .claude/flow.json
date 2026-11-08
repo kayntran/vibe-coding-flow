@@ -1,0 +1,4 @@
+{
+  "$comment": "Repo kit không có màn hình riêng: chỉ mẫu app trong kit/templates là giao diện thật. File .tsx ở kit/rules/**/fixtures là mẫu kiểm của luật quét, không phải giao diện (cổng QA không đòi duyệt giao diện cho chúng).",
+  "uiPattern": "^kit/templates/.*\\.(tsx|jsx|vue|svelte|astro|html|css|scss|sass|less)$"
+}

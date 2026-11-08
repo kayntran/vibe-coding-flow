@@ -273,6 +273,19 @@
       "hint": "Sửa chỗ luật SAST báo (mỗi luật có lời dặn sửa ngay dưới dòng báo); đừng tắt luật."
     },
     {
+      "id": "ui-token",
+      "stack": ["web", "wails", "extension"],
+      "title": "Giao diện lấy màu, cỡ, khoảng cách từ token (chỉ nhắc)",
+      "cmd": ["ast-grep", "sg"],
+      "identify": "ast-grep",
+      "args": ["scan", "--config", "{kit}/rules/ui/sgconfig.yml", "."],
+      "required": false,
+      "timeoutMs": 120000,
+      "install": "npm i -g @ast-grep/cli",
+      "docs": "https://ast-grep.github.io/guide/quick-start.html#installation",
+      "hint": "Đổi giá trị gõ cứng sang token của dự án (biến CSS / lớp theo theme); thiếu token thì thêm token rồi dùng (flow-ui-design/references/defaults.md)."
+    },
+    {
       "id": "spec-codes",
       "stack": "all",
       "title": "SPEC đang làm khớp app và test (mã S-nn, P-nn)",

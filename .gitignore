@@ -14,6 +14,7 @@
 !/.claude/
 /.claude/*
 !/.claude/allow-direct-edit
+!/.claude/flow.json
 
 !/kit/
 

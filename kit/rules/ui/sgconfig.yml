@@ -1,0 +1,6 @@
+# Luật giao diện của kit (chỉ nhắc, checker ui-token không bắt buộc): flow-check chạy `ast-grep scan --config kit/rules/ui/sgconfig.yml .`
+# Mỗi luật có fixture đỏ + xanh ở fixtures/<id>/ (hooks/flow-check.test.mjs kiểm).
+ruleDirs:
+  - rules
+languageGlobs:
+  tsx: ['*.ts', '*.mts', '*.cts', '*.js', '*.mjs', '*.cjs', '*.jsx']

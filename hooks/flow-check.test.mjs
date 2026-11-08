@@ -681,7 +681,7 @@ test('thật × extension (manifest MV3 ở gốc): web-ext-lint + mv3-manifest 
   const dir = project({ 'manifest.json': { manifest_version: 3, name: 'x', version: '1', permissions: ['storage'] } })
   const rep = await runChecks({ dir, checkers: REAL.checkers, which: whichAll, exec: execGood })
   assert.deepEqual(rep.stacks, ['extension'])
-  assert.deepEqual(rep.results.map((r) => r.id).sort(), ['mv3-manifest', 'sast-ast-grep', 'secret-build', 'web-ext-lint'])
+  assert.deepEqual(rep.results.map((r) => r.id).sort(), ['mv3-manifest', 'sast-ast-grep', 'secret-build', 'ui-token', 'web-ext-lint'])
   assert.equal(rep.results.find((r) => r.id === 'secret-build').status, 'pass')
   assert.equal(exitCode(rep), 0)
 })
@@ -801,6 +801,25 @@ test('luật SAST chạy THẬT bằng ast-grep: fixture bad bị luật bắt, 
     assert.ok(mine.some((h) => path.basename(h.file) === `bad.${ext}`), `${id}: fixture bad KHÔNG bị bắt`)
     assert.ok(!mine.some((h) => path.basename(h.file) === `good.${ext}`), `${id}: fixture good bị bắt nhầm`)
   }
+})
+
+// Luật giao diện (chốt zgp6): checker ui-token chỉ nhắc (required:false), chạy ở dự án có giao diện, fixture đỏ bị bắt, xanh không.
+test('ui-token: chỉ nhắc, chỉ cho stack có giao diện, có fixture đỏ + xanh', () => {
+  const c = REAL.checkers.find((x) => x.id === 'ui-token')
+  assert.equal(c.required, false)
+  assert.deepEqual([].concat(c.stack).sort(), ['extension', 'wails', 'web'])
+  assert.deepEqual(fs.readdirSync(path.join(RULES_DIR, 'ui', 'fixtures', 'ui-token-hardcoded')).sort(), ['bad.tsx', 'good.tsx'])
+  assert.deepEqual(yamlLiteProblems(fs.readFileSync(path.join(RULES_DIR, 'ui', 'rules', 'ui-token-hardcoded.yml'), 'utf8')), [])
+})
+
+test('ui-token chạy THẬT bằng ast-grep: bắt màu/cỡ gõ cứng (Tailwind [#…]/[13px], style={{ color: "#…" }}), không bắt token', { skip: AST_GREP ? false : 'máy không có ast-grep/sg' }, () => {
+  const work = project({}, 'ui token ')
+  for (const f of ['bad.tsx', 'good.tsx']) fs.copyFileSync(path.join(RULES_DIR, 'ui', 'fixtures', 'ui-token-hardcoded', f), path.join(work, f))
+  const r = spawnSync(AST_GREP, ['scan', '--config', path.join(RULES_DIR, 'ui', 'sgconfig.yml').replace(/\\/g, '/'), '--json', '.'], { cwd: work, encoding: 'utf8', shell: IS_WIN && /\.(cmd|bat)$/i.test(AST_GREP) })
+  let hits
+  try { hits = JSON.parse(r.stdout || '[]') } catch { hits = r.stdout.split('\n').filter(Boolean).map((l) => JSON.parse(l)) }
+  assert.equal(hits.filter((h) => path.basename(h.file) === 'bad.tsx').length, 4)
+  assert.equal(hits.filter((h) => path.basename(h.file) === 'good.tsx').length, 0)
 })
 
 // --- đợt 2 (làn B): máy kiểm kiến trúc / API / migration --------------------------------------------------------------------------------------

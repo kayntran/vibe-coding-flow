@@ -18,6 +18,7 @@ Hai chế độ dùng chung một bộ luật: **Làm** khi đang viết giao di
 
 ## Chế độ Làm
 
+0. Chưa có bộ token 3 tầng (`references/tokens.md`) ⇒ dựng trước, rồi mới làm màn. Thành phần bấm được có đủ token trạng thái.
 1. Đọc token và thành phần sẵn có, dùng lại trước khi tạo mới. Dự án có thư viện UI thì tra tài liệu chính hãng trước khi đoán API.
 2. Giá trị màu, cỡ, khoảng cách lấy từ token. Thiếu thì thêm vào token, không gõ số rời.
 3. Mỗi màn đủ trạng thái: có dữ liệu, trống, đang tải, lỗi; nút có hover, focus, đang xử lý, tắt. Giữ `data-s="S-nn"`.
