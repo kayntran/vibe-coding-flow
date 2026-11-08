@@ -42,8 +42,8 @@ họ khác, không chạy Codex hai lần.
 | Nhạy cảm | **Codex Sol `high`** lượt bảo mật (cùng commit đã qua `flow-security` thì dùng lại) + **Grok** lượt chất lượng |
 | Tiền / auth / dữ liệu có rủi ro mất mát | như Nhạy cảm + **Gemini Flash** lượt chất lượng thứ hai |
 
-Model luôn là bản mới nhất của dòng (`kit/roles.json` + `models.mjs`). Codex có tài khoản dự phòng thì thử trước khi coi
-là hết lượt.
+Model luôn là bản mới nhất của dòng (`kit/roles.json` + `models.mjs`). `review-ext.mjs --model codex` tự thử mọi tài khoản
+Codex đã đăng nhập trên máy (`~/.codex`, `~/.codex-*`) trước khi báo hết lượt; dòng "đã chuyển sang tài khoản…" báo lại user.
 
 **Dự phòng:** lượt nào lỗi, hết giờ, hết lượt hoặc không ra JSON ⇒ chạy lại bằng model kế tiếp CHƯA dùng cho nhánh này:
 Codex → Grok → Gemini Flash → Agent `code-reviewer`.

@@ -53,7 +53,8 @@ thì sang bậc sau:
 - Đang ở Codex: **Sol high** (`pick codex plan-reviewer`).
 
 ```bash
-codex exec --sandbox read-only -m "$(node ~/.claude/hooks/models.mjs pick codex plan-reviewer)" \
+# codex-run.mjs = codex exec, tự đổi tài khoản Codex khi hết lượt và báo một dòng
+node ~/.claude/hooks/codex-run.mjs exec --sandbox read-only -m "$(node ~/.claude/hooks/models.mjs pick codex plan-reviewer)" \
   -c model_reasoning_effort="high" -C "<gốc repo>" -o "<scratchpad>/plan-review.md" "<ĐỀ>" < /dev/null
 # agy: cd vào thư mục trống, agy -p "<ĐỀ, kèm đường dẫn tuyệt đối SPEC/PLAN>" --model "$(node ~/.claude/hooks/models.mjs pick agy plan-reviewer)" --mode plan
 ```

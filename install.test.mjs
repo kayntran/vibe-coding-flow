@@ -253,6 +253,23 @@ test('Codex có mặt (~/.codex) ⇒ khối AGENTS.md, skill sang ~/.agents/skil
   assert.match(r.out, /\/hooks/, 'phải hướng dẫn trust hook trong Codex')
 })
 
+test('Codex hai tài khoản (~/.codex và ~/.codex-2 có auth.json) ⇒ cả hai có AGENTS.md + hooks.json, không cài trùng, nhắc trust từng tài khoản', async () => {
+  const home = tmp(); const kit = miniKit()
+  withCodex(home)
+  fs.mkdirSync(path.join(home, '.codex-2'), { recursive: true })
+  fs.writeFileSync(path.join(home, '.codex-2', 'auth.json'), '{}')
+  fs.mkdirSync(path.join(home, '.codex-chua-dang-nhap'), { recursive: true })
+  const r = await run(home, kit)
+  assert.equal(r.code, 0, r.out)
+  for (const d of ['.codex', '.codex-2']) {
+    assert.ok(rd(home, d, 'AGENTS.md').includes('Từ điển công cụ Claude → Codex'), d)
+    assert.deepEqual(json(home, d, 'hooks.json'), codexHooksJson(rootOf(home)), d)
+  }
+  assert.ok(!fs.existsSync(path.join(home, '.codex-chua-dang-nhap', 'AGENTS.md')), 'thư mục chưa đăng nhập không được cài')
+  assert.equal((r.out.match(/Codex tài khoản 2:/g) ?? []).length, 1)
+  assert.match(r.out, /\/hooks[^\n]*từng tài khoản: 1, 2/)
+})
+
 test('Codex: vai không có model trong danh sách ⇒ TOML bỏ khoá model (CLI tự dùng mặc định), vẫn có effort, có ghi chú', async () => {
   const home = tmp(); withCodex(home)
   const r = await run(home, miniKit(), { models: { catalog: { codex: null }, exec: () => ({ ok: false, stdout: '', error: 'không có codex' }) } })

@@ -564,6 +564,23 @@ describe('run: chặn trước khi gọi', () => {
     assert.equal(h.calls.length, 0)
   })
 
+  test('codex đi qua đổi tài khoản: lượt hết lượt ⇒ thử tài khoản kế với CODEX_HOME khác, ok = có JSON review, dòng báo ra stderr', async () => {
+    let n = 0
+    const h = harness({ reply: () => (++n === 1 ? { status: 1, stdout: '', stderr: "ERROR: You've hit your usage limit." } : {}) })
+    const homes = []
+    h.deps.withAccounts = async (f, o) => {
+      let r = await f({ ...o.env, CODEX_HOME: 'TK1' }); homes.push('TK1')
+      assert.equal(o.ok(r), false)
+      o.say('Codex: tài khoản 1 hết lượt ⇒ đã chuyển sang tài khoản 2.')
+      r = await f({ ...o.env, CODEX_HOME: 'TK2' }); homes.push('TK2')
+      assert.equal(o.ok(r), true)
+      return r
+    }
+    assert.equal(await run(h.args(makeRepo({ base: { 'a.js': '1\n' }, feat: { 'a.js': '2\n' } }), 'codex'), h.deps), 0, errText(h))
+    assert.deepEqual(h.calls.map((c) => c.env.CODEX_HOME), ['TK1', 'TK2'])
+    assert.match(errText(h), /đã chuyển sang tài khoản 2/)
+  })
+
   test('diff rỗng ⇒ exit 1', async () => {
     const repo = makeRepo()
     const h = harness()

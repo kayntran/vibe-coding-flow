@@ -23,6 +23,7 @@ import { dirname, join, resolve, basename, relative, isAbsolute } from "node:pat
 import { fileURLToPath } from "node:url";
 import { GROK_ENV } from "./grok.mjs";
 import { check as checkCli, classifyFailure, resolveBin } from "./lib/clis.mjs";
+import { runWithAccounts } from "./lib/codex-accounts.mjs";
 import { resolve as resolveModel, parseAgyCatalog, pickModel } from "./lib/models.mjs";
 import { staleHint } from "./lib/updates.mjs";
 import { scanDiff, scanText, scanDir, isSensitiveFile, isPrivateData, unquoteGitPath, diffSectionPaths } from "./lib/secrets.mjs";
@@ -458,7 +459,13 @@ async function review(o, io, deps) {
     if (o.model === "grok") env = cursorEnv(env);
 
     const t0 = Date.now();
-    let r = await exec(call.cmd, call.args, { cwd: ws, env, input: call.input, timeoutMs: o.timeout * 1000 });
+    // Codex: thử lần lượt các tài khoản đã đăng nhập, hết lượt thì sang tài khoản kế (chốt 0ufuusz3).
+    let r = o.model === "codex"
+      // Test tiêm exec mà không tiêm withAccounts ⇒ chạy một lần, không đọc tài khoản/ghi sổ hết lượt của máy thật.
+      ? await (deps.withAccounts ?? (deps.exec ? (f, x) => f(x.env) : runWithAccounts))(
+        (e) => exec(call.cmd, call.args, { cwd: ws, env: e, input: call.input, timeoutMs: Math.max(1000, o.timeout * 1000 - (Date.now() - t0)) }),
+        { env, ok: (x) => Boolean(extractReview(x.stdout ?? "")), say: (s) => io.err(s) })
+      : await exec(call.cmd, call.args, { cwd: ws, env, input: call.input, timeoutMs: o.timeout * 1000 });
     // Cursor đổi tên model phía server (dính 2026-10-13) ⇒ lỗi "Cannot use this model … Available models: …": chọn lại từ danh sách đó, chạy lại một lần.
     const avail = o.model === "grok" && !extractReview(r.stdout ?? "") ? /Cannot use this model[\s\S]*?Available models:([\s\S]*)/i.exec(`${r.stdout ?? ""}\n${r.stderr ?? ""}`)?.[1] : null;
     const retryModel = avail ? pickCursorModel(avail) : null;

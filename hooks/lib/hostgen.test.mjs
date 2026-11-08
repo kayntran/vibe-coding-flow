@@ -54,6 +54,14 @@ test('AGENTS: từ điển công cụ theo brief J, không hứa có tool Claude
   assert.match(block, /không.*@import/i)
 })
 
+test('AGENTS: nhúng luật rules/*.md (bỏ frontmatter paths) vì Codex không nạp theo loại file', () => {
+  const rule = '---\r\npaths:\r\n  - "**/*.tsx"\r\n---\r\n\r\n# Phong cách UI\r\nNhãn 1–3 chữ.\r\n'
+  const block = codexAgentsBlock('# Luật', [rule])
+  assert.ok(block.includes('# Luật\n\n# Phong cách UI\nNhãn 1–3 chữ.'))
+  assert.ok(!block.includes('paths:'))
+  assert.throws(() => codexAgentsBlock('# Luật', ['<!-- VIBE-FLOW:END -->']), /marker/i)
+})
+
 test('AGENTS: trần đo bằng byte UTF-8; quá cỡ ném lỗi, không cắt mất luật', () => {
   const overhead = Buffer.byteLength(codexAgentsBlock(''), 'utf8')
   const exact = 'a'.repeat(24 * 1024 - overhead)
@@ -216,7 +224,7 @@ test('Codex hooks: hooks.json đúng nhóm event/handler và giữ các hook dù
   const out = codexHooksJson('/tmp/kit')
   assert.ok(out.description.includes(banner))
   assert.deepEqual(Object.keys(out.hooks).sort(), ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'SubagentStop', 'SessionStart'].sort())
-  assert.equal(Object.values(out.hooks).flat().length, 10)
+  assert.equal(Object.values(out.hooks).flat().length, 11) // + khoa.mjs prompt (chỉ Codex)
   for (const [event, groups] of Object.entries(out.hooks)) for (const group of groups) {
     assert.equal(group.hooks.length, 1)
     if (['Stop', 'SubagentStop', 'SessionStart', 'UserPromptSubmit'].includes(event)) assert.ok(!Object.hasOwn(group, 'matcher'))

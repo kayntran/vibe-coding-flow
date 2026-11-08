@@ -12,8 +12,8 @@ Hai chế độ dùng chung một bộ luật: **Làm** khi đang viết giao di
 1. Lời user và gu đã ghi ở sổ chốt (`mcp__so-chot__tim_chot`).
 2. Design system và token trong code. **Token trong code là nguồn thật** của màu, chữ, khoảng cách; sổ chốt chỉ ghi hướng gu.
 3. Bản demo đã chọn và `UX.md`.
-4. Phần "Phong cách UI" trong `~/.claude/CLAUDE.md`: mỗi màn một việc, ít chữ, nhãn 1-3 chữ dạng động từ, phản hồi bằng trạng thái,
-   lỗi một dòng cạnh chỗ sai. Trùng với luật ở đây thì luật CLAUDE.md thắng.
+4. Luật phong cách UI ở `~/.claude/rules/ui-style.md` (đọc nếu chưa nạp): mỗi màn một việc, ít chữ, nhãn 1-3 chữ dạng động từ,
+   phản hồi bằng trạng thái, lỗi một dòng cạnh chỗ sai. Trùng với luật ở đây thì luật đó thắng.
 5. Mặc định trong `references/defaults.md`, chỉ khi các nguồn trên không nói.
 
 ## Chế độ Làm

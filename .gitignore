@@ -23,6 +23,8 @@
 
 !/workers/
 
+!/rules/
+
 !/skills/
 /skills/*
 !/skills/flow-*/

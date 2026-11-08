@@ -209,7 +209,7 @@ const frontName = (md) => {
 function scanTargets(kitDir) {
   const t = []
   for (const f of ['CLAUDE.md', 'AGENTS.md', 'WORKERS.md', 'WORKTREE.md']) if (existsSync(join(kitDir, f))) t.push(join(kitDir, f))
-  for (const d of ['agents', 'workers', 'kit']) if (existsSync(join(kitDir, d))) t.push(join(kitDir, d))
+  for (const d of ['agents', 'workers', 'kit', 'rules']) if (existsSync(join(kitDir, d))) t.push(join(kitDir, d))
   const sk = join(kitDir, 'skills')
   if (existsSync(sk)) for (const e of readdirSync(sk, { withFileTypes: true })) if (e.isDirectory() && e.name.startsWith('flow-')) t.push(join(sk, e.name))
   return t
@@ -236,6 +236,7 @@ export async function install(opts = {}) {
   const { scanHiddenPaths } = await import('./hooks/lib/secrets.mjs')
   const models = await import('./hooks/lib/models.mjs')
   const clis = await import('./hooks/lib/clis.mjs')
+  const codexAccounts = await import('./hooks/lib/codex-accounts.mjs')
 
   // 1. ký tự ẩn trong file luật/skill/agent của kit
   const scan = scanHiddenPaths(scanTargets(kitDir))
@@ -272,13 +273,27 @@ export async function install(opts = {}) {
   }
 
   // 3. Codex
-  const codexDir = env.CODEX_HOME ? resolve(env.CODEX_HOME) : join(home, '.codex')
-  const codexPresent = existsSync(codexDir) || Boolean(models.findExe('codex', env, home))
+  const codexPrimary = env.CODEX_HOME ? resolve(env.CODEX_HOME) : join(home, '.codex')
+  let codexDir = codexPrimary
+  let tag = 'codex', sayTag = 'Codex'
+  const codexPresent = existsSync(codexPrimary) || Boolean(models.findExe('codex', env, home))
   if (codexPresent) {
     try {
       codexOk = await installCodex()
     } catch (e) {
       problems.push(`Codex: ${e.message}`)
+    }
+    // Tài khoản Codex khác đã đăng nhập trên máy (~/.codex-2…): mỗi tài khoản có AGENTS.md, vai, hook riêng ⇒ cài cho cả
+    // các tài khoản đó để kit đổi tài khoản khi hết lượt vẫn đủ luật (chốt 0ufuusz3). Skill dùng chung ~/.agents/skills.
+    for (const dir of codexAccounts.listHomes({ env, home }).filter((d) => d !== codexPrimary)) {
+      codexDir = dir
+      tag = `codex (tài khoản ${codexAccounts.label(dir)})`
+      sayTag = `Codex tài khoản ${codexAccounts.label(dir)}`
+      try {
+        await installCodex()
+      } catch (e) {
+        problems.push(`${sayTag}: ${e.message}`)
+      }
     }
   }
 
@@ -301,7 +316,11 @@ export async function install(opts = {}) {
     // --- tính trước (chưa ghi gì): lỗi ở đây ⇒ bỏ cả phần Codex, không ghi nửa chừng ---
     const claudeMd = join(kitDir, 'CLAUDE.md')
     if (!existsSync(claudeMd)) throw new Error(`kit thiếu CLAUDE.md (${norm(claudeMd)})`)
-    const block = hostgen.codexAgentsBlock(readFileSync(claudeMd, 'utf8'))
+    const rulesDir = join(kitDir, 'rules')
+    const ruleTexts = existsSync(rulesDir)
+      ? readdirSync(rulesDir).filter((f) => f.endsWith('.md')).sort().map((f) => readFileSync(join(rulesDir, f), 'utf8'))
+      : []
+    const block = hostgen.codexAgentsBlock(readFileSync(claudeMd, 'utf8'), ruleTexts)
     const agentsFile = join(codexDir, 'AGENTS.md')
     const agentsBefore = existsSync(agentsFile) ? readFileSync(agentsFile, 'utf8') : null
     const spliced = spliceAgents(agentsBefore ?? '', block)
@@ -344,7 +363,7 @@ export async function install(opts = {}) {
     for (const e of readdirSync(codexDir)) {
       if (e === 'orchestration-policy.md' || e.startsWith('worker-wait-hook')) {
         toBackup(join(codexDir, e), true)
-        changed.push(`codex: cất ${e} vào ${basename(backupDir)}`)
+        changed.push(`${tag}: cất ${e} vào ${basename(backupDir)}`)
         legacyMoved = true
         n++
       }
@@ -354,7 +373,7 @@ export async function install(opts = {}) {
     if (agentsBefore === null || spliced.text !== agentsBefore) {
       if (agentsBefore !== null && spliced.touchedOutside) toBackup(agentsFile, false)
       writeAtomic(agentsFile, spliced.text)
-      changed.push('codex: AGENTS.md')
+      changed.push(`${tag}: AGENTS.md`)
       n++
     }
 
@@ -363,7 +382,7 @@ export async function install(opts = {}) {
       const src = join(skillsSrc, name)
       const dest = join(agentsSkills, name)
       const hadMark = existsSync(join(dest, SKILL_MARK))
-      if (existsSync(dest) && !hadMark) { toBackup(dest, true); changed.push(`codex: cất skill ${name} có sẵn vào ${basename(backupDir)}`) }
+      if (existsSync(dest) && !hadMark) { toBackup(dest, true); changed.push(`${tag}: cất skill ${name} có sẵn vào ${basename(backupDir)}`) }
       const files = listFiles(src)
       let wrote = false
       for (const f of files) {
@@ -377,13 +396,13 @@ export async function install(opts = {}) {
         const keep = new Set([...files.map((f) => f.rel), SKILL_MARK])
         for (const f of listFiles(dest)) if (!keep.has(f.rel)) { toBackup(f.abs, true); wrote = true }
       }
-      if (wrote) { changed.push(`codex: skill ${name}`); n++ }
+      if (wrote) { changed.push(`${tag}: skill ${name}`); n++ }
     }
     if (existsSync(agentsSkills)) {
       for (const e of readdirSync(agentsSkills, { withFileTypes: true })) {
         if (e.isDirectory() && !skills.includes(e.name) && existsSync(join(agentsSkills, e.name, SKILL_MARK))) {
           toBackup(join(agentsSkills, e.name), true)
-          changed.push(`codex: cất skill ${e.name} (đã bỏ khỏi kit) vào ${basename(backupDir)}`)
+          changed.push(`${tag}: cất skill ${e.name} (đã bỏ khỏi kit) vào ${basename(backupDir)}`)
           n++
         }
       }
@@ -396,7 +415,7 @@ export async function install(opts = {}) {
       if (same(file, text)) continue
       if (existsSync(file) && !readFileSync(file, 'utf8').includes(GENERATED)) toBackup(file, false)
       writeAtomic(file, text)
-      changed.push(`codex: vai ${name}`)
+      changed.push(`${tag}: vai ${name}`)
       n++
     }
     if (existsSync(tomlDir)) {
@@ -404,7 +423,7 @@ export async function install(opts = {}) {
         if (tomls.has(f.replace(/\.toml$/, ''))) continue
         if (readFileSync(join(tomlDir, f), 'utf8').includes(GENERATED)) {
           toBackup(join(tomlDir, f), true)
-          changed.push(`codex: cất vai ${f} (đã bỏ khỏi kit) vào ${basename(backupDir)}`)
+          changed.push(`${tag}: cất vai ${f} (đã bỏ khỏi kit) vào ${basename(backupDir)}`)
           n++
         }
       }
@@ -414,11 +433,11 @@ export async function install(opts = {}) {
     if (!hooksCur.exists || JSON.stringify(hooksCur.data) !== JSON.stringify(hooksMerge.json)) {
       if (hooksCur.exists) toBackup(hooksFile, false)
       writeAtomic(hooksFile, hooksText)
-      changed.push('codex: hooks.json')
+      changed.push(`${tag}: hooks.json`)
       n++
     }
 
-    say(n ? `Codex: đã cập nhật (luật AGENTS.md, ${skills.length} skill, ${tomls.size} vai, hook).` : 'Codex: đã đủ, không đổi gì.')
+    say(n ? `${sayTag}: đã cập nhật (luật AGENTS.md, ${skills.length} skill, ${tomls.size} vai, hook).` : `${sayTag}: đã đủ, không đổi gì.`)
     if (legacyMoved) {
       say(`Bộ điều phối Codex cũ đã được cất trong ${norm(backupDir)} (không xoá).`)
     }
@@ -426,7 +445,12 @@ export async function install(opts = {}) {
   }
 
   // 4. việc user cần làm
-  if (codexPresent && codexOk && changed.includes('codex: hooks.json')) todo.push('Mở Codex, gõ /hooks rồi bấm tin (trust) các hook của vibe-flow. Hook vừa đổi nên Codex chưa chạy chúng cho tới khi bạn bấm tin.')
+  // Mỗi tài khoản Codex trust hook riêng ⇒ nêu đúng tài khoản có hook vừa đổi (kể cả khi tài khoản chính lỗi).
+  const trustAccounts = changed.filter((c) => /^codex.*: hooks\.json$/.test(c)).map((c) => /tài khoản ([^)]+)\)/.exec(c)?.[1] ?? '1')
+  if (codexPresent && trustAccounts.length) {
+    const which = trustAccounts.length > 1 || trustAccounts[0] !== '1' ? ` (làm ở từng tài khoản: ${trustAccounts.join(', ')})` : ''
+    todo.push(`Mở Codex, gõ /hooks rồi bấm tin (trust) các hook của vibe-flow${which}. Hook vừa đổi nên Codex chưa chạy chúng cho tới khi bạn bấm tin.`)
+  }
   // AC-42: AI tìm kiếm bằng rg (nhanh, đỡ CPU khi nhiều worker chạy) — chưa có thì đưa đúng lệnh cài theo hệ điều hành.
   if (!(opts.hasRg ?? Boolean(models.findExe('rg', env, home)))) {
     const how = process.platform === 'win32' ? 'winget install BurntSushi.ripgrep.MSVC' : process.platform === 'darwin' ? 'brew install ripgrep' : 'sudo apt install ripgrep'

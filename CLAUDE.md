@@ -20,17 +20,9 @@ Nói như đang mô tả cho **người dùng app/webapp**, không như lập tr
 
 ## Phong cách UI — tối giản, ít chữ nhất mà người mới vẫn tự dùng được
 
-AI hay thêm chữ giải thích khắp nơi ⇒ app rối. Mặc định ngược lại:
-- **Mỗi màn hình một việc chính.** Nút chính nổi bật nhất; thứ phụ lùi xuống hoặc vào menu.
-- **Bố cục kể luồng thay cho chữ:** thứ tự trên màn hình = thứ tự người dùng làm. Bố cục tự nói được thì không thêm chữ.
-- **Icon luôn kèm nhãn 1 chữ** trừ nhà · in · tìm kiếm · đóng (X); thanh công cụ dày được ẩn nhãn nhưng hiện khi rê chuột.
-- **Nhãn 1–3 chữ, dạng động từ** ("Lưu", "Thêm từ"; không OK/Có/Không/Xác nhận). Không đoạn giải thích, không placeholder dài, không tooltip cho thứ hiển nhiên.
-- **Bắt buộc có chữ rõ** ở việc không quay lại được: xoá, tiền, quyền, dữ liệu mất hẳn — nêu tên đối tượng, nút theo kết quả ("Xoá đơn"). Việc hoàn tác được ⇒ nút Hoàn tác, không hộp xác nhận.
-- **Chỗ duy nhất được giải thích là màn hình trống** (chưa có dữ liệu): một câu + một nút làm bước đầu tiên.
-- **Phản hồi bằng trạng thái**, không bằng thông báo chữ: nút đổi trạng thái, mục mới hiện ra, chỗ vừa lưu sáng lên.
-- **Lỗi một dòng, ngay cạnh chỗ sai:** sai gì + làm gì tiếp.
-- Trước khi thêm chữ nào: "bỏ đi thì người mới có kẹt không?" Không kẹt ⇒ không thêm. Thêm UI mới ⇒ đề xuất cái bỏ
-  được trước, cái thêm sau. Dự án có design system riêng ⇒ theo nó, nguyên tắc này chỉ quyết chuyện lượng chữ.
+Mỗi màn một việc chính, bố cục kể luồng thay cho chữ, nhãn 1–3 chữ dạng động từ. Việc không quay lại được (xoá, tiền,
+quyền, dữ liệu mất hẳn) bắt buộc có chữ rõ, nêu tên đối tượng. Luật đủ ở `~/.claude/rules/ui-style.md`, tự nạp khi đụng
+file giao diện; bàn luồng, dựng demo hay soát giao diện mà chưa mở file nào ⇒ đọc file đó trước.
 
 ## Nguyên tắc
 
@@ -97,7 +89,6 @@ AGENTS.md, `.claude/rules/`) thắng phần này.
   xem file không mở được file trong worktree); chỉ đưa link khi mở được thật.
 - Gọi CLI/model ngoài (codex, agy, cursor-agent, grok, devin) ⇒ `node ~/.claude/hooks/cli-check.mjs <tên>` trước; chưa
   sẵn sàng ⇒ dùng worker native, chỉ đưa user đúng lệnh đăng nhập khi lý do là chưa đăng nhập (không khi hết lượt/mất mạng).
-- Chạy Playwright test trên máy user ⇒ luôn kèm `--workers=2` (mặc định mở ~14 trình duyệt ngầm, cả máy giật; CI không áp).
 - Không gộp, push, xoá, gửi gì ra ngoài khi user chưa gật.
 
 **Nhắn giữa các phiên** (chốt 2026-10-15) — sắp sửa file phiên khác đang sửa · vừa đổi thứ dùng chung phiên kia gọi tới ·

@@ -16,7 +16,11 @@ const TOOL_DICTIONARY = `## Từ điển công cụ Claude → Codex
 
 Tên công cụ trong luật/skill/agent nguồn là tên Claude; trên Codex làm tương đương như sau:
 - Agent / Task → spawn_agent (có thể hiện là collaboration.spawn_agent); dùng đúng vai, brief và scope.
-- AskUserQuestion → hỏi thẳng trong chat, chờ câu trả lời khi quyết định cần user; không giả định có tool này.
+- AskUserQuestion → hỏi thẳng trong chat, chờ câu trả lời khi quyết định cần user; không giả định có tool này. Gom các câu vào
+  một tin; mỗi câu đánh số, phương án dạng 1a/1b/1c kèm một câu lý do, đúng một phương án ghi "(Khuyên dùng)".
+- mcp__so-chot__* → \`node ~/.claude/hooks/lib/so-chot.mjs <ghi|tim|y-tuong|da-xem> <gốc dự án> '<json>'\` (cùng trường với tool).
+- mcp__kho-khoa__* → \`node ~/.claude/hooks/khoa.mjs ds | lay <TÊN> [thư mục dự án] [--as TÊN_ENV] | thay <TÊN> <TÊN_2>\`. User dán khoá thì hook đã chặn tin và cất
+  khoá vào kho, báo tên; không xin dán lại, không đọc hay in giá trị trong .env.
 - EnterWorktree / isolation: worktree → git worktree add rồi làm trong đó; không có cô lập worktree tự động theo agent.
 - ExitPlanMode → trình plan rồi chờ user duyệt trước khi làm bước cần duyệt.
 - Bash → exec_command; Read / Glob / Grep → lệnh đọc và rg / rg --files.
@@ -35,9 +39,13 @@ function text(value, label) {
   return value.replace(/^\uFEFF/, '').replaceAll('\r\n', '\n')
 }
 
-/** Khối dành để installer chèn/thay giữa marker; quá cỡ thì lỗi, không cắt bỏ luật. */
-export function codexAgentsBlock(claudeMdText) {
-  const rules = text(claudeMdText, 'claudeMdText').trim()
+/**
+ * Khối dành để installer chèn/thay giữa marker; quá cỡ thì lỗi, không cắt bỏ luật.
+ * ruleTexts = nội dung rules/*.md của kit: Codex không có luật nạp theo `paths:` nên nhúng luôn, bỏ frontmatter.
+ */
+export function codexAgentsBlock(claudeMdText, ruleTexts = []) {
+  const extra = ruleTexts.map((r, i) => text(r, `ruleTexts[${i}]`).replace(/^---\n[\s\S]*?\n---(?:\n|$)/, '').trim()).filter(Boolean)
+  const rules = [text(claudeMdText, 'claudeMdText').trim(), ...extra].join('\n\n')
   if (rules.includes(START) || rules.includes(END)) throw new Error('CLAUDE.md chứa marker VIBE-FLOW lồng nhau.')
   if (/^\s*@\S+/m.test(rules)) throw new Error('Cần mở rộng @import trong nguồn trước khi sinh AGENTS; hostgen không đọc file.')
   const block = `${START}\n<!-- ${GENERATED} -->\n\n${rules}\n\n${TOOL_DICTIONARY}\n${END}\n`
@@ -156,6 +164,8 @@ function entries(kitRoot, codex) {
     ['PreToolUse', codex ? '^(Agent|spawn_agent|collaborationspawn_agent)$' : '^(Agent|Task|run_subagent)$', cmd('flow-dispatch.mjs', 'agent', 30)],
     ['PreToolUse', codex ? '^Bash$' : '^(Bash|PowerShell|exec)$', cmd('flow-dispatch.mjs', 'commit', 15)], // git commit mà sổ tiến độ chưa vào commit ⇒ nhắc một dòng (không chặn)
     ['Stop', undefined, cmd('flow-dispatch.mjs', 'stop', 15)],
+    // Codex không có mod kho-khoa (che khoá trong tin nhắn) ⇒ hook chặn tin có khoá và cất khoá vào kho chung.
+    ...(codex ? [['UserPromptSubmit', undefined, cmd('khoa.mjs', 'prompt', 10)]] : []),
   ]
 }
 

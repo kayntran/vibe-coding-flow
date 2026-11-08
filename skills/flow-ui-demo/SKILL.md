@@ -6,6 +6,7 @@ description: Dựng các bản giao diện xem thử ngay trong app chạy trên
 # Dựng bản xem thử cho user chọn
 
 Luồng đã duyệt (`UX.md`) và SPEC là đầu vào, nếu có. Thiếu luồng mà đây là màn mới thì chạy `flow-ux` trước.
+Mọi bản theo luật `~/.claude/rules/ui-style.md` (đọc trước nếu chưa nạp).
 
 ## Số bản
 

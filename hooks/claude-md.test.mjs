@@ -25,6 +25,24 @@ test('CLAUDE.md có đủ cụm bắt buộc', () => {
   ]) assert.ok(text.includes(must), `thiếu "${must}"`)
 })
 
+test('luật phong cách UI tách ra rules/ui-style.md, nạp theo file giao diện, CLAUDE.md trỏ tới', () => {
+  const rule = fs.readFileSync(path.join(ROOT, 'rules', 'ui-style.md'), 'utf8').replaceAll('\r\n', '\n')
+  assert.match(rule, /^---\npaths:\n(?: {2}- ".+"\n)+---\n/)
+  assert.match(rule, /\*\*\/\*\.\{tsx,jsx,vue,svelte/)
+  for (const must of ['Mỗi màn hình một việc chính', 'Nhãn 1–3 chữ', 'Bắt buộc có chữ rõ', 'màn hình trống', 'Phản hồi bằng trạng thái', 'Lỗi một dòng'])
+    assert.ok(rule.includes(must), must)
+  assert.ok(text.includes('~/.claude/rules/ui-style.md'))
+  assert.ok(text.includes('bắt buộc có chữ rõ'))
+})
+
+test('khối AGENTS cho Codex từ CLAUDE.md + rules/ thật vẫn dưới trần 24 KiB và có luật UI', async () => {
+  const { codexAgentsBlock } = await import('./lib/hostgen.mjs')
+  const dir = path.join(ROOT, 'rules')
+  const rules = fs.readdirSync(dir).filter((f) => f.endsWith('.md')).sort().map((f) => fs.readFileSync(path.join(dir, f), 'utf8'))
+  const block = codexAgentsBlock(text, rules)
+  assert.ok(block.includes('Mỗi màn hình một việc chính'))
+})
+
 test('CLAUDE.md không ghi cứng số phiên bản model (dùng tên dòng + models.mjs)', () => {
   assert.doesNotMatch(text, /gpt-\d|claude-(opus|sonnet|haiku)-\d|gemini-\d/i)
 })
