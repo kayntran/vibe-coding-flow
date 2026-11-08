@@ -26,7 +26,7 @@ Luật cho AI sửa extension này. Người dùng không viết code: giữ gia
 - Kiểm: `node ~/.claude/hooks/ui-check.mjs` (đọc `.claude/ui.json`, mở popup ở http://localhost:{{PORT}}/src/entrypoints/popup/index.html).
 
 ## Bí mật
-- Mọi thứ trong extension đọc được (người dùng mở file ra xem là thấy): KHÔNG nhét khoá bí mật vào mã. Cần khoá ⇒ gọi qua máy chủ của người dùng. Người dùng tự dán khoá, AI không nhập hộ.
+- Mọi thứ trong extension đọc được (người dùng mở file ra xem là thấy): KHÔNG nhét khoá bí mật vào mã. Cần khoá ⇒ gọi qua máy chủ của người dùng. Khoá đi qua kho khoá của kit (`khoa.mjs luu` rồi `lay`); không viết giá trị khoá vào code hay câu trả lời.
 
 ## Lệnh
 - Xem thử popup: `{{PM_DEV}}` rồi mở http://localhost:{{PORT}}/src/entrypoints/popup/index.html · Thử thật: `{{PM_RUN}} build`, mở `chrome://extensions` → bật Chế độ nhà phát triển → Tải tiện ích đã giải nén → chọn thư mục `dist`.

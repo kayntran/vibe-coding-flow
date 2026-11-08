@@ -38,6 +38,8 @@ Mỗi task:
 - Mọi tiêu chí của SPEC có task phủ; mỗi task có test của nó. Việc làm dần thì đánh dấu ô tick; plan hoàn tất nằm **cùng commit** với code.
 - Việc chia thành nhiều làn: viết bảng làn rồi `node ~/.claude/hooks/lane-check.mjs plan <PLAN.md>`, exit 1 thì sửa tới khi sạch.
 - Plan chỉ có **MỘT** bước review code (`flow-review`), ở cuối.
+- Có màn mới hoặc làm lại giao diện: task phụ thuộc bản demo ghi `(chờ demo)` ở cuối dòng; các task còn lại không được phụ thuộc vào
+  task đó, để làm song song trong lúc user chọn bản demo [xwuk].
 - Có **kế hoạch test** và **QA charter** từ tiêu chí (vai, trạng thái đầu, dữ liệu, bằng chứng cần có).
 
 ## Soát plan bằng model khác

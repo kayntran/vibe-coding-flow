@@ -23,7 +23,7 @@ Thiếu điều làm đổi kết quả ⇒ hỏi một lần, gom câu. Thiếu
 Cỡ M/L mà chưa có PLAN ⇒ sang `flow-plan`. Đọc code và test quanh chỗ sửa trước khi viết; dùng lại mẫu sẵn có.
 
 Chưa ở worktree ⇒ `flow-worktree`. Việc đụng thứ dùng chung ⇒ `flow-impact` trước.
-Màn mới hoặc làm lại giao diện ⇒ làm theo bản đã chọn ở `flow-ui-demo`, chưa có bản được chọn thì chưa code thật.
+Màn mới hoặc làm lại giao diện ⇒ task ghi `(chờ demo)` làm theo bản đã chọn ở `flow-ui-demo`, chỉ làm sau khi user chọn bản; task khác làm ngay, không chờ [xwuk].
 
 ## 2. Chia việc
 

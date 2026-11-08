@@ -10,7 +10,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { install, SECRET_DENY, hookKey, spliceAgents, mergeCodexHooks } from './install.mjs'
+import { install, SECRET_DENY, hookKey, spliceAgents, mergeCodexHooks, mergeClaudeHooks } from './install.mjs'
 import { claudeHooks, codexHooksJson } from './hooks/lib/hostgen.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -117,16 +117,14 @@ test('Claude: máy trống ⇒ settings.json có đủ hook của kit + chặn �
   assert.ok(r.changed.includes('settings.json'))
 })
 
-test('Claude: hook kèm bí danh tên công cụ Devin (ADR-0004) và nháy kép quanh đường dẫn', async () => {
+test('Claude: hook kèm bí danh tên công cụ Devin (ADR-0004) và nháy kép quanh đường dẫn; không có hook chặn sửa file', async () => {
   const home = tmp()
   await run(home, miniKit())
   const cmds = flat(json(home, '.claude', 'settings.json'))
-  const edit = cmds.find(([, , c]) => c.includes('flow-gate.mjs') && c.endsWith(' edit'))
   const bash = cmds.find(([, , c]) => c.includes('flow-gate.mjs') && c.endsWith(' bash'))
-  assert.match(edit[1], /apply_patch/)
-  assert.match(edit[1], /\bedit\b/)
   assert.match(bash[1], /\bexec\b/)
-  assert.ok(edit[2].startsWith(`node "${rootOf(home)}/hooks/`), edit[2])
+  assert.ok(bash[2].startsWith(`node "${rootOf(home)}/hooks/`), bash[2])
+  assert.equal(cmds.filter(([, , c]) => /flow-gate\.mjs"? edit$/.test(c)).length, 0, 'luật chặn sửa thẳng thư mục chính đã bỏ')
 })
 
 test('Claude: ghép vào settings.json sẵn có — giữ khoá/hook/quyền của user, thay hook kit cũ (đường dẫn máy khác), sao lưu bản gốc', async () => {
@@ -159,8 +157,9 @@ test('Claude: ghép vào settings.json sẵn có — giữ khoá/hook/quyền c�
   assert.ok(cmds.includes('node /my/own/hook.mjs'))
   assert.ok(cmds.includes('python3 /my/other.py'))
   assert.equal(cmds.filter((c) => c.includes('C:/Old/Machine')).length, 0, 'hook kit cũ phải được thay')
-  assert.equal(cmds.filter((c) => /flow-gate\.mjs"? edit$/.test(c)).length, 1)
+  assert.equal(cmds.filter((c) => /flow-gate\.mjs"? edit$/.test(c)).length, 0, 'hook edit cũ của kit (luật đã bỏ) phải được gỡ, không thêm lại')
   assert.equal(cmds.filter((c) => /flow-gate\.mjs"? stop$/.test(c)).length, 1)
+  assert.ok(s.hooks.PreToolUse.some((e) => e.matcher === 'Edit|Write|NotebookEdit' && e.hooks.length === 1 && e.hooks[0].command === 'node /my/own/hook.mjs'), 'entry có hook riêng của user giữ nguyên, chỉ mất hook edit cũ')
   for (const e of expectedClaude(home)) assert.ok(flat(s).some((t) => key(t) === key(e)), key(e))
   assert.deepEqual(ls(path.join(home, '.claude')).filter((f) => f.includes('before-kit')), [`settings.json.before-kit-${STAMP}`])
   assert.deepEqual(json(home, '.claude', `settings.json.before-kit-${STAMP}`), original)
@@ -418,10 +417,13 @@ test('Codex: hooks.json của user có hook không phải của kit ⇒ gộp, k
   const f = path.join(home, '.codex', 'hooks.json')
   wr(f, JSON.stringify({
     hooks: {
-      PreToolUse: [{ matcher: '^Bash$', hooks: [
-        { type: 'command', command: 'node "C:/Old/.claude/hooks/flow-gate.mjs" bash', timeout: 15 },
-        { type: 'command', command: 'node /mine/audit.mjs' },
-      ] }],
+      PreToolUse: [
+        { matcher: '^(Edit|Write|apply_patch)$', hooks: [{ type: 'command', command: 'node "C:/Old/.claude/hooks/flow-gate.mjs" edit', timeout: 15 }] },
+        { matcher: '^Bash$', hooks: [
+          { type: 'command', command: 'node "C:/Old/.claude/hooks/flow-gate.mjs" bash', timeout: 15 },
+          { type: 'command', command: 'node /mine/audit.mjs' },
+        ] },
+      ],
     },
     custom: true,
   }))
@@ -433,6 +435,7 @@ test('Codex: hooks.json của user có hook không phải của kit ⇒ gộp, k
   assert.ok(cmds.includes('node /mine/audit.mjs'))
   assert.equal(cmds.filter((c) => c.includes('C:/Old')).length, 0)
   assert.equal(cmds.filter((c) => /flow-gate\.mjs" bash$/.test(c)).length, 1)
+  assert.equal(cmds.filter((c) => /flow-gate\.mjs"? edit$/.test(c)).length, 0, 'hook edit cũ của kit (luật đã bỏ) phải được gỡ khỏi hooks.json')
 
   const home2 = tmp()
   const bad = path.join(home2, '.codex', 'hooks.json')
@@ -596,6 +599,51 @@ test('mergeCodexHooks: không có file ⇒ nguyên bản của kit; có hook ri�
   assert.equal(r.legacy, 1)
   assert.equal(r.json.note, 1)
   assert.ok(r.json.hooks.Stop[0].hooks.length === 1 && r.json.hooks.Stop[0].hooks[0].command === 'node /mine.mjs')
+  assert.deepEqual(mergeCodexHooks(r.json, kit).json, r.json)
+})
+
+test('hook edit cũ (luật chặn sửa thẳng thư mục chính đã bỏ): mergeClaudeHooks và mergeCodexHooks gỡ ở mọi đường dẫn/nháy, giữ hook riêng, sự kiện chỉ còn hook cũ thì bỏ hẳn; chạy lại không đổi', () => {
+  const olds = [
+    'node "C:/Users/A/.claude/hooks/flow-gate.mjs" edit',
+    'node C:\\Users\\A\\.claude\\hooks\\flow-gate.mjs edit',
+    'node /Users/a/.claude/hooks/flow-gate.mjs edit',
+  ]
+  const mine = { type: 'command', command: 'node /mine/own.mjs' }
+  const bash = { type: 'command', command: 'node "C:/Users/A/.claude/hooks/flow-gate.mjs" bash', timeout: 15 }
+
+  // Claude: wanted rỗng ⇒ chỉ có bước gỡ hook đã bỏ.
+  const settings = {
+    hooks: {
+      PreToolUse: [
+        ...olds.map((command) => ({ matcher: 'Edit|Write', hooks: [{ type: 'command', command, timeout: 15 }] })),
+        { matcher: 'Edit', hooks: [{ type: 'command', command: olds[0] }, mine] },
+        { matcher: 'Bash', hooks: [bash] },
+      ],
+      Stop: [{ hooks: [{ type: 'command', command: olds[1] }] }],
+      SessionStart: [],
+    },
+  }
+  mergeClaudeHooks(settings, [])
+  assert.deepEqual(settings.hooks, { PreToolUse: [{ matcher: 'Edit', hooks: [mine] }, { matcher: 'Bash', hooks: [bash] }], SessionStart: [] })
+  const again = structuredClone(settings)
+  mergeClaudeHooks(again, [])
+  assert.deepEqual(again, settings)
+
+  // Codex: hooks.json cũ có hook edit + hook riêng + hook bash cũ.
+  const kit = codexHooksJson('C:/Users/A/.claude')
+  const existing = {
+    hooks: {
+      PreToolUse: [
+        { matcher: '^(Edit|Write|apply_patch)$', hooks: [{ type: 'command', command: olds[0], timeout: 15 }] },
+        { matcher: '^Write$', hooks: [{ type: 'command', command: olds[2] }, mine] },
+      ],
+    },
+  }
+  const r = mergeCodexHooks(existing, kit)
+  const cmds = Object.values(r.json.hooks).flatMap((gs) => gs.flatMap((g) => g.hooks.map((h) => h.command)))
+  assert.equal(cmds.filter((c) => /flow-gate\.mjs"? edit$/.test(c)).length, 0)
+  assert.ok(cmds.includes(mine.command))
+  assert.deepEqual(r.json.hooks.PreToolUse.filter((g) => g.matcher === '^Write$'), [{ matcher: '^Write$', hooks: [mine] }])
   assert.deepEqual(mergeCodexHooks(r.json, kit).json, r.json)
 })
 

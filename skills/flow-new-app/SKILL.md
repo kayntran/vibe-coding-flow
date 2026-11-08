@@ -38,4 +38,4 @@ Báo user theo khuôn: app đã mở ở đâu · thấy gì · bước tiếp l
 ## 5. Nền dữ liệu
 Áp công thức đã chọn (`recipes/<tên>.md`) như task đầu của PLAN tính năng đầu tiên: đăng nhập, chặn quyền, kiểm dữ
 liệu vào, DB thử cho từng làn, test `P-nn` + lần "tắt chặn quyền". Khoá bí mật chỉ ở biến môi trường (`.env.local` /
-biến của nền tảng), không bao giờ trong code chạy ở trình duyệt; user tự dán khoá — AI không nhập khoá hộ.
+biến của nền tảng), không bao giờ trong code chạy ở trình duyệt; khoá đi qua kho khoá (`khoa.mjs luu` rồi `lay`), không viết giá trị vào code hay câu trả lời.

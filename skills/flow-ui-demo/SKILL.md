@@ -10,10 +10,12 @@ Mọi bản theo luật `~/.claude/rules/ui-style.md` (đọc trước nếu ch�
 
 ## Số bản
 
-| App | Số bản |
+Mặc định **5 bản**, kể cả app đã có giao diện [oabq]. User nói số khác thì theo user.
+
+| App | 5 bản khác nhau ở |
 |---|---|
-| Chưa có gu (app mới, chưa có token, sổ chốt chưa ghi gu) | 5 |
-| Đã có gu | 3, giữ nguyên màu, chữ, thành phần; chỉ khác bố cục |
+| Chưa có gu (app mới, chưa có token, sổ chốt chưa ghi gu) | Hướng thiết kế: màu, chữ, bố cục |
+| Đã có gu | Bố cục; giữ nguyên màu, chữ, thành phần |
 
 **Sửa giao diện rất nhỏ** (đổi nhãn, màu, một nút): không dựng demo, không dừng chờ. Làm luôn, gửi ảnh trước/sau khi báo.
 

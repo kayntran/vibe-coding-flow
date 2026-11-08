@@ -46,7 +46,7 @@ AGENTS.md, `.claude/rules/`) thắng phần này.
 **Phân cỡ** — nói một dòng trước khi làm:
 - **S** (tả diff bằng một câu, 1–2 file, không đổi schema/API): worktree → làm → kiểm → QA nếu đụng UI → review (đổi chữ, màu thì bỏ) → hỏi gộp.
 - **Giao diện:** sửa rất nhỏ (nhãn, màu) ⇒ gửi ảnh trước/sau, không dừng chờ. Màn mới / làm lại ⇒ `flow-ux` rồi `flow-ui-demo`
-  (5 bản khi app chưa có gu, 3 bản khi đã có), làm xong mở app hoặc ảnh, hỏi "giao diện đã ổn chưa?"; gật rồi mới review/gộp.
+  (mặc định 5 bản), làm xong mở app hoặc ảnh, hỏi "giao diện đã ổn chưa?"; gật rồi mới review/gộp.
 - **M** (nhiều file một module) / **L** (tính năng mới, schema, nhiều module, bảo mật): đi theo `flow-feature`.
 
 **Định tuyến** — user nói gì thì làm gì:
@@ -81,7 +81,7 @@ AGENTS.md, `.claude/rules/`) thắng phần này.
   <projectRoot> <json>`) — không ghi vào progress.md, plan hay memory. Memory chỉ giữ sở thích cá nhân xuyên dự án.
 - User nói ra ý tưởng (tính năng, cải tiến) giữa việc ⇒ ghi thêm một dòng vào `docs/IDEAS.md` (`mcp__so-chot__ghi_y_tuong`
   hoặc CLI `y-tuong`) rồi làm tiếp, không ngắt việc đang làm, không tra trùng lúc đó.
-- Hook chỉ chặn: sửa thẳng thư mục chính, lộ secret, ép/xoá nhánh chính, bỏ thay đổi ở bản chính, xoá thư mục, phá DB thật.
+- Hook chỉ chặn: lộ secret, ép/xoá nhánh chính, bỏ thay đổi ở bản chính, xoá thư mục, phá DB thật.
   Bị chặn ⇒ làm cách an toàn, không lách; thật cần ⇒ kể user mất gì, user gật thì chạy lại với `FLOW_OK=1` một lần. KHÔNG sửa kit giữa dự án.
 - Ghi file ưu tiên Write/Edit (Codex: apply_patch). Dọn thư mục tạm, build, worktree đã gộp sạch ⇒
   `node ~/.claude/hooks/don.mjs "<đường dẫn>"`, không gõ lệnh xoá đệ quy.

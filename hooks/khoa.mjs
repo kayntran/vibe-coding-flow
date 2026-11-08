@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// khoa: kho khoá chung của máy (~/.claude/kho-khoa.env) cho host không có mod kho-khoa (Codex CLI, phiên Codex trong Paseo).
-// Claude dùng mod kho-khoa (che khoá ngay trong tin nhắn); Codex không sửa được tin nhắn ⇒ hook chặn tin có khoá, tự cất khoá vào kho
-// rồi báo tên, AI dùng qua lệnh và không bao giờ thấy giá trị (chốt auitjig3).
-//   prompt                      hook UserPromptSubmit (JSON stdin): tin có khoá ⇒ cất vào kho, chặn tin, báo tên khoá
+// khoa: kho khoá chung của máy (~/.claude/kho-khoa.env) dùng chung cho Claude và Codex.
+// Như AgentKit (chốt i0ggtaf3): khoá user dán vào chat không bị che hay chặn; hook chỉ nhắc AI không in giá trị ra câu trả lời.
+//   prompt                      hook UserPromptSubmit (JSON stdin): tin có khoá hoặc nhắc tới khoá ⇒ thêm lời nhắc (không chặn)
+//   luu <TÊN> -                 cất khoá vào kho chung, giá trị qua stdin (không đặt khoá trên dòng lệnh)
 //   ds [thư mục dự án]          TÊN khoá trong kho chung và trong .env của dự án (không in giá trị)
 //   lay <TÊN> [thư mục dự án] [--as TÊN_ENV]  chép khoá từ kho chung vào .env.local (nếu có) hoặc .env của dự án; trong repo git mà
 //                               file đó chưa bị bỏ qua ⇒ thêm vào .gitignore ở gốc repo
@@ -15,13 +15,6 @@ import { fileURLToPath } from 'node:url'
 import { scanLine } from './lib/secrets.mjs'
 
 const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
-// Tên gợi ý theo loại khoá (cùng gợi ý với mod kho-khoa). Không có tên ⇒ không cất (vd private key nhiều dòng, URL có mật khẩu): chỉ chặn.
-const GUESS = {
-  anthropic: 'ANTHROPIC_API_KEY', openai: 'OPENAI_API_KEY', google: 'GEMINI_API_KEY', github: 'GITHUB_TOKEN', xai: 'XAI_API_KEY',
-  aws: 'AWS_ACCESS_KEY_ID', slack: 'SLACK_TOKEN', jwt: 'JWT_TOKEN', 'jwt-service-role': 'SUPABASE_SERVICE_ROLE_KEY',
-  supabase: 'SUPABASE_SECRET_KEY', stripe: 'STRIPE_SECRET_KEY', neon: 'NEON_API_KEY', sentry: 'SENTRY_AUTH_TOKEN',
-  sendgrid: 'SENDGRID_API_KEY', twilio: 'TWILIO_API_KEY', cloudflare: 'CLOUDFLARE_API_TOKEN',
-}
 
 export const vaultPath = (home = os.homedir()) => path.join(home, '.claude', 'kho-khoa.env')
 const read = (f) => { try { return fs.readFileSync(f, 'utf8') } catch { return '' } }
@@ -70,59 +63,33 @@ function guardGit(dir, envFile) {
   return ` Đã thêm ${line} vào .gitignore.`
 }
 
-// Từ chung đứng trước khoá ("key: sk-…", "token=ghp_…") không phải tên biến ⇒ dùng tên gợi ý theo loại khoá.
-const GENERIC = new Set(['KEY', 'KEYS', 'TOKEN', 'SECRET', 'API', 'APIKEY', 'API_KEY', 'PASSWORD', 'PASS', 'PWD', 'MK', 'KHOA', 'MA'])
-const envName = (s) => (s && /^[A-Z][A-Z0-9_]{3,}$|^[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+$/.test(s) && !GENERIC.has(s.toUpperCase()) ? s.toUpperCase() : null)
+// Tin có khoá hoặc nhắc tới khoá ⇒ nhắc AI không in giá trị ra câu trả lời (chốt i0ggtaf3, như AgentKit: không che, không chặn tin).
+// Không bao giờ chép chữ trong tin hay giá trị khoá vào lời nhắc.
+// Chỉ nhắc khi có khoá thật hoặc dấu hiệu đưa khoá: mẫu khoá đã biết (scanLine); "TÊN_KEY=giá trị dài" (cả DEEPSEEK_API_KEY=, CLIENT_SECRET=,
+// "key: abc…"); cụm rõ nghĩa như "API key", "mật khẩu", "khoá bí mật". Chữ thường gặp ("khoá nút Lưu", "giới hạn token", "đọc .env") không tính.
+const KEY_ASSIGN = /(?<![A-Za-z])(?:[A-Za-z0-9]+_)*(?:api_?key|key|secret|token|password|passwd|pwd)\s*[=:]\s*["']?[^\s"']{8,}/i
+const KEY_PHRASE = /\bapi[ _-]?key\b|\bprivate key\b|\bsecret key\b|\baccess token\b|mật khẩu|khoá bí mật|khóa bí mật|khoá api|khóa api/i
+const hasKey = (text) => {
+  const t = text.normalize('NFC')
+  return KEY_ASSIGN.test(t) || KEY_PHRASE.test(t) || t.split(/\r?\n/).some((l) => scanLine(l).length > 0)
+}
+export const REMINDER = 'Nhắc bảo mật: không viết giá trị khoá, token, mật khẩu, JWT hay private key ra câu trả lời, kể cả khi user vừa dán. ' +
+  'Nói bằng tên (vd "đã lưu OPENAI_API_KEY") hoặc [đã che]. Cần dùng khoá cho lệnh thì đưa qua kho khoá ' +
+  '(`node ~/.claude/hooks/khoa.mjs luu <TÊN> -` với giá trị qua stdin, rồi `lay <TÊN>`), chỉ báo thành công/thất bại.'
 
-// Mọi khoá trên một dòng, kể cả hai khoá cùng loại (scanLine chỉ trả khớp đầu của mỗi loại ⇒ che khớp đã lấy rồi quét lại).
-function allHits(line) {
-  const out = []
-  let rest = line
-  for (let hits = scanLine(rest); hits.length; hits = scanLine(rest)) {
-    for (const h of hits) {
-      out.push({ ...h, value: line.slice(h.index, h.end) })
-      rest = rest.slice(0, h.index) + ' '.repeat(h.end - h.index) + rest.slice(h.end)
-    }
-  }
-  return out.sort((a, b) => a.index - b.index)
+export function promptHook(payload) {
+  const text = typeof payload?.prompt === 'string' ? payload.prompt : ''
+  if (!text || !hasKey(text)) return null
+  return { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: REMINDER } }
 }
 
-/**
- * Tìm khoá trong tin nhắn và cất vào kho. Trả { found, saved: [{name, kind, extra}], unsaved: [kind] }.
- * User ghi rõ `TÊN=khoá` ⇒ ghi đè đúng tên đó (đổi khoá sau khi lộ). Tên gợi ý đã có khoá khác ⇒ cất thêm TÊN_2, TÊN_3…
- * (extra = tên gốc) để không xoá mất khoá cũ khi user có hai khoá cùng hãng; AI chép bằng `lay TÊN_2 --as TÊN`.
- */
-export function stash(text, { vault = vaultPath() } = {}) {
-  const saved = [], unsaved = []
-  let found = 0
-  for (const line of String(text ?? '').split(/\r?\n/)) {
-    for (const h of allHits(line)) {
-      found++
-      const named = envName(/([A-Za-z_][A-Za-z0-9_]*)\s*[=:]\s*["']?$/.exec(line.slice(0, h.index))?.[1])
-      const base = named ?? GUESS[h.name]
-      if (!base) { unsaved.push(h.name); continue }
-      let name = base
-      const cur = read(vault)
-      if (!named) for (let i = 2; valueOf(cur, name) !== undefined && valueOf(cur, name) !== h.value; i++) name = `${base}_${i}`
-      upsert(vault, name, h.value)
-      saved.push({ name, kind: h.name, extra: name !== base ? base : null })
-    }
-  }
-  return { found, saved, unsaved }
-}
-
-export function promptHook(payload, opts = {}) {
-  const r = stash(typeof payload?.prompt === 'string' ? payload.prompt : '', opts)
-  if (!r.found) return null
-  const names = r.saved.map((s) => s.name)
-  const reason = [
-    'Tin nhắn có khoá bí mật nên chưa gửi cho AI (để khoá không lên máy chủ của AI).',
-    names.length ? `Đã cất vào kho khoá của máy: ${names.join(', ')}.` : '',
-    ...r.saved.filter((s) => s.extra).map((s) => `Kho đã có ${s.extra} khác nên khoá mới mang tên ${s.name}; muốn thay khoá cũ thì nói "thay ${s.extra} bằng khoá mới".`),
-    r.unsaved.length ? `Có ${r.unsaved.length} khoá chưa cất được (${[...new Set(r.unsaved)].join(', ')}): đặt vào file .env bằng tay.` : '',
-    names.length ? `Gửi lại tin nhắn, thay khoá bằng tên ${names.length > 1 ? 'của nó' : names[0]}; AI sẽ tự chép khoá vào dự án.` : 'Gửi lại tin nhắn không kèm khoá.',
-  ].filter(Boolean).join(' ')
-  return { decision: 'block', reason }
+/** Cất khoá `value` vào kho chung dưới tên `name` (ghi đè nếu đã có). Không in giá trị. */
+export function luu(name, value, { vault = vaultPath() } = {}) {
+  if (!NAME_RE.test(name ?? '')) throw new Error(`tên "${name}" không hợp lệ: chỉ chữ, số và _`)
+  const v = String(value ?? '').trim()
+  if (!v || /[\r\n]/.test(v)) throw new Error('giá trị khoá rỗng hoặc nhiều dòng (đưa đúng một dòng qua stdin)')
+  upsert(vault, name, v)
+  return `Đã cất ${name} vào kho chung. Chép vào dự án: "khoa.mjs lay ${name}".`
 }
 
 export function ds(dir, { vault = vaultPath() } = {}) {
@@ -167,7 +134,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const dir = rest.filter((x, j) => j !== i && j !== i + 1 || i < 0)[0]
       console.log(lay(a, path.resolve(dir ?? process.cwd()), { as }))
     } else if (cmd === 'thay') console.log(thay(a, b))
-    else throw new Error('dùng: khoa.mjs prompt | ds [thư mục dự án] | lay <TÊN> [thư mục dự án] [--as TÊN_ENV] | thay <TÊN> <TÊN_MỚI_TRONG_KHO>')
+    else if (cmd === 'luu') {
+      if (b !== '-') throw new Error('giá trị khoá đưa qua stdin: khoa.mjs luu <TÊN> - (không đặt khoá trên dòng lệnh)')
+      console.log(luu(a, fs.readFileSync(0, 'utf8')))
+    } else throw new Error('dùng: khoa.mjs prompt | ds [thư mục dự án] | luu <TÊN> - | lay <TÊN> [thư mục dự án] [--as TÊN_ENV] | thay <TÊN> <TÊN_MỚI_TRONG_KHO>')
   } catch (e) {
     process.stderr.write(`lỗi: ${e.message}\n`)
     process.exitCode = 1

@@ -175,12 +175,11 @@ test('TOML: parser độc lập Python stdlib tomllib đọc toàn bộ bản xu
   assert.ok(!Object.hasOwn(parsed.at(-1), 'model'))
 })
 
-test('Claude hooks: đủ 10 command/event/timeout (9 của bộ hook trước v7 + nhắc sổ lúc commit)', () => {
-  // Bộ hook của install.mjs bản v6 (đã chạy thật). Installer v7 lấy hook từ chính claudeHooks (một nguồn, ADR-0003),
-  // nên mốc đối chiếu ghi thẳng ở đây; đổi hook thì sửa cả hai có chủ đích.
+test('Claude hooks: đủ 10 command/event/timeout (không còn hook chặn sửa thẳng thư mục chính, chốt 2026-11-08)', () => {
+  // Bộ hook của install.mjs bản v6 (đã chạy thật) trừ hook edit đã gỡ + nhắc sổ lúc commit. Installer v7 lấy hook từ chính claudeHooks
+  // (một nguồn, ADR-0003), nên mốc đối chiếu ghi thẳng ở đây; đổi hook thì sửa cả hai có chủ đích.
   const baseline = [
     ['UserPromptSubmit', 'undefined', 'reply-vietnamese.mjs', 5],
-    ['PreToolUse', '"Edit|Write|NotebookEdit"', 'flow-gate.mjs edit', 15],
     ['PreToolUse', '"Bash"', 'flow-gate.mjs bash', 15],
     ['Stop', 'undefined', 'flow-gate.mjs stop', 15],
     ['SubagentStop', 'undefined', 'flow-gate.mjs subagent-stop', 15],
@@ -189,6 +188,7 @@ test('Claude hooks: đủ 10 command/event/timeout (9 của bộ hook trước v
     ['PreToolUse', '"Agent|Task"', 'flow-dispatch.mjs agent', 30],
     ['PreToolUse', '"Bash"', 'flow-dispatch.mjs commit', 15], // sau audit 2026-10-13: nhắc sổ tiến độ lúc git commit
     ['Stop', 'undefined', 'flow-dispatch.mjs stop', 15],
+    ['UserPromptSubmit', 'undefined', 'khoa.mjs prompt', 10], // nhắc không in khoá (chốt i0gg)
   ].map(([e, m, s, t]) => [null, e, m, s, String(t)])
   const entries = claudeHooks('/tmp/kit with spaces')
   assert.equal(entries.length, baseline.length)
@@ -204,17 +204,15 @@ test('Claude hooks: đủ 10 command/event/timeout (9 của bộ hook trước v
   }
 })
 
-test('Claude hooks: MỌI tên tool sửa file của Claude (Edit, Write, MultiEdit, NotebookEdit) vào cổng edit — matcher neo ^$ không được bỏ sót MultiEdit', () => {
-  const edit = claudeHooks('/tmp/kit').find(([ev, , h]) => ev === 'PreToolUse' && commandParts(h.command) === 'flow-gate.mjs edit')
-  assert.ok(edit)
-  for (const name of ['Edit', 'Write', 'MultiEdit', 'NotebookEdit']) assert.ok(new RegExp(edit[1]).test(name), name)
-  for (const name of ['MultiEditX', 'XMultiEdit', 'Multi', 'EditNotebook']) assert.ok(!new RegExp(edit[1]).test(name), name)
+test('Hooks: không còn hook flow-gate.mjs edit ở Claude lẫn Codex — sửa file thẳng thư mục chính không bị chặn (chốt 2026-11-08)', () => {
+  const all = [...claudeHooks('/tmp/kit').map(([, , h]) => h.command), ...Object.values(codexHooksJson('/tmp/kit').hooks).flat().map((g) => g.hooks[0].command)]
+  assert.equal(all.filter((c) => commandParts(c) === 'flow-gate.mjs edit').length, 0)
 })
 
 test('Claude hooks: mọi bí danh Devin vào đúng cổng; tên tool khác không khớp', () => {
   const entries = claudeHooks('/tmp/kit')
   const match = (tool) => entries.filter(([ev, matcher]) => ev === 'PreToolUse' && new RegExp(matcher).test(tool)).map(([, , h]) => commandParts(h.command))
-  for (const name of ['Edit', 'Write', 'NotebookEdit', 'edit', 'write', 'apply_patch', 'notebook_edit']) assert.deepEqual(match(name), ['flow-gate.mjs edit'])
+  for (const name of ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'edit', 'write', 'apply_patch', 'notebook_edit']) assert.deepEqual(match(name), [], `tool sửa file ${name} không qua cổng nào`)
   for (const name of ['Bash', 'PowerShell', 'exec']) assert.deepEqual(match(name), ['flow-gate.mjs bash', 'flow-dispatch.mjs commit'])
   for (const name of ['Agent', 'Task', 'run_subagent']) assert.deepEqual(match(name), ['flow-dispatch.mjs agent'])
   for (const name of ['Read', 'execute_query', 'rewrite', 'mcp__server__edit']) assert.deepEqual(match(name), [])
@@ -224,7 +222,7 @@ test('Codex hooks: hooks.json đúng nhóm event/handler và giữ các hook dù
   const out = codexHooksJson('/tmp/kit')
   assert.ok(out.description.includes(banner))
   assert.deepEqual(Object.keys(out.hooks).sort(), ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'SubagentStop', 'SessionStart'].sort())
-  assert.equal(Object.values(out.hooks).flat().length, 11) // + khoa.mjs prompt (chỉ Codex)
+  assert.equal(Object.values(out.hooks).flat().length, 10) // + khoa.mjs prompt (chỉ Codex)
   for (const [event, groups] of Object.entries(out.hooks)) for (const group of groups) {
     assert.equal(group.hooks.length, 1)
     if (['Stop', 'SubagentStop', 'SessionStart', 'UserPromptSubmit'].includes(event)) assert.ok(!Object.hasOwn(group, 'matcher'))
@@ -236,10 +234,10 @@ test('Codex hooks: hooks.json đúng nhóm event/handler và giữ các hook dù
   assert.deepEqual(JSON.parse(JSON.stringify(out)), out)
 })
 
-test('Codex hooks: apply_patch/Bash/spawn_agent đúng cổng, Stop có cả gate và dispatch', () => {
+test('Codex hooks: apply_patch không qua cổng nào; Bash/spawn_agent đúng cổng, Stop có cả gate và dispatch', () => {
   const { hooks } = codexHooksJson('/tmp/kit')
   const match = (tool) => hooks.PreToolUse.filter((g) => new RegExp(g.matcher).test(tool)).map((g) => commandParts(g.hooks[0].command))
-  for (const tool of ['apply_patch', 'Edit', 'Write']) assert.deepEqual(match(tool), ['flow-gate.mjs edit'])
+  for (const tool of ['apply_patch', 'Edit', 'Write']) assert.deepEqual(match(tool), [], tool)
   assert.deepEqual(match('Bash'), ['flow-gate.mjs bash', 'flow-dispatch.mjs commit'])
   for (const tool of ['Agent', 'spawn_agent', 'collaborationspawn_agent']) assert.deepEqual(match(tool), ['flow-dispatch.mjs agent'])
   assert.deepEqual(match('mcp__server__spawn_agent'), [])
@@ -257,7 +255,7 @@ test('Hooks: root Windows/POSIX có khoảng trắng, nháy và shell metachar l
     assert.match(h.commandWindows, /^powershell\.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand [A-Za-z0-9+/=]+$/)
     const decoded = Buffer.from(h.commandWindows.split(' ').at(-1), 'base64').toString('utf16le')
     assert.equal(decoded, generated(root, 'session-start.mjs', true))
-    assert.equal(claudeHooks(root)[5][2].command, generated(root, 'session-start.mjs'))
+    assert.equal(claudeHooks(root)[4][2].command, generated(root, 'session-start.mjs'))
   }
 })
 
@@ -278,7 +276,7 @@ test('Hooks Windows: shell cmd → PowerShell giữ nguyên đối số metachar
   const cmd = hook.commandWindows.replace(/\S+$/, Buffer.from(mock + ps, 'utf16le').toString('base64'))
   const result = spawnSync('cmd.exe', ['/d', '/s', '/c', cmd], { encoding: 'utf8', timeout: 10000 })
   assert.equal(result.status, 2, result.stderr)
-  assert.deepEqual(JSON.parse(result.stdout.trim()), [root.replaceAll('\\', '/') + '/hooks/flow-gate.mjs', 'edit'])
+  assert.deepEqual(JSON.parse(result.stdout.trim()), [root.replaceAll('\\', '/') + '/hooks/flow-gate.mjs', 'bash'])
 })
 
 test('Hàm thuần: lặp cho cùng kết quả, không chia sẻ hook object hoặc sửa registry/resolver', () => {

@@ -27,7 +27,7 @@ Luật cho AI sửa app này. Người dùng không viết code: giữ giao di�
 - Kiểm: `node ~/.claude/hooks/ui-check.mjs --dir frontend` (đọc `frontend/.claude/ui.json`; Playwright cài trong `frontend`).
 
 ## Bí mật
-- Khoá bí mật chỉ ở biến môi trường của máy / file `.env` không đưa lên git; KHÔNG nằm trong mã giao diện (mọi thứ trong giao diện đọc được). Người dùng tự dán khoá, AI không nhập hộ.
+- Khoá bí mật chỉ ở biến môi trường của máy / file `.env` không đưa lên git; KHÔNG nằm trong mã giao diện (mọi thứ trong giao diện đọc được). Khoá đi qua kho khoá của kit (`khoa.mjs luu` rồi `lay`); không viết giá trị khoá vào code hay câu trả lời.
 - Không tải mã từ web ngoài vào giao diện (`<script src="https://…">`); đóng gói mọi thứ cùng app.
 - Ghi nhật ký ở giao diện chỉ qua `safeLog` (`frontend/src/shared/safe-log.ts`: chỉ trường trong danh sách cho phép được ghi, phần còn lại bị che). KHÔNG `console.log` thẳng mật khẩu, token, khoá, email hay chữ người dùng nhập. Máy kiểm `log-secrets` quét log của bài thử.
 

@@ -1,6 +1,6 @@
 // Test cho flow-gate.mjs: node --test ~/.claude/hooks/flow-gate.test.mjs
 // Mỗi test tạo repo tạm trong os.tmpdir (main + worktree `feat`), gọi script qua spawnSync với JSON stdin, rồi tự dọn.
-// Ngoại lệ: test cổng "sửa thẳng thư mục chính" dựng repo cạnh file test (fixture({ outsideTmp: true })) vì cổng đó cho qua mọi file trong thư mục tạm.
+// Ngoại lệ: test "sửa thẳng thư mục chính không bị chặn" dựng repo cạnh file test (fixture({ outsideTmp: true })) để không trùng ngoại lệ thư mục tạm của luật chặn cũ.
 import { after, describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
@@ -42,7 +42,7 @@ function commit(dir, rel, content, msg = 'c') {
 }
 
 // Repo chính (nhánh main, a.txt 20 dòng) + worktree `wt` trên nhánh feat (chưa có commit riêng).
-// outsideTmp: dựng cạnh file test thay vì os.tmpdir() — cổng sửa-thẳng-thư-mục-chính cho qua mọi file trong thư mục tạm (os.tmpdir(), <ổ>:\tmp, /tmp).
+// outsideTmp: dựng cạnh file test thay vì os.tmpdir() — luật chặn sửa-thẳng-thư-mục-chính (đã bỏ) từng cho qua mọi file trong thư mục tạm (os.tmpdir(), <ổ>:\tmp, /tmp).
 function fixture({ outsideTmp = false } = {}) {
   const root = fs.realpathSync(fs.mkdtempSync(outsideTmp ? path.join(HOOKS_DIR, '.flow-gate-fx-') : path.join(os.tmpdir(), 'flow-gate-')))
   roots.push(root)
@@ -130,54 +130,6 @@ function stampBoth(fx, { qa = 'QA ok\nUser duyệt giao diện: có\n', cwd = fx
 }
 
 const bashIn = (cwd, command) => ({ hook_event_name: 'PreToolUse', tool_name: 'Bash', cwd, tool_input: { command } })
-
-// ---------- edit ----------
-
-describe('edit', () => {
-  test('sửa file trong thư mục chính bị chặn (cả đường dẫn \\ và /)', () => {
-    const fx = fixture({ outsideTmp: true })
-    const target = path.join(fx.main, 'a.txt')
-    for (const p of [target, target.replace(/\\/g, '/')]) {
-      const reason = assertDeny(hook(fx, 'edit', { tool_name: 'Edit', cwd: fx.main, tool_input: { file_path: p } }))
-      assert.match(reason, /EnterWorktree/)
-      assert.match(reason, /allow-direct-edit/)
-      assert.ok(reason.toLowerCase().includes(fx.main.toLowerCase().replace(/\\/g, '/')) || reason.toLowerCase().includes(fx.main.toLowerCase()))
-    }
-  })
-
-  test('NotebookEdit (notebook_path) và file mới trong thư mục chưa tồn tại cũng bị chặn', () => {
-    const fx = fixture({ outsideTmp: true })
-    assertDeny(hook(fx, 'edit', { tool_name: 'NotebookEdit', cwd: fx.main, tool_input: { notebook_path: path.join(fx.main, 'x.ipynb') } }))
-    assertDeny(hook(fx, 'edit', { tool_name: 'Write', cwd: fx.main, tool_input: { file_path: path.join(fx.main, 'new', 'deep', 'f.ts') } }))
-  })
-
-  test('file nằm trong thư mục tạm (os.tmpdir()) cho qua dù là thư mục chính của một repo; cùng repo đặt ngoài thư mục tạm vẫn bị chặn', () => {
-    const tmp = fixture() // repo dựng trong os.tmpdir()
-    assertPass(hook(tmp, 'edit', { tool_name: 'Edit', cwd: tmp.main, tool_input: { file_path: path.join(tmp.main, 'a.txt') } }))
-    assertPass(hook(tmp, 'edit', { tool_name: 'Write', cwd: tmp.main, tool_input: { file_path: path.join(tmp.main, 'new', 'f.ts') } }))
-    assertPass(hook(tmp, 'edit', { tool_name: 'Write', cwd: tmp.main, tool_input: { file_path: 'a.txt' } })) // đường dẫn tương đối tính từ cwd
-    const real = fixture({ outsideTmp: true })
-    assertDeny(hook(real, 'edit', { tool_name: 'Edit', cwd: real.main, tool_input: { file_path: path.join(real.main, 'a.txt') } }))
-  })
-
-  test('sửa trong worktree cho qua', () => {
-    const fx = fixture()
-    assertPass(hook(fx, 'edit', { tool_name: 'Edit', cwd: fx.wt, tool_input: { file_path: path.join(fx.wt, 'a.txt') } }))
-    assertPass(hook(fx, 'edit', { tool_name: 'Write', cwd: fx.main, tool_input: { file_path: path.join(fx.wt, 'new', 'f.ts') } }))
-  })
-
-  test('có .claude/allow-direct-edit thì cho qua', () => {
-    const fx = fixture()
-    write(fx.main, '.claude/allow-direct-edit', '')
-    assertPass(hook(fx, 'edit', { tool_name: 'Edit', cwd: fx.main, tool_input: { file_path: path.join(fx.main, 'a.txt') } }))
-  })
-
-  test('ngoài git repo cho qua; thiếu path cho qua', () => {
-    const fx = fixture()
-    assertPass(hook(fx, 'edit', { tool_name: 'Write', cwd: fx.root, tool_input: { file_path: path.join(fx.root, 'plain', 'x.txt') } }))
-    assertPass(hook(fx, 'edit', { tool_name: 'Write', cwd: fx.main, tool_input: {} }))
-  })
-})
 
 // ---------- bash (git merge) ----------
 // Merge vào nhánh chính thiếu dấu KHÔNG bị chặn [chốt 2026-11-07]: chỉ nhắc MỘT dòng "Gộp khi còn thiếu: …" (additionalContext).
@@ -1810,231 +1762,50 @@ function assertPlainOpening(reason, label = '') {
   assert.ok(first.length >= 20 && first.length <= 240, `${label} câu đầu dài ${first.length} ký tự: ${first}`)
 }
 
-const fixtureOutsideTmp = () => fixture({ outsideTmp: true })
-
-describe('v7 host: sửa file qua Codex apply_patch / tên tool Devin', () => {
-  const fixture = fixtureOutsideTmp // cổng sửa-thẳng-thư-mục-chính cho qua file trong thư mục tạm ⇒ repo thử dựng cạnh file test
-  test('Codex apply_patch vào file của thư mục chính bị chặn (đường dẫn tương đối theo cwd, và tuyệt đối)', () => {
-    const fx = fixture()
-    const rel = assertDeny(hook(fx, 'edit', codexIn(fx.main, 'apply_patch', { command: patchOf('a.txt') })))
-    assert.match(rel, /a\.txt/)
-    assertDeny(hook(fx, 'edit', codexIn(fx.wt, 'apply_patch', { command: patchOf(path.join(fx.main, 'a.txt')) })))
-    assertDeny(hook(fx, 'edit', codexIn(fx.wt, 'apply_patch', { command: patchOf('../main/a.txt') })))
-  })
-
-  test('Codex apply_patch trong worktree cho qua; có allow-direct-edit cho qua', () => {
-    const fx = fixture()
-    assertPass(hook(fx, 'edit', codexIn(fx.wt, 'apply_patch', { command: patchOf('a.txt') })))
-    assertPass(hook(fx, 'edit', codexIn(fx.main, 'apply_patch', { command: patchOf(path.join(fx.wt, 'a.txt')) })))
-    write(fx.main, '.claude/allow-direct-edit', '')
-    assertPass(hook(fx, 'edit', codexIn(fx.main, 'apply_patch', { command: patchOf('a.txt') })))
-  })
-
-  test('patch nhiều file: một file trong thư mục chính là đủ để chặn; Add File ở thư mục mới, Move to, Delete File cũng bị kiểm', () => {
-    const fx = fixture()
-    const mixed = patchOf(path.join(fx.wt, 'a.txt'), path.join(fx.main, 'a.txt'))
-    assert.match(assertDeny(hook(fx, 'edit', codexIn(fx.wt, 'apply_patch', { command: mixed }))), /a\.txt/)
-    const add = `*** Begin Patch\n*** Add File: ${path.join(fx.main, 'new', 'deep', 'f.ts')}\n+x\n*** End Patch`
-    assertDeny(hook(fx, 'edit', codexIn(fx.wt, 'apply_patch', { command: add })))
-    const move = `*** Begin Patch\n*** Update File: ${path.join(fx.wt, 'a.txt')}\n*** Move to: ${path.join(fx.main, 'moved.txt')}\n@@\n-line1\n+line1\n*** End Patch`
-    assertDeny(hook(fx, 'edit', codexIn(fx.wt, 'apply_patch', { command: move })))
-    const del = `*** Begin Patch\n*** Delete File: ${path.join(fx.main, 'a.txt')}\n*** End Patch`
-    assertDeny(hook(fx, 'edit', codexIn(fx.wt, 'apply_patch', { command: del })))
-  })
-
-  test('patch không đọc được file nào / ngoài git repo ⇒ cho qua', () => {
-    const fx = fixture()
-    assertPass(hook(fx, 'edit', codexIn(fx.main, 'apply_patch', { command: 'không phải patch' })))
-    assertPass(hook(fx, 'edit', codexIn(fx.main, 'apply_patch', {})))
-    assertPass(hook(fx, 'edit', codexIn(fx.root, 'apply_patch', { command: patchOf(path.join(fx.root, 'plain', 'x.txt')) })))
-  })
-
-  test('lời chặn cho Codex chỉ cách tạo worktree bằng git (không có EnterWorktree); Claude vẫn nhắc EnterWorktree', () => {
-    const fx = fixture()
-    const codex = assertDeny(hook(fx, 'edit', codexIn(fx.main, 'apply_patch', { command: patchOf('a.txt') })))
-    assert.match(codex, /git worktree add/)
-    assert.doesNotMatch(codex, /EnterWorktree/)
-    assert.match(codex, /allow-direct-edit/)
-    const claude = assertDeny(hook(fx, 'edit', { tool_name: 'Edit', cwd: fx.main, tool_input: { file_path: path.join(fx.main, 'a.txt') } }))
-    assert.match(claude, /EnterWorktree/)
-  })
-
-  test('tên tool Devin: write/edit (file_path hoặc path), notebook_edit, apply_patch', () => {
-    const fx = fixture()
+// Sửa thẳng thư mục chính của repo KHÔNG còn bị chặn [chốt 2026-11-08, sổ chốt 8kxf6ad3: như AgentKit, dùng worktree chỉ là lời dặn trong skill].
+// Repo dựng ngoài thư mục tạm (outsideTmp) để các ca này đỏ nếu luật chặn cũ (từng cho qua mọi file trong thư mục tạm) bị đặt lại.
+describe('sửa thẳng thư mục chính không bị chặn (luật cũ đã bỏ); các cổng khác vẫn chạy', () => {
+  test('hook edit cũ còn trong settings của user: Edit/Write/NotebookEdit/MultiEdit/apply_patch vào thư mục chính ⇒ qua, không in gì', () => {
+    const fx = fixture({ outsideTmp: true })
     const target = path.join(fx.main, 'a.txt')
-    assertDeny(hook(fx, 'edit', devinIn(fx.main, 'write', { file_path: target })))
-    assertDeny(hook(fx, 'edit', devinIn(fx.main, 'edit', { path: target })))
-    assertDeny(hook(fx, 'edit', devinIn(fx.main, 'notebook_edit', { notebook_path: path.join(fx.main, 'n.ipynb') })))
-    assertDeny(hook(fx, 'edit', devinIn(fx.main, 'apply_patch', { command: patchOf('a.txt') })))
-    assertPass(hook(fx, 'edit', devinIn(fx.wt, 'write', { file_path: path.join(fx.wt, 'a.txt') })))
+    assertPass(hook(fx, 'edit', { tool_name: 'Edit', cwd: fx.main, tool_input: { file_path: target } }))
+    assertPass(hook(fx, 'edit', { tool_name: 'Edit', cwd: fx.main, tool_input: { file_path: target.replace(/\\/g, '/') } }))
+    assertPass(hook(fx, 'edit', { tool_name: 'Write', cwd: fx.main, tool_input: { file_path: path.join(fx.main, 'new', 'deep', 'f.ts') } }))
+    assertPass(hook(fx, 'edit', { tool_name: 'Write', cwd: fx.main, tool_input: { file_path: 'a.txt' } }))
+    assertPass(hook(fx, 'edit', { tool_name: 'NotebookEdit', cwd: fx.main, tool_input: { notebook_path: path.join(fx.main, 'x.ipynb') } }))
+    assertPass(hook(fx, 'edit', { tool_name: 'MultiEdit', cwd: fx.main, tool_input: { file_path: target } }))
+    assertPass(hook(fx, 'edit', codexIn(fx.main, 'apply_patch', { command: patchOf('a.txt') })))
+    assertPass(hook(fx, 'edit', devinIn(fx.main, 'write', { file_path: target })))
+    assertPass(hook(fx, 'edit', devinIn(fx.main, 'apply_patch', { command: patchOf(target) })))
   })
 
-  test('Bash chứa `apply_patch <<` ⇒ kiểm từng file trong patch (Codex/Devin gọi apply_patch qua shell)', () => {
-    const fx = fixture()
-    const cmd = (patch) => `apply_patch <<'EOF'\n${patch}\nEOF`
-    assert.match(assertDeny(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: cmd(patchOf('a.txt')) }))), /a\.txt/)
-    assertDeny(hook(fx, 'bash', devinIn(fx.main, 'exec', { command: cmd(patchOf('a.txt')) })))
-    assertDeny(hook(fx, 'bash', bashIn(fx.wt, `cd ${fx.main.replace(/\\/g, '/')} && apply_patch <<'PATCH'\n${patchOf(path.join(fx.main, 'a.txt'))}\nPATCH`)))
-    assertPass(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: cmd(patchOf('a.txt')) })))
-    assertPass(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: 'echo apply_patch and *** Update File: a.txt' }))) // không có heredoc
-    assertPass(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: 'ls' })))
-  })
-
-  test('apply_patch đi sau tiền tố (command / env / exec / sudo / đường dẫn tuyệt đối / bash -c) vẫn bị kiểm file trong patch', () => {
-    const fx = fixture()
-    const body = `\n${patchOf('a.txt')}\nEOF`
-    const heads = [
-      "command apply_patch <<'EOF'", "env FOO=1 apply_patch <<'EOF'", '/usr/local/bin/apply_patch <<EOF', "exec apply_patch <<'EOF'",
-      "sudo -n apply_patch <<'EOF'", "FOO=1 command -- apply_patch <<'EOF'", "time apply_patch <<'EOF'",
-    ]
-    for (const head of heads) {
-      assert.match(assertDeny(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: head + body }))), /a\.txt/, head)
-      assertDeny(hook(fx, 'bash', devinIn(fx.main, 'exec', { command: head + body })))
-      assertPass(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: head + body })))
-    }
-    assertDeny(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: `bash -c "apply_patch <<'EOF'${body}"` })))
-    assertDeny(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `cd ${fx.main.replace(/\\/g, '/')} && env X=1 apply_patch <<'EOF'${body}` })))
-    assertPass(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: `cd ${fx.wt.replace(/\\/g, '/')} && command apply_patch <<'EOF'${body}` })))
-  })
-
-  test('apply_patch không xác định được thư mục đích (cd $VAR, cd ~, cd -, cd trần, cd $(…)) ⇒ đường dẫn tương đối không kiểm được ⇒ cho qua + log; đường dẫn tuyệt đối vẫn xét như thường', () => {
-    const fx = fixture()
-    const rel = `\n${patchOf('a.txt')}\nEOF`
-    for (const cd of ['cd "$TARGET"', 'cd ~/proj', 'cd -', 'cd', 'cd $(git rev-parse --show-toplevel)', 'cd `pwd`/x', 'pushd "$TARGET"', 'popd']) {
-      assertPass(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `${cd} && apply_patch <<'EOF'${rel}` })))
-    }
-    assert.match(fs.readFileSync(fx.log, 'utf8'), /apply_patch: không biết đường dẫn tương đối a\.txt trỏ vào đâu/)
-    const abs = (f) => `\n${patchOf(f)}\nEOF`
-    assertPass(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `cd "$TARGET" && apply_patch <<'EOF'${abs(path.join(fx.wt, 'a.txt'))}` })))
-    assertDeny(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `cd "$TARGET" && apply_patch <<'EOF'${abs(path.join(fx.main, 'a.txt'))}` })))
-    // cd sau đó về chỗ biết rõ thì lại xét bình thường
-    assertPass(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: `cd "$TARGET"; cd ${fx.wt.replace(/\\/g, '/')} && apply_patch <<'EOF'${rel}` })))
-  })
-
-  test('apply_patch nhận patch qua pipe (cat <<EOF | apply_patch) ⇒ vẫn kiểm file trong patch như heredoc trực tiếp', () => {
-    const fx = fixture()
-    const piped = `cat <<'EOF' | apply_patch\n${patchOf('a.txt')}\nEOF`
-    assert.match(assertDeny(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: piped }))), /a\.txt/)
-    assertPass(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: piped })))
-    assertDeny(hook(fx, 'bash', devinIn(fx.main, 'exec', { command: `cat <<EOF | command apply_patch\n${patchOf('a.txt')}\nEOF` })))
-    assertDeny(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `cd ${fx.main.replace(/\\/g, '/')} && cat <<'EOF' | sudo -n apply_patch\n${patchOf('a.txt')}\nEOF` })))
-    assertDeny(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: `bash -c "cat <<'EOF' | apply_patch\n${patchOf('a.txt')}\nEOF"` })))
-  })
-
-  // Review lượt 2 (BLOCKER): gọi apply_patch qua biến/alias/find -exec thì cổng không nhận ra "cách gọi" nên bỏ qua kiểm file dù patch nằm ngay trong lệnh.
-  test('lệnh CHỨA nội dung patch (*** Update File: …) thì luôn kiểm file, dù cách gọi apply_patch không nhận ra được (biến, alias, $(…), ghép tên, find -exec, eval)', () => {
-    const fx = fixture()
+  test('lệnh bash có apply_patch vào thư mục chính ⇒ không chặn (heredoc, pipe, bash -c, cd sang thư mục chính, gọi bằng biến)', () => {
+    const fx = fixture({ outsideTmp: true })
     const main = fx.main.replace(/\\/g, '/')
     const body = (f) => `\n${patchOf(f)}\nEOF`
-    const heads = [
-      "p=apply_patch; $p <<'EOF'", "p=apply_patch; \"$p\" <<'EOF'", "p=apply_patch\ncommand $p <<'EOF'", "alias ap=apply_patch; ap <<'EOF'",
-      "$(command -v apply_patch) <<'EOF'", "a=apply_; b=patch; $a$b <<'EOF'", "eval \"$CMD\" <<'EOF'", "find . -maxdepth 0 -exec apply_patch {} \\; <<'EOF'",
-      "env \"$P\" <<'EOF'", "cat <<'EOF' | xargs -I{} sh -c \"$APPLY\"",
-    ]
-    for (const head of heads) {
-      const reason = assertDeny(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: head + body('a.txt') })))
-      assert.match(reason, /a\.txt/, head)
-      assertDeny(hook(fx, 'bash', devinIn(fx.main, 'exec', { command: head + body('a.txt') })))
-      assertPass(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: head + body('a.txt') }))) // trong worktree thì đường dẫn tương đối là của worktree
-      assertDeny(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: head + body(`${main}/a.txt`) }))) // đường dẫn tuyệt đối vào thư mục chính
-    }
-  })
-
-  test('nội dung patch nằm sau cd tới thư mục chính, cách gọi không nhận ra ⇒ vẫn deny; cd tới chỗ không biết ⇒ cho qua; cd về worktree rồi gọi thì xét theo chỗ cd', () => {
-    const fx = fixture()
-    const main = fx.main.replace(/\\/g, '/')
-    const wt = fx.wt.replace(/\\/g, '/')
-    const rel = `\n${patchOf('a.txt')}\nEOF`
-    assertDeny(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `cd ${main} && p=apply_patch && $p <<'EOF'${rel}` })))
-    assertPass(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `cd "$X" && p=apply_patch && $p <<'EOF'${rel}` })))
-    // có lời gọi nhận ra được thì vẫn xét theo chỗ gọi (không bị coi là không nhận ra)
-    assertPass(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: `cd ${wt} && apply_patch <<'EOF'${rel}` })))
-    assertDeny(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `cd ${main} && apply_patch <<'EOF'${rel}` })))
-  })
-
-  test('gọi apply_patch không nhận ra được (biến, alias, find -exec, xargs) với patch từ FILE (không có nội dung trong lệnh) ⇒ không biết file nào ⇒ cho qua, ở cả thư mục chính lẫn worktree', () => {
-    const fx = fixture()
-    const cmds = [
-      'p=apply_patch; $p < x.patch', 'p=apply_patch; "$p" < x.patch', 'p=apply_patch && cat x.patch | $p', 'p=apply_patch; `echo $p` < x.patch',
-      'alias ap=apply_patch; ap < x.patch', 'find . -name x.patch -exec apply_patch {} \\;', 'ls *.patch | xargs apply_patch',
-    ]
-    for (const command of cmds) { // `find … -name` có thể kèm lời nhắc dùng rg (không phải deny)
-      for (const cwd of [fx.main, fx.wt]) {
-        const r = hook(fx, 'bash', codexIn(cwd, 'Bash', { command }))
-        assert.equal(r.json?.hookSpecificOutput?.permissionDecision, undefined, `${command}: ${r.stdout}`)
-      }
-    }
-    for (const command of ['p=apply_patch; echo $p', 'command -v apply_patch', 'rg -n apply_patch hooks', 'git log --grep apply_patch', 'which apply_patch']) {
-      assertPass(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command })), command)
-    }
-  })
-
-  test('lệnh không chứa nội dung patch (chỉ nhắc *** trong chuỗi một dòng, echo, commit message) vẫn qua', () => {
-    const fx = fixture()
-    for (const command of ['echo "*** Update File: a.txt"', 'git commit -m "*** Update File: a.txt"', 'p=apply_patch; echo $p', 'ls *** ']) {
+    for (const command of [
+      `apply_patch <<'EOF'${body('a.txt')}`,
+      `cat <<'EOF' | apply_patch\n${patchOf('a.txt')}\nEOF`,
+      `cd ${main} && apply_patch <<'EOF'${body('a.txt')}`,
+      `bash -c "apply_patch <<'EOF'${body('a.txt')}"`,
+      `sudo -n apply_patch <<'EOF'${body(`${main}/a.txt`)}`,
+      `p=apply_patch; $p <<'EOF'${body(`${main}/a.txt`)}`,
+    ]) {
       assertPass(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command })))
+      assertPass(hook(fx, 'bash', devinIn(fx.main, 'exec', { command })))
+      assertPass(hook(fx, 'bash', bashIn(fx.wt, command)))
     }
   })
 
-  // Review lượt 2 (MAJOR): shell con tự cd rồi apply_patch với đường dẫn tương đối — cổng chỉ biết cwd của shell ngoài.
-  test('bash/sh -c, eval, sudo bash -c có cd/pushd BÊN TRONG + patch đường dẫn tương đối ⇒ coi như cd không xác định (cho qua); đường dẫn tuyệt đối vẫn xét như thường', () => {
-    const fx = fixture()
-    const main = fx.main.replace(/\\/g, '/')
-    const wt = fx.wt.replace(/\\/g, '/')
-    const rel = `\n${patchOf('a.txt')}\nEOF`
-    const inner = (cd) => `${cd} && apply_patch <<'EOF'${rel}`
-    const cmds = [
-      `bash -c "${inner(`cd ${main}`)}"`, `sh -c "${inner(`cd ${main}`)}"`, `bash -lc "${inner(`pushd ${main}`)}"`, `eval "${inner(`cd ${main}`)}"`,
-      `sudo -n bash -c "${inner(`cd ${main}`)}"`, `bash -c 'bash -c "cd ${main} && apply_patch <<EOF${rel}"'`, `bash -c "cd ${main}; apply_patch <<'EOF'${rel}"`,
-      `bash -c "cd ${wt} && cd ${main} && apply_patch <<'EOF'${rel}"`, `env X=1 bash -c "${inner('builtin cd ' + main)}"`,
-    ]
-    for (const command of cmds) {
-      assertPass(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command })))
-      assertPass(hook(fx, 'bash', devinIn(fx.wt, 'exec', { command })))
-    }
-    // đường dẫn tuyệt đối: trong worktree qua, vào thư mục chính bị chặn — dù có cd bên trong
-    const abs = (f) => `\n${patchOf(f)}\nEOF`
-    assertPass(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `bash -c "cd ${main} && apply_patch <<'EOF'${abs(`${wt}/a.txt`)}"` })))
-    assertDeny(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `bash -c "cd ${wt} && apply_patch <<'EOF'${abs(`${main}/a.txt`)}"` })))
-  })
-
-  test('bash -c KHÔNG có cd bên trong: đường dẫn tương đối vẫn xét theo cwd ngoài (worktree qua, thư mục chính chặn)', () => {
-    const fx = fixture()
-    const rel = `\n${patchOf('a.txt')}\nEOF`
-    assertPass(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `bash -c "apply_patch <<'EOF'${rel}"` })))
-    assertPass(hook(fx, 'bash', codexIn(fx.wt, 'Bash', { command: `sudo -n sh -c "echo cd-not-a-command; apply_patch <<'EOF'${rel}"` })))
-    assertDeny(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: `bash -c "apply_patch <<'EOF'${rel}"` })))
-  })
-
-  test('có gọi apply_patch mà không đọc được file nào từ lệnh (patch từ file / biến / printf / $(…)) ⇒ không biết file nào bị sửa ⇒ cho qua, ở cả thư mục chính lẫn worktree', () => {
-    const fx = fixture()
-    const cmds = [
-      'apply_patch < /tmp/p.diff', 'cat /tmp/p.diff | apply_patch', 'echo "$PATCH" | apply_patch', 'apply_patch "$(cat /tmp/p.diff)"',
-      "printf '*** Begin Patch\\n*** Update File: a.txt\\n*** End Patch\\n' | apply_patch", 'command apply_patch < p.diff', 'env X=1 apply_patch < p.diff',
-      'bash -c "apply_patch < /tmp/p.diff"', 'sudo -n bash -c "apply_patch < /tmp/p.diff"', 'cat p.diff | xargs apply_patch', '/usr/bin/apply_patch --help',
-      `apply_patch <<'EOF'\nnội dung không phải patch\nEOF`,
-    ]
-    for (const command of cmds) {
-      for (const cwd of [fx.main, fx.wt]) assertPass(hook(fx, 'bash', codexIn(cwd, 'Bash', { command })), command)
-    }
-  })
-
-  test('chỉ NHẮC TÊN apply_patch (echo, grep, rg, command -v, which, commit message) không phải là gọi ⇒ qua', () => {
-    const fx = fixture()
-    for (const command of ['echo apply_patch', 'echo "dùng apply_patch <<EOF để sửa"', 'grep apply_patch notes.txt', 'rg apply_patch .', 'command -v apply_patch',
-      'which apply_patch', 'git commit -m "fix apply_patch"', 'ls apply_patch.md', 'printf "%s" apply_patch']) {
-      assertPass(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command })))
-    }
-  })
-
-  test('ca cũ giữ nguyên: payload thiếu tool_name vẫn kiểm file_path, MultiEdit; tool Bash gửi vào chế độ edit thì qua', () => {
-    const fx = fixture()
-    assertDeny(hook(fx, 'edit', { cwd: fx.main, tool_input: { file_path: path.join(fx.main, 'a.txt') } }))
-    assertDeny(hook(fx, 'edit', { tool_name: 'MultiEdit', cwd: fx.main, tool_input: { file_path: path.join(fx.main, 'a.txt') } }))
-    assertPass(hook(fx, 'edit', codexIn(fx.main, 'Bash', { command: 'ls' })))
+  test('cổng khác vẫn chạy cạnh apply_patch: xoá thư mục, git reset --hard, push ép nhánh chính vẫn bị chặn; có FLOW_OK=1 thì qua', () => {
+    const fx = fixture({ outsideTmp: true })
+    const patch = `apply_patch <<'EOF'\n${patchOf('a.txt')}\nEOF`
+    assertExit(assertDeny(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: `rm -rf build && ${patch}` }))))
+    assertExit(assertDeny(hook(fx, 'bash', bashIn(fx.main, 'git reset --hard'))))
+    assertExit(assertDeny(hook(fx, 'bash', bashIn(fx.main, `${patch}\ngit push --force origin main`))))
+    assertPass(hook(fx, 'bash', bashIn(fx.main, 'FLOW_OK=1 rm -rf build')))
   })
 })
-
 describe('v7 secret: mẫu lấy từ lib/secrets.mjs', () => {
   const src = fs.readFileSync(SCRIPT, 'utf8')
   const sh = (fx, cwd, command) => hook(fx, 'bash', bashIn(cwd, command))
@@ -2373,10 +2144,8 @@ describe('v7 AC-24: lời chặn mở đầu bằng một câu đời thường'
   const sh = (fx, cwd, command) => hook(fx, 'bash', bashIn(cwd, command))
   const stage = (dir, rel, content) => { write(dir, rel, content); git(dir, 'add', '--', rel) }
 
-  test('sửa thẳng thư mục chính / push ép / xoá nhánh chính / lệnh phá huỷ / secret', () => {
+  test('push ép / xoá nhánh chính / lệnh phá huỷ / secret', () => {
     const fx = fixture()
-    const direct = fixtureOutsideTmp() // cổng sửa thẳng cho qua file trong thư mục tạm
-    assertPlainOpening(assertDeny(hook(direct, 'edit', { tool_name: 'Edit', cwd: direct.main, tool_input: { file_path: path.join(direct.main, 'a.txt') } })), 'edit')
     for (const c of ['git push --force origin main', 'git push origin --delete main', 'git branch -D main', 'git branch -M feat main', 'git reset --hard', 'git clean -fd', 'git restore .', 'git checkout -- .']) {
       assertPlainOpening(assertDeny(sh(fx, fx.main, c)), c)
     }

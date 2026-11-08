@@ -28,7 +28,7 @@ Luật cho AI sửa app này. Người dùng không viết code: giữ giao di�
 - Kiểm: `node ~/.claude/hooks/ui-check.mjs` (đọc `.claude/ui.json`).
 
 ## Bí mật và header
-- Khoá bí mật chỉ ở `.env.local` / biến của nền tảng; biến `VITE_*` vào trình duyệt nên KHÔNG đặt khoá bí mật ở đó. Người dùng tự dán khoá, AI không nhập hộ.
+- Khoá bí mật chỉ ở `.env.local` / biến của nền tảng; biến `VITE_*` vào trình duyệt nên KHÔNG đặt khoá bí mật ở đó. Khoá đi qua kho khoá của kit (`khoa.mjs luu` rồi `lay`); không viết giá trị khoá vào code hay câu trả lời.
 - `public/_headers` là hàng rào trình duyệt: thêm tên miền dữ liệu vào `connect-src` khi cần; KHÔNG nới `script-src`, KHÔNG thêm `'unsafe-eval'`.
 - Dữ liệu từ người dùng: kiểm ở máy chủ, truy vấn tham số hoá; không ghép chuỗi vào SQL.
 - Ghi nhật ký chỉ qua `safeLog` (`src/shared/safe-log.ts`: chỉ trường trong danh sách cho phép được ghi, phần còn lại bị che). KHÔNG `console.log` thẳng mật khẩu, token, khoá, email hay chữ người dùng nhập; code máy chủ cũng ghi log qua hàm tương đương. Máy kiểm `log-secrets` quét log của bài thử.

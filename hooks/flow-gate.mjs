@@ -1,12 +1,13 @@
-// flow-gate: cổng worktree/review/qa/test cho flow captain + worker. Một script, chế độ chọn bằng argv[2].
-//   hook : edit (PreToolUse Edit|Write|NotebookEdit + apply_patch của Codex/Devin: chặn sửa thẳng thư mục chính của repo; file trong thư mục tạm cho qua) ·
-//          bash (PreToolUse Bash: chỉ CHẶN vài việc thật nguy hiểm — commit/push có secret, push ép/xoá nhánh chính, lệnh phá huỷ trên nhánh chính,
-//          xoá cả thư mục, `apply_patch <<` vào thư mục chính; mọi thứ còn lại chỉ NHẮC AI (additionalContext): git merge vào nhánh chính thiếu dấu
+// flow-gate: cổng review/qa/test cho flow captain + worker. Một script, chế độ chọn bằng argv[2].
+//   hook : bash (PreToolUse Bash: chỉ CHẶN vài việc thật nguy hiểm — commit/push có secret, push ép/xoá nhánh chính, lệnh phá huỷ trên nhánh chính,
+//          xoá cả thư mục; mọi thứ còn lại chỉ NHẮC AI (additionalContext): git merge vào nhánh chính thiếu dấu
 //          review/qa/test, thư viện mới lạ/có lỗ hổng/không kiểm được, diff quá lớn không quét hết).
 //          KHÔNG hộp hỏi (ask) nào [chốt 2026-10-14: user no code luôn bấm Allow]; push thường lên nhánh chính cho qua.
 //          Mọi lời chặn có LỐI RA [chốt 2026-11-07: kit không bao giờ làm việc đứng lại]: user gật trong chat ⇒ AI chạy lại đúng lệnh với tiền tố
 //          FLOW_OK=1 (PowerShell: $env:FLOW_OK=1;) ⇒ cho qua mọi cổng và ghi một dòng vào flow-approvals.log cạnh flow-gate.log (xem EXIT_LINE, hookBash)) ·
 //          stop (Stop: nhắc MỘT lần khi thiếu dấu) · subagent-stop (SubagentStop: receipt + audit phạm vi làn)
+//          Sửa file thẳng vào thư mục chính của repo KHÔNG bị chặn [chốt 2026-11-08, sổ chốt 8kxf6ad3: như AgentKit, dùng worktree chỉ là lời dặn trong skill
+//          flow-worktree]. Chế độ `edit` của bản cũ vẫn được nhận và không làm gì, để hook chưa gỡ trong settings.json / hooks.json của user không lỗi (installer gỡ khi cài lại).
 //   CLI  : stamp review <file.json> · stamp qa <file.md> · stamp test -- <lệnh…> · status      (chạy trong worktree)
 // Spec: ~/.claude/plans/flow-v2-hooks-spec.md, flow-v3-hooks-spec.md (Làn A: quét secret), flow-v5-hooks-spec.md (Làn A: dấu test, lệnh phá huỷ, ask, audit);
 //       flow v7: docs/specs/2026-10-11-flow-v7-nocode (làn D: AC-09 audit phạm vi làn, AC-24 lời chặn đời thường, AC-38 thư viện mới);
@@ -23,7 +24,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { briefPlan, briefWord } from './lib/brief.mjs'
-import { normalize, patchFiles } from './lib/host.mjs'
+import { normalize } from './lib/host.mjs'
 import { ALLOW_MARK, isSensitiveFile, scanLine, scanPatch } from './lib/secrets.mjs'
 
 const HOOK_DIR = path.dirname(fileURLToPath(import.meta.url))
@@ -248,46 +249,6 @@ function gateState(info, base, head, pReq = { codes: [], unreadable: [] }) {
 const gateStateOf = async (info, base, head) => gateState(info, base, head, await requiredPCodes(info, base, head))
 
 // ---------- hook handlers: trả object để in, hoặc null = cho qua ----------
-
-// abs có nằm trong thư mục tạm không: os.tmpdir(), <ổ đĩa của chính nó>:\tmp, /tmp (so cả đường dẫn thô lẫn realpath: macOS /var → /private/var, Windows 8.3).
-function inTempDir(abs) {
-  const roots = new Set()
-  for (const r of [os.tmpdir(), path.join(path.parse(abs).root, 'tmp'), '/tmp']) { roots.add(norm(r)); roots.add(norm(realish(r))) }
-  return [abs, realish(abs)].some((f) => { const n = norm(f); return [...roots].some((r) => n === r || n.startsWith(r + path.sep)) })
-}
-
-// files = các file mà tool sắp ghi (đã qua host.normalize / patchFiles; tương đối thì tính từ cwd). Deny nếu có file nằm trong thư mục chính
-// của một repo (không phải worktree) mà repo đó chưa bật .claude/allow-direct-edit. Codex/Devin không có EnterWorktree ⇒ chỉ cách dùng git.
-function denyDirectEdit(files, cwd, host) {
-  for (const p of files) {
-    const abs = path.resolve(cwd, toNative(p))
-    if (inTempDir(abs)) continue // thư mục tạm: làm nháp/chạy thử, không phải bản chính của dự án
-    const info = repoInfo(abs)
-    if (!info || info.linked) continue
-    if (fs.existsSync(path.join(info.toplevel, '.claude', 'allow-direct-edit'))) continue
-    const how = host === 'claude'
-      ? 'Gọi EnterWorktree để tạo worktree trước khi sửa file.'
-      : 'Tạo worktree bằng git worktree add ../<tên> -b <nhánh> rồi sửa file trong đó.'
-    return permission('deny',
-      'Chưa sửa thẳng vào bản chính của dự án được; AI sẽ tạo một bản sao riêng của dự án rồi sửa ở đó. ' +
-      `Đang sửa thẳng thư mục chính của ${info.toplevel} (nhánh ${info.branch ?? '?'}), file ${p}. ${how} ` +
-      'Muốn sửa thẳng thì user tạo file .claude/allow-direct-edit trong repo.')
-  }
-  return null
-}
-
-function hookEdit(input) {
-  const n = normalize(input, process.env)
-  // tool ghi file đã biết (Edit/Write/NotebookEdit, Devin write/edit/notebook_edit, Codex apply_patch): host.mjs đã lấy sẵn danh sách file.
-  // Tên tool lạ/thiếu: giữ cách cũ (file_path hoặc notebook_path) — chế độ edit chỉ được gắn cho tool ghi file nên thà đọc dư còn hơn mù.
-  let files = n.files
-  if (n.tool === 'other') {
-    const ti = input.tool_input
-    const p = ti?.file_path ?? ti?.notebook_path
-    files = typeof p === 'string' && p ? [p] : []
-  }
-  return denyDirectEdit(files, n.cwd, n.host)
-}
 
 // Đọc dấu hiệu heredoc `<<[-] WORD` tại cmd[i] ('<' đầu tiên). Trả { word, dash, end } (end = chỉ số sau WORD) hoặc null.
 function heredocMarker(cmd, i) {
@@ -902,68 +863,8 @@ async function safelyAsync(name, fn) {
 }
 
 const GIT_WORDS = /merge|commit|push|reset|branch|checkout|restore|clean/
-const APPLY_PATCH_WORD = /\bapply_patch\b/ // Codex/Devin sửa file bằng `apply_patch <<'EOF' … EOF`, `cat <<EOF | apply_patch`, bash -c "…" … qua shell
-const APPLY_PATCH_TOKEN = /(^|[\\/])apply_patch(\.\w+)?$/
-const PATCH_WRAPPERS = new Set(['command', 'env', 'exec', 'sudo', 'doas', 'time', 'nice', 'nohup', 'builtin', 'xargs', 'stdbuf', 'timeout', 'setsid', 'ionice', 'then', 'do', 'else', 'elif'])
 const SHELL_RUNNERS = /^(?:(?:ba|z|da|k|c|fi)?sh|eval|pwsh|powershell|cmd)$/i
 const baseCmd = (t) => path.posix.basename(t.replace(/\\/g, '/')).replace(/\.(exe|cmd|bat)$/i, '').replace(/^`+/, '')
-
-// Đoạn lệnh (toks, đã bỏ nháy) có GỌI apply_patch không? 'direct' = apply_patch đứng ở vị trí lệnh (sau các phép gán VAR=, và nếu có thì sau từ bọc
-// command/env/exec/sudo/time/xargs/… cùng cờ + đối số của chúng); 'nested' = nằm trong chuỗi mà shell con sẽ chạy (bash -c "…", eval "…");
-// null = chỉ nhắc tên (echo apply_patch, grep apply_patch f, command -v apply_patch, git commit -m "…apply_patch…").
-function patchInvocation(toks) {
-  let k = 0
-  while (/^[A-Za-z_]\w*=/.test(toks[k] ?? '')) k++
-  const first = toks[k]
-  if (first === undefined) return null
-  if (APPLY_PATCH_TOKEN.test(first.replace(/^`+/, ''))) return 'direct'
-  const name = baseCmd(first)
-  if (PATCH_WRAPPERS.has(name)) {
-    if (name === 'command' && /^-[vV]/.test(toks[k + 1] ?? '')) return null // command -v apply_patch chỉ hỏi có cài không
-    const rest = toks.slice(k + 1)
-    if (rest.some((t) => APPLY_PATCH_TOKEN.test(t.replace(/^`+/, '')))) return 'direct'
-    const sh = rest.findIndex((t) => SHELL_RUNNERS.test(baseCmd(t))) // sudo bash -c "… apply_patch …"
-    return sh >= 0 && rest.slice(sh + 1).some((t) => APPLY_PATCH_WORD.test(t)) ? 'nested' : null
-  }
-  if (SHELL_RUNNERS.test(name) && toks.slice(k + 1).some((t) => APPLY_PATCH_WORD.test(t))) return 'nested'
-  return null
-}
-
-// Lệnh con (bash -c "…", eval "…", sudo bash -c "…") có tự đổi thư mục (cd/pushd/popd, kể cả sau builtin/command) ở tầng nào không? strs = token của
-// lệnh ngoài, mỗi token coi như một đoạn script. Cổng chỉ biết cwd của shell ngoài, nên lệnh con tự cd rồi apply_patch với đường dẫn tương đối là mù.
-// Lồng quá sâu thì coi như có (không đọc nổi).
-function innerCd(strs, depth = 0) {
-  if (depth > 4) return true
-  for (const s of strs) {
-    for (const seg of tokenize(s)) {
-      let k = 0
-      while (/^[A-Za-z_]\w*=/.test(seg[k] ?? '')) k++
-      if (/^(builtin|command)$/.test(seg[k] ?? '')) k++
-      if (/^(cd|pushd|popd)$/.test(seg[k] ?? '')) return true
-      for (const t of seg) if (t !== s && /[\s;&|()<>]/.test(t) && innerCd([t], depth + 1)) return true
-    }
-  }
-  return false
-}
-
-// Gọi apply_patch: đọc được file từ lệnh (patchFiles) ⇒ kiểm từng file tại các thư mục `states` ([{cwd, known}]); không đọc được file nào
-// (patch đến từ file, biến, printf, $(…)) ⇒ không biết file nào sẽ bị sửa ⇒ cho qua.
-function denyPatchUse(patch, states, host) {
-  for (const s of states) {
-    const out = denyPatchTargets(patch, s.cwd, s.known, host)
-    if (out) return out
-  }
-  return null
-}
-
-// Kiểm các file trong heredoc patch như hookEdit, tại thư mục `cwd`. known=false (đứng sau cd tới chỗ không tính ra được) thì đường dẫn
-// tương đối không có nghĩa ⇒ cho qua + log; đường dẫn tuyệt đối vẫn xét như thường.
-function denyPatchTargets(patch, cwd, known, host) {
-  const isAbs = (p) => path.isAbsolute(toNative(p))
-  const rel = patch.filter((p) => !isAbs(p))
-  if (!known && rel.length > 0) log(`apply_patch: không biết đường dẫn tương đối ${rel.join(', ')} trỏ vào đâu (cd tới chỗ không tính ra được), bỏ qua`)
-  return denyDirectEdit(known ? patch : patch.filter(isAbs), cwd, host)
-}
 
 // AC-42: quét thư mục bằng `grep -r`/`grep -R`/`--recursive` hoặc `find <dir> … -name` ⇒ nhắc MỘT dòng dùng Grep/rg.
 // Chỉ nhắc (additionalContext, không permissionDecision) — có chỗ vẫn cần grep (đọc pipe, một file).
@@ -1010,32 +911,15 @@ async function hookBash(input) {
   if (/\bFLOW_OK=/.test(cmd)) { logApproval(cmd); return null }
   if (safely('dirDelete', () => tokenize(cmd).some((t) => deletesDir(t)))) return DIR_DELETE_DENY
   const nudge = SLOW_SEARCH.test(cmd) ? SEARCH_NUDGE : null
-  const mentionsPatch = APPLY_PATCH_WORD.test(cmd)
-  // Nội dung patch nằm ngay trong lệnh (dòng *** Add/Update/Delete File:) ⇒ LUÔN kiểm file, không phụ thuộc nhận ra cách gọi apply_patch
-  // (`p=apply_patch; $p`, alias, find -exec, ghép tên…).
-  const patch = patchFiles(cmd)
-  if (!mentionsPatch && patch.length === 0 && !GIT_WORDS.test(cmd)) return nudge
+  if (!GIT_WORDS.test(cmd)) return nudge
   let cwd = path.resolve(toNative(n.cwd))
   const notes = [] // lời nhắc không chặn (vd thư viện mới chưa kiểm được, merge thiếu dấu); trả khi không có deny
   let sawAdd = false // đã có `git add` đứng trước trong cùng lệnh: index lúc này chưa phản ánh commit sắp tạo
-  let cwdKnown = true // false sau một cd/pushd/popd tới chỗ không tính ra được (biến, ~, -, $(…), cd trần)
-  const dirs = [{ cwd, known: true }] // các thư mục lệnh đi qua, để kiểm patch khi apply_patch nằm trong chuỗi (bash -c "…") không biết chạy ở đâu
-  let patchCalls = 0 // số lời gọi apply_patch nhận ra được (đã kiểm theo chỗ gọi)
   for (const toks of tokenize(cmd)) {
     if (/^(cd|pushd|popd)$/.test(toks[0] ?? '')) {
       const to = toks[0] === 'popd' ? null : toks[1]
-      if (to && !/^[-~$]/.test(to)) { cwd = path.resolve(cwd, toNative(to)); cwdKnown = !/[$`]/.test(to) } else cwdKnown = false
-      dirs.push({ cwd, known: cwdKnown })
+      if (to && !/^[-~$]/.test(to)) cwd = path.resolve(cwd, toNative(to)) // cd tới chỗ không tính ra được (biến, ~, -, cd trần) ⇒ giữ thư mục cũ
       continue
-    }
-    // gọi apply_patch dưới BẤT KỲ dạng nào (heredoc, pipe, command/env/exec/sudo …, bash -c "…") ⇒ kiểm file trong patch; không đọc được file nào ⇒ cho qua
-    const use = mentionsPatch ? patchInvocation(toks) : null
-    if (use) {
-      patchCalls++
-      // lệnh con không cho biết nó cd đi đâu: có cd/pushd bên trong ⇒ coi như thư mục không xác định (đường dẫn tương đối ⇒ bỏ qua, tuyệt đối xét như thường)
-      const states = use !== 'nested' ? [{ cwd, known: cwdKnown }] : innerCd(toks.slice(1)) ? dirs.map((d) => ({ cwd: d.cwd, known: false })) : dirs
-      const out = safely('denyDirectEdit', () => denyPatchUse(patch, states, n.host))
-      if (out) return out
     }
     const g = parseGitSub(toks, cwd)
     if (!g) continue
@@ -1059,14 +943,6 @@ async function hookBash(input) {
       if (out?.hookSpecificOutput?.permissionDecision) return out
       if (out) notes.push(out.hookSpecificOutput.additionalContext)
     }
-  }
-  // Có nội dung patch mà số lời gọi nhận ra được ít hơn số khối patch (gồm trường hợp không nhận ra lời gọi nào: biến, alias, find -exec…) ⇒ không biết patch
-  // chạy ở đâu ⇒ kiểm file tại MỌI thư mục lệnh đi qua (đường dẫn tương đối tính theo từng chỗ; cd không xác định ⇒ bỏ qua đường dẫn tương đối).
-  // Không có nội dung patch ⇒ không biết file nào sẽ sửa ⇒ cho qua.
-  const patchBlocks = (cmd.match(/^[ \t]*\*\*\* Begin Patch\b/gm) ?? []).length
-  if (patch.length > 0 && patchCalls < Math.max(1, patchBlocks)) {
-    const out = safely('denyDirectEdit', () => denyPatchUse(patch, dirs, n.host))
-    if (out) return out
   }
   if (nudge) notes.push(nudge.hookSpecificOutput.additionalContext)
   return notes.length > 0 ? remind(notes.join('\n')) : null
@@ -1405,7 +1281,7 @@ async function cliStatus() {
 
 // ---------- main ----------
 
-const HOOKS = { edit: hookEdit, bash: hookBash, stop: hookStop, 'subagent-stop': hookSubagentStop }
+const HOOKS = { edit: () => null, bash: hookBash, stop: hookStop, 'subagent-stop': hookSubagentStop } // edit: hook cũ còn trong settings.json của user — nhận và bỏ qua
 const [, , mode, arg1, arg2] = process.argv
 
 if (HOOKS[mode]) {
@@ -1422,5 +1298,5 @@ if (HOOKS[mode]) {
 } else if (mode === 'status') {
   await cliStatus()
 } else {
-  fail('Dùng: flow-gate.mjs edit|bash|stop|subagent-stop (hook) · stamp review <file.json> · stamp qa <file.md> · stamp test -- <lệnh> · status')
+  fail('Dùng: flow-gate.mjs bash|stop|subagent-stop (hook) · stamp review <file.json> · stamp qa <file.md> · stamp test -- <lệnh> · status')
 }

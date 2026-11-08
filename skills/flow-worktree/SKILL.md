@@ -1,6 +1,6 @@
 ---
 name: flow-worktree
-description: Tạo, dùng lại và dọn worktree (bản sao riêng của dự án để sửa không đụng bản đang chạy), soi file các phiên khác đang sửa. Dùng khi sắp sửa file lần đầu trong git repo, khi hook báo "Đang sửa thẳng thư mục chính", trước khi gộp, hoặc khi user muốn dọn bản sao cũ. KHÔNG dùng khi chỉ hỏi đáp, đọc code, lập plan, ngoài git repo, đã ở trong worktree, hay repo có .claude/allow-direct-edit.
+description: Tạo, dùng lại và dọn worktree (bản sao riêng của dự án để sửa không đụng bản đang chạy), soi file các phiên khác đang sửa. Dùng khi sắp sửa file lần đầu trong git repo, trước khi gộp, hoặc khi user muốn dọn bản sao cũ. KHÔNG dùng khi chỉ hỏi đáp, đọc code, lập plan, ngoài git repo, đã ở trong worktree, hay repo có .claude/allow-direct-edit.
 ---
 
 # Worktree
@@ -41,7 +41,7 @@ Dự án ghi lệnh riêng trong `CLAUDE.md` ⇒ dùng lệnh đó. Lệnh báo 
 
 - Hai phiên không chạy dev server cùng cổng: lấy cổng bằng `node ~/.claude/hooks/wt-env.mjs alloc <worktree>`. Ghi lại lệnh và cổng của
   mọi tiến trình mình bật để còn dừng lúc dọn.
-- Repo user muốn sửa thẳng ⇒ user tạo `.claude/allow-direct-edit` (hook sẽ cho qua).
+- Không có hook chặn sửa thẳng (chốt 8kxf, như AgentKit): tự giác tách worktree trước khi sửa. Repo có `.claude/allow-direct-edit` ⇒ sửa thẳng, bỏ bước này.
 
 ## 4. Gộp
 

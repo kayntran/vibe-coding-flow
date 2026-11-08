@@ -876,7 +876,7 @@ export function close(projectRoot, feature, opts = {}) {
 }
 
 // Đóng sổ một tính năng ở bước gộp: progress.md ghi "Trạng thái: xong" + "Xong ngày", rồi close().
-// Chạy qua CLI (không qua công cụ sửa file) nên không vướng luật chặn sửa thẳng thư mục chính. Chạy lại không đổi gì.
+// Chạy lại không đổi gì.
 // Sổ đang KHÔNG ở trạng thái xong (lần đầu, hoặc đã mở lại sau khi từng xong) ⇒ "Xong ngày" ghi lại = hôm nay (giờ VN); đã xong sẵn ⇒ giữ ngày cũ.
 export function xong(projectRoot, feature, { now = Date.now() } = {}) {
   const root = realRootOf(projectRoot)

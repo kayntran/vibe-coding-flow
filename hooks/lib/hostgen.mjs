@@ -19,8 +19,8 @@ Tên công cụ trong luật/skill/agent nguồn là tên Claude; trên Codex l�
 - AskUserQuestion → hỏi thẳng trong chat, chờ câu trả lời khi quyết định cần user; không giả định có tool này. Gom các câu vào
   một tin; mỗi câu đánh số, phương án dạng 1a/1b/1c kèm một câu lý do, đúng một phương án ghi "(Khuyên dùng)".
 - mcp__so-chot__* → \`node ~/.claude/hooks/lib/so-chot.mjs <ghi|tim|y-tuong|da-xem> <gốc dự án> '<json>'\` (cùng trường với tool).
-- mcp__kho-khoa__* → \`node ~/.claude/hooks/khoa.mjs ds | lay <TÊN> [thư mục dự án] [--as TÊN_ENV] | thay <TÊN> <TÊN_2>\`. User dán khoá thì hook đã chặn tin và cất
-  khoá vào kho, báo tên; không xin dán lại, không đọc hay in giá trị trong .env.
+- mcp__kho-khoa__* → \`node ~/.claude/hooks/khoa.mjs ds | luu <TÊN> - (giá trị qua stdin) | lay <TÊN> [thư mục dự án] [--as TÊN_ENV] | thay <TÊN> <TÊN_2>\`.
+  User dán khoá ⇒ cất bằng \`luu\`, báo bằng tên; không in giá trị khoá ra câu trả lời, không đọc hay in giá trị trong .env.
 - EnterWorktree / isolation: worktree → git worktree add rồi làm trong đó; không có cô lập worktree tự động theo agent.
 - ExitPlanMode → trình plan rồi chờ user duyệt trước khi làm bước cần duyệt.
 - Bash → exec_command; Read / Glob / Grep → lệnh đọc và rg / rg --files.
@@ -155,7 +155,6 @@ function entries(kitRoot, codex) {
   const cmd = (script, arg, timeout) => command(root, script, arg, timeout, codex)
   return [
     ['UserPromptSubmit', undefined, cmd('reply-vietnamese.mjs', '', 5)],
-    ['PreToolUse', codex ? '^(Edit|Write|apply_patch)$' : '^(Edit|Write|MultiEdit|NotebookEdit|edit|write|apply_patch|notebook_edit)$', cmd('flow-gate.mjs', 'edit', 15)],
     ['PreToolUse', codex ? '^Bash$' : '^(Bash|PowerShell|exec)$', cmd('flow-gate.mjs', 'bash', 15)], // PowerShell: tool lệnh của Claude Code trên Windows, cùng cổng như Bash
     ['Stop', undefined, cmd('flow-gate.mjs', 'stop', 15)],
     ['SubagentStop', undefined, cmd('flow-gate.mjs', 'subagent-stop', 15)],
@@ -164,8 +163,8 @@ function entries(kitRoot, codex) {
     ['PreToolUse', codex ? '^(Agent|spawn_agent|collaborationspawn_agent)$' : '^(Agent|Task|run_subagent)$', cmd('flow-dispatch.mjs', 'agent', 30)],
     ['PreToolUse', codex ? '^Bash$' : '^(Bash|PowerShell|exec)$', cmd('flow-dispatch.mjs', 'commit', 15)], // git commit mà sổ tiến độ chưa vào commit ⇒ nhắc một dòng (không chặn)
     ['Stop', undefined, cmd('flow-dispatch.mjs', 'stop', 15)],
-    // Codex không có mod kho-khoa (che khoá trong tin nhắn) ⇒ hook chặn tin có khoá và cất khoá vào kho chung.
-    ...(codex ? [['UserPromptSubmit', undefined, cmd('khoa.mjs', 'prompt', 10)]] : []),
+    // Tin có khoá hoặc nhắc tới khoá ⇒ nhắc AI không in giá trị khoá (chốt i0gg, như AgentKit: không che, không chặn). Claude lẫn Codex.
+    ['UserPromptSubmit', undefined, cmd('khoa.mjs', 'prompt', 10)],
   ]
 }
 

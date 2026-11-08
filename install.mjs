@@ -37,6 +37,9 @@ export const SECRET_DENY = [
 const GENERATED = 'tự sinh bởi vibe-flow'
 const SKILL_MARK = '.vibe-flow-generated'
 const LEGACY_HOOK = /worker-wait-hook|orchestration-policy/i
+// Hook của kit đã gỡ (khoá hookKey = script + đối số): cài lại thì bỏ khỏi settings.json / hooks.json của user, mọi đường dẫn, mọi sự kiện.
+// flow-gate.mjs edit: luật chặn sửa thẳng thư mục chính đã bỏ [chốt 2026-11-08, sổ chốt 8kxf6ad3].
+const RETIRED_HOOKS = new Set(['flow-gate.mjs edit'])
 
 const here = dirname(fileURLToPath(import.meta.url))
 const norm = (p) => p.replaceAll('\\', '/')
@@ -91,10 +94,24 @@ export function hookKey(command) {
   return m ? m[1].trim() : null
 }
 
+// Bỏ hook đã gỡ (RETIRED_HOOKS) khỏi danh sách entry của một sự kiện; giữ hook khác chung entry, entry chỉ còn hook đã gỡ thì bỏ cả entry.
+const dropRetired = (list) => list.flatMap((e) => {
+  if (!(e && Array.isArray(e.hooks))) return [e]
+  const keep = e.hooks.filter((h) => !RETIRED_HOOKS.has(hookKey(h?.command)))
+  return keep.length === e.hooks.length ? [e] : keep.length ? [{ ...e, hooks: keep }] : []
+})
+
 // Giữ cách ghép cũ: với từng hook cần có, bỏ đúng command cũ của cùng script+đối số (cùng sự kiện), giữ hook khác chung entry, entry rỗng thì bỏ, rồi thêm hook mới.
+// Thêm: hook đã gỡ (RETIRED_HOOKS) bị bỏ ở mọi sự kiện; sự kiện chỉ còn hook đã gỡ thì bỏ hẳn sự kiện (nếu kit còn hook cho nó thì được thêm lại ngay sau).
 export function mergeClaudeHooks(settings, wanted) {
   if (settings.hooks !== undefined && !isPlain(settings.hooks)) throw new Error('"hooks" trong settings.json không phải object')
   settings.hooks ??= {}
+  for (const [event, list] of Object.entries(settings.hooks)) {
+    if (!Array.isArray(list)) continue
+    const kept = dropRetired(list)
+    if (kept.length > 0 || list.length === 0) settings.hooks[event] = kept
+    else delete settings.hooks[event]
+  }
   for (const [event, matcher, hook] of wanted) {
     const list = settings.hooks[event] ?? []
     if (!Array.isArray(list)) throw new Error(`hooks.${event} trong settings.json không phải danh sách`)
@@ -114,11 +131,11 @@ export function mergeDeny(settings, rules = SECRET_DENY) {
   for (const r of rules) if (!p.deny.includes(r)) p.deny.push(r)
 }
 
-// ~/.codex/hooks.json: bỏ hook của kit (mọi đường dẫn) và hook của bộ điều phối cũ, giữ hook khác, rồi thêm hook của kit. Sự kiện chỉ còn hook bị bỏ ⇒ bỏ hẳn sự kiện.
+// ~/.codex/hooks.json: bỏ hook của kit (mọi đường dẫn, kể cả hook đã gỡ RETIRED_HOOKS) và hook của bộ điều phối cũ, giữ hook khác, rồi thêm hook của kit. Sự kiện chỉ còn hook bị bỏ ⇒ bỏ hẳn sự kiện.
 export function mergeCodexHooks(existing, kit) {
   if (!existing) return { json: kit, legacy: 0 }
   if (existing.hooks !== undefined && !isPlain(existing.hooks)) throw new Error('"hooks" trong hooks.json của Codex không phải object')
-  const kitKeys = new Set(Object.values(kit.hooks).flat().flatMap((g) => g.hooks.map((h) => hookKey(h.command))))
+  const kitKeys = new Set([...RETIRED_HOOKS, ...Object.values(kit.hooks).flat().flatMap((g) => g.hooks.map((h) => hookKey(h.command)))])
   const hooks = {}
   let legacy = 0
   for (const [event, groups] of Object.entries(existing.hooks ?? {})) {

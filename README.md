@@ -11,7 +11,7 @@ skill tự bật theo câu user nói, hook ép các cổng. Thiết kế gốc: 
 | `CLAUDE.md` | Thứ DUY NHẤT nạp vào mọi phiên (~3,6KB): ngôn ngữ, nguyên tắc, phân cỡ, bảng định tuyến "user nói gì → làm gì" |
 | `skills/flow-*` | Quy trình, chỉ nạp khi cần. **Luồng:** `flow-feature`, `flow-bugfix`, `flow-release`, `flow-new-app`, `flow-health`. **Trước khi làm:** `flow-spec`, `flow-ux`, `flow-ui-demo`, `flow-ui-design`, `flow-plan`, `flow-impact`, `flow-architecture`, `flow-worktree`. **Làm và kiểm:** `flow-build`, `flow-fix`, `flow-qa`, `flow-review`, `flow-security`, `flow-merge`. **Sau phát hành:** `flow-publish`, `flow-rollback`, `flow-backup`, `flow-key-leak`, `flow-maintain`, `flow-scale`. **Hỏi đáp:** `flow-explain`, `flow-status`. **Nội bộ:** `flow-team`, `flow-sessions`, `flow-devin` |
 | `agents/` | Worker: `researcher` (GitHub + agy), `recon`, `coder`, `coder-lite`, `test-runner`, `qa-tester` (Playwright), `debugger` (+ Codex), `code-reviewer` |
-| `hooks/flow-gate.mjs` | Chỉ chặn việc nguy hiểm (sửa thẳng thư mục chính, lộ secret, ép/xoá nhánh chính, bỏ thay đổi ở bản chính, xoá thư mục), có lối ra `FLOW_OK=1` khi user gật; gộp thiếu dấu chỉ nhắc; bắt worker trả receipt |
+| `hooks/flow-gate.mjs` | Chỉ chặn việc nguy hiểm (lộ secret, ép/xoá nhánh chính, bỏ thay đổi ở bản chính, xoá thư mục), có lối ra `FLOW_OK=1` khi user gật; gộp thiếu dấu chỉ nhắc; bắt worker trả receipt |
 | `hooks/don.mjs` | Dọn thư mục có kiểm tra: thư mục tạm, build mà git bỏ qua, worktree đã gộp sạch |
 | `hooks/session-start.mjs` | Mở phiên / sau khi nén ngữ cảnh: tự nạp sổ `progress.md` đang dở; nhắc báo cáo MCP sau 30 ngày |
 | `hooks/lane-check.mjs` | Chạy song song: `plan` kiểm bảng làn trong PLAN.md (trùng file, file nóng, phụ thuộc, chia wave) · `audit` bắt worker sửa ngoài phạm vi (cả file chưa commit) · `conflicts` dò xung đột giữa các nhánh làn |
@@ -56,7 +56,7 @@ Luật riêng từng dự án nằm trong repo dự án (`CLAUDE.md`, `AGENTS.md
 
 Báo cáo MCP bất cứ lúc nào: `node ~/.claude/hooks/mcp-usage.mjs report` (mặc định 30 ngày gần nhất).
 
-Repo muốn sửa thẳng trên nhánh chính (không worktree) ⇒ tạo `.claude/allow-direct-edit` trong repo đó.
+AI được dặn sửa trong worktree (skill `flow-worktree`), không bị chặn khi sửa thẳng [8kxf]. Repo muốn AI sửa thẳng trên nhánh chính ⇒ tạo `.claude/allow-direct-edit` trong repo đó (bỏ bước tạo worktree).
 
 ## v6 — sổ chốt, roadmap, ý tưởng
 

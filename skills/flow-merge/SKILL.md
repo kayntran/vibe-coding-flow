@@ -46,7 +46,7 @@ Thiếu bước kiểm không phải lý do đứng lại: test, review, QA là 
 5. **Đóng sổ (sau gộp, trước push):** có `docs/specs/<YYYY-MM-DD>-<slug>/progress.md` ⇒ chạy
    `node ~/.claude/hooks/lib/so-chot.mjs xong <projectRoot> <YYYY-MM-DD>-<slug>` — ghi `Trạng thái: xong` + `Xong ngày` vào
    progress.md (hook thôi nạp sổ này), cất kho các quyết định ✅ phạm vi tính năng (điều `chung` và điều ⚠️ chờ xem lại giữ nguyên) và
-   sinh lại INDEX/ROADMAP. Dùng lệnh này, KHÔNG sửa progress.md bằng Edit: thư mục chính bị hook chặn sửa thẳng. Việc có chạy
+   sinh lại INDEX/ROADMAP. Dùng lệnh này, KHÔNG sửa progress.md bằng Edit (lệnh còn cất kho quyết định và sinh lại INDEX/ROADMAP). Việc có chạy
    `flow-impact` ⇒ cập nhật mục tương ứng trong `docs/feature-map.md` (registry · tính năng tiêu thụ · file test đối chiếu). Rồi commit
    phần đóng sổ, kèm `docs/IDEAS.md` nếu có dòng chưa commit (sổ ý tưởng luôn ghi ở thư mục chính, kể cả khi gọi từ worktree, nên
    nhánh không mang nó).
