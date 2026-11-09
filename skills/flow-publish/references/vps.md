@@ -1,6 +1,6 @@
 # Công thức phát hành: VPS
 
-Hợp khi app chạy trên máy chủ riêng của user (xem thêm `skills/flow-new-app/references/postgres-vps.md` cho phần dựng
+Hợp khi app chạy trên máy chủ riêng của user (xem thêm `skills/flow-system-design/references/noi-luu-postgres-vps.md` cho phần dựng
 máy). Cần: ssh vào máy chủ bằng khoá (không hỏi mật khẩu), Playwright trong dự án. Kit giữ **ít nhất 3 bản gần nhất**
 và KHÔNG tự xoá bản nào — chỉ liệt kê bản cũ để user dọn tay.
 

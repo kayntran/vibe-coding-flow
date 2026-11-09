@@ -12,7 +12,6 @@ Dùng ở bước 5–8 của `flow-system-design`.
 - Giới hạn CPU của Workers
 - Gửi hàng loạt
 - Webhook nhận vào
-- Nguồn
 
 Mở khi có việc chạy nền, gửi đi hàng loạt, gọi dịch vụ ngoài chậm, hoặc việc hẹn giờ. Mọi queue trong thiết kế phải ghi rõ hai thứ:
 **giao tin kiểu gì** (ít nhất một lần ⇒ có thể trùng) và **consumer chống trùng bằng gì**.
@@ -33,7 +32,7 @@ loạt, khuyến mãi) cần san tải; gửi cho nhiều người một lúc.
 | Cách | Hợp | Cần biết |
 |---|---|---|
 | Làm tiếp sau khi trả phản hồi (cùng Worker) | Việc phụ ngắn, mất cũng được | Không thử lại, không đảm bảo xong (chưa xác minh trong research) |
-| **Cloudflare Queues** (mặc định cho việc nền) | Email, SMS, AI, xuất file, xử lý ảnh, webhook gửi đi | Có thử lại, lô tin, hoãn gửi, hàng đợi chết; tin có trần cỡ và thời gian giữ ⇒ tra bảng số liệu có ngày |
+| **Cloudflare Queues** (mặc định cho việc nền) | Email, SMS, AI, xuất file, xử lý ảnh, webhook gửi đi | Có thử lại, lô tin, hoãn gửi, hàng đợi chết; tin có trần cỡ và thời gian giữ ⇒ tra trang giá chính thức lúc thiết kế |
 | Cron Trigger | Việc định kỳ: dọn dữ liệu, đối soát thanh toán, gửi tóm tắt ngày | Số cron có trần theo gói; cron chỉ nên **đẩy việc vào queue**, không tự làm việc nặng |
 | Durable Object (đối tượng có trạng thái riêng, chạy một bản) | Việc phải tuần tự theo một khoá (một phòng chat, một tài khoản), bộ đếm chính xác | Mỗi đối tượng có trần request/giây mềm |
 | App máy tính (Wails) | Việc nặng trên máy user | Goroutine nền + báo tiến trình lên giao diện; app tắt là dừng ⇒ lưu tiến độ để chạy tiếp |
@@ -80,7 +79,7 @@ Queue và webhook giao **ít nhất một lần** ⇒ cùng một tin có thể 
 
 ## Giới hạn CPU của Workers
 
-- Mỗi request Worker có trần CPU; bản Free rất thấp (số cụ thể: tra bảng số liệu có ngày). Băm mật khẩu kiểu Argon2/scrypt, xử lý
+- Mỗi request Worker có trần CPU; bản Free rất thấp (số cụ thể: tra trang giá chính thức lúc thiết kế). Băm mật khẩu kiểu Argon2/scrypt, xử lý
   ảnh, tạo PDF, đọc file Excel lớn có thể vượt (suy luận, chưa đo) ⇒ đẩy ra queue consumer (có trần CPU cao hơn ở gói trả phí) hoặc
   dịch vụ chuyên dụng.
 - Trần số lần gọi ra ngoài (subrequest) mỗi request ⇒ gửi 1.000 email trong một request là sai thiết kế; chia lô qua queue.
@@ -89,7 +88,7 @@ Queue và webhook giao **ít nhất một lần** ⇒ cùng một tin có thể 
 ## Gửi hàng loạt
 
 - Không gửi trong request của người bấm nút. Request chỉ tạo "đợt gửi" + đẩy tin vào queue theo lô.
-- Tôn trọng giới hạn tốc độ của nhà cung cấp email/SMS và trần ngày của gói (gói miễn phí email có trần ngày thấp ⇒ tra bảng số liệu có ngày).
+- Tôn trọng giới hạn tốc độ của nhà cung cấp email/SMS và trần ngày của gói (gói miễn phí email có trần ngày thấp ⇒ tra trang giá chính thức lúc thiết kế).
 - Mỗi người nhận một bản ghi trạng thái (chờ · đã gửi · lỗi · bỏ qua vì đã huỷ nhận) ⇒ gửi lại được phần lỗi, không gửi trùng phần đã xong.
 - Kiểm danh sách huỷ nhận trước khi gửi. Có nút dừng đợt gửi.
 - Ước chi phí đợt gửi trước khi bấm (số người × đơn giá) và chặn nếu vượt trần tháng (N7 ở bước 1).
@@ -100,17 +99,3 @@ Queue và webhook giao **ít nhất một lần** ⇒ cùng một tin có thể 
 - Lưu ID sự kiện đã xử lý, bỏ qua trùng.
 - Stripe thử lại tới vài ngày; Lemon Squeezy chỉ thử lại vài phút ⇒ cần job đối soát định kỳ (cron) so với API nhà cung cấp để bắt sự kiện bị lỡ (suy luận).
 - Đợt dồn đầu tháng (gia hạn hàng loạt) ⇒ queue san tải.
-
-## Nguồn
-
-- Queues giới hạn và giá (thử lại, lô, giữ tin, hoãn, thử lại tính thêm thao tác): https://developers.cloudflare.com/queues/platform/limits/ · https://developers.cloudflare.com/queues/platform/pricing/
-- Trần CPU, subrequest, Cron Triggers: https://developers.cloudflare.com/workers/platform/limits/
-- Durable Objects: https://developers.cloudflare.com/durable-objects/platform/limits/
-- Mọi queue nêu kiểu giao + idempotency; hiệu ứng ra ngoài phải idempotent: https://github.com/pinchen147/system-design-skill
-- Timeout + thử lại có trần + idempotency cho thao tác tính tiền/gửi: https://github.com/codejunkie99/system-design-skill
-- Chờ vài giây ⇒ bất đồng bộ; đợt dồn ⇒ queue: https://github.com/study8677/architecture-copilot (references/signals.md)
-- Việc chậm đẩy khỏi request: https://cheatsheetseries.owasp.org/cheatsheets/Denial_of_Service_Cheat_Sheet.html
-- Webhook (thân thô, trả 2xx nhanh, trùng, thứ tự, queue cho đợt dồn): https://docs.stripe.com/webhooks · idempotency: https://docs.stripe.com/api/idempotent_requests
-- Lemon Squeezy thử lại ngắn: https://docs.lemonsqueezy.com/help/webhooks/webhook-requests
-- Trần ngày email: https://resend.com/pricing
-- Chưa có nguồn trong bộ research: tên/cấu hình dead-letter queue của Cloudflare Queues, Queues giao "ít nhất một lần", làm tiếp sau phản hồi (`waitUntil`) không thử lại, consumer có trần CPU cao hơn, lùi dần + ngẫu nhiên, trần 5 lần.

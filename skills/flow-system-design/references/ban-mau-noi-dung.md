@@ -14,7 +14,7 @@ Dùng ở bước 4 của `flow-system-design`.
 - Điểm vào công khai không cần đăng nhập
 
 Cách dùng: nhận ra loại ⇒ hỏi các câu lúc viết SPEC (`flow-spec`) ⇒ cột "Làm ngay" thành tiêu chí `AC-nn` kèm bài kiểm ⇒ "Chừa chỗ"
-vào mục kiến trúc của plan ⇒ "Chưa làm" vào lộ trình theo ngưỡng. Giá và giới hạn gói: tra bảng số liệu có ngày, không ghi ở đây.
+vào mục kiến trúc của plan ⇒ "Chưa làm" vào lộ trình theo ngưỡng. Giá và giới hạn gói: tra trang giá chính thức lúc thiết kế, không ghi ở đây.
 
 ## Tải file/ảnh lên
 
@@ -29,7 +29,7 @@ Hỏi user (lúc viết SPEC):
 | Mặt | Làm ngay | Chừa chỗ | Chưa làm (cần khi…) |
 |---|---|---|---|
 | Lạm dụng/spam | Chỉ người đã đăng nhập mới xin được presigned URL (link tải lên có chữ ký, hạn vài phút) của R2; khoá Content-Type khi ký; allow-list đuôi file; sau khi tải lên đọc byte đầu (chữ ký file thật), sai loại ⇒ xoá object; rate limit (giới hạn số lần) xin link theo người dùng | Cột `trang_thai` (cho_kiem / da_kiem / bi_chan) trên bảng file để sau cắm bước quét mã độc | Quét virus/ảnh nhạy cảm tự động — khi file được người khác tải về, hoặc có báo cáo vi phạm đầu tiên |
-| Chi phí | Trần dung lượng mỗi người tính ở server; job dọn object đã ký mà không bấm xác nhận; hiển thị bản thu nhỏ, không phục vụ ảnh gốc ở danh sách | Cột `kich_thuoc` + tổng theo người để đổi quota theo gói | Biến đổi ảnh nhiều cỡ/CDN ảnh — khi băng thông ảnh thành khoản lớn nhất hoá đơn (R2 không tính phí tải ra, Supabase Storage có tính — tra bảng số liệu có ngày) |
+| Chi phí | Trần dung lượng mỗi người tính ở server; job dọn object đã ký mà không bấm xác nhận; hiển thị bản thu nhỏ, không phục vụ ảnh gốc ở danh sách | Cột `kich_thuoc` + tổng theo người để đổi quota theo gói | Biến đổi ảnh nhiều cỡ/CDN ảnh — khi băng thông ảnh thành khoản lớn nhất hoá đơn (R2 không tính phí tải ra, Supabase Storage có tính — tra trang giá chính thức lúc thiết kế) |
 | Chịu tải | Trình duyệt đẩy thẳng lên R2, không đi qua Worker (Worker có trần bộ nhớ, file lớn sẽ vỡ); bước "xác nhận" đo cỡ thật của object, quá cỡ ⇒ xoá | Xử lý sau tải (thu nhỏ, kiểm) đặt trong hàm riêng chạy qua Queue | Tải nhiều phần (multipart) — khi file thường trên 100 MB (kinh nghiệm, không phải số đo) |
 | Dữ liệu (riêng tư, xoá, sao lưu) | Key object do app sinh (UUID), không dùng tên gốc; tên gốc làm sạch rồi lưu cột riêng; bucket không công khai, tải về qua kiểm quyền + link ký hạn ngắn; mã hoá lại ảnh để bỏ EXIF (có toạ độ GPS) | Bảng `tep` có `chu_so_huu`, `xoa_luc` để xoá theo tài khoản | Sao lưu R2 sang nơi thứ hai (`flow-backup`) — khi file là thứ người dùng không tạo lại được (hợp đồng, hồ sơ) |
 | Theo dõi sự cố | Log mỗi lần tải: ai, cỡ, loại, kết quả kiểm; không log URL đã ký | — | Cảnh báo dung lượng tăng bất thường — khi có trên 1.000 người tải (kinh nghiệm, không phải số đo) |
@@ -43,8 +43,6 @@ Hay sai:
 - Tin `Content-Type` trình duyệt gửi; dùng tên file gốc làm key (lộ tên, đè file người khác, tên kiểu `../`).
 - Để bucket công khai "cho dễ hiện ảnh" ⇒ ai có link là xem được hồ sơ riêng.
 - Đẩy file qua Worker để "kiểm cho chắc" ⇒ file lớn làm Worker vượt trần bộ nhớ.
-
-Nguồn: https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html · https://developers.cloudflare.com/r2/api/s3/presigned-urls/ · https://cheatsheetseries.owasp.org/cheatsheets/Denial_of_Service_Cheat_Sheet.html
 
 ## Bình luận/đánh giá
 
@@ -74,8 +72,6 @@ Hay sai:
 - Tính AVG trên cả bảng mỗi lần mở trang sản phẩm.
 - Cho viết markdown/HTML mà không làm sạch đầu ra.
 
-Nguồn: https://github.com/OWASP/ASVS/blob/master/5.0/en/0x11-V2-Validation-and-Business-Logic.md · https://use-the-index-luke.com/no-offset · https://api-security.owasp.org/editions/2023/en/0x11-t10 · https://supabase.com/docs/guides/database/postgres/row-level-security
-
 ## Chat thời gian thực
 
 Nhận ra khi: "nhắn tin", "chat", "hộp thư", "thấy tin ngay không cần tải lại", "đang gõ…", "phòng chat nhóm", "hỗ trợ trực tuyến".
@@ -89,7 +85,7 @@ Hỏi user (lúc viết SPEC):
 | Mặt | Làm ngay | Chừa chỗ | Chưa làm (cần khi…) |
 |---|---|---|---|
 | Lạm dụng/spam | Kiểm quyền thành viên phòng ở server TRƯỚC khi nhận kết nối WebSocket (kết nối hai chiều mở liên tục); rate limit số tin theo người; giới hạn cỡ tin; luật người lạ theo SPEC | Bảng `thanh_vien_phong` có vai trò; quan hệ chặn dùng chung với tính năng chặn | Lọc nội dung tự động — khi có báo vi phạm đầu tiên |
-| Chi phí | Webapp Cloudflare: Durable Objects (mỗi phòng một "đối tượng" chạy ở một chỗ, giữ kết nối và trạng thái), dùng chế độ ngủ của WebSocket để phòng im không tốn thời gian chạy; Supabase Realtime tính theo kết nối đồng thời và số tin — tra bảng số liệu có ngày; "đang gõ" gộp, tối đa một lần mỗi vài giây | — | — |
+| Chi phí | Webapp Cloudflare: Durable Objects (mỗi phòng một "đối tượng" chạy ở một chỗ, giữ kết nối và trạng thái), dùng chế độ ngủ của WebSocket để phòng im không tốn thời gian chạy; Supabase Realtime tính theo kết nối đồng thời và số tin — tra trang giá chính thức lúc thiết kế; "đang gõ" gộp, tối đa một lần mỗi vài giây | — | — |
 | Chịu tải | Một Durable Object mỗi phòng, KHÔNG một đối tượng cho cả app (mỗi đối tượng có trần mềm số request/giây); tin được lưu trước rồi mới phát; client tự nối lại với độ trễ tăng dần | Cột `so_thu_tu` tăng dần trong mỗi phòng để client hỏi "các tin sau số N" | Tách phòng rất lớn thành nhiều mảnh — khi có kênh trên 1.000 người (kinh nghiệm, không phải số đo) |
 | Dữ liệu (riêng tư, xoá, sao lưu) | Chỉ thành viên đọc được tin (RLS nếu Supabase, kiểm trong DO nếu Cloudflare); xoá tài khoản ⇒ xoá hoặc ẩn danh tin; ảnh trong chat theo bản mẫu tải file | Cột `thu_hoi_luc`, `xoa_luc`; mã tin do client sinh | Mã hoá đầu-cuối — chỉ khi SPEC hứa "kể cả chúng tôi cũng không đọc được"; hứa rồi thì phải làm từ đầu vì đổi sau gần như viết lại |
 | Theo dõi sự cố | Đếm kết nối đang mở, lỗi gửi; log kết nối bị từ chối quyền | — | Đo độ trễ gửi-nhận — khi trên 1.000 người online cùng lúc (kinh nghiệm, không phải số đo) |
@@ -103,8 +99,6 @@ Hay sai:
 - Chỉ phát qua WebSocket mà không lưu ⇒ rớt mạng là mất tin.
 - Một Durable Object toàn cục cho mọi phòng ⇒ nghẽn khi đông.
 - Kiểm quyền vào phòng ở giao diện, server nhận mọi kết nối.
-
-Nguồn: https://developers.cloudflare.com/durable-objects/platform/limits/ · https://developers.cloudflare.com/durable-objects/platform/pricing/ · https://supabase.com/pricing · https://supabase.com/docs/guides/database/postgres/row-level-security
 
 ## Bài đăng/feed
 
@@ -133,8 +127,6 @@ Hay sai:
 - Dựng "đẩy khi ghi" cùng hàng đợi ngay từ đầu cho app vài trăm người.
 - Đếm `COUNT(*)` tổng số bài mỗi lần mở feed.
 
-Nguồn: https://use-the-index-luke.com/no-offset · https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html
-
 ## Theo dõi/chặn/ẩn/đề cập
 
 Nhận ra khi: "theo dõi", "follow", "kết bạn", "chặn người này", "ẩn bài", "tắt tiếng", "@tên", "nhắc tên ai đó".
@@ -161,8 +153,6 @@ Hay sai:
 - Chặn chỉ ẩn ở giao diện; API vẫn trả dữ liệu.
 - Áp chặn ở feed nhưng quên thông báo, tìm kiếm hoặc chat.
 - Bóc @ không giới hạn ⇒ một bài gửi hàng trăm thông báo rác.
-
-Nguồn: https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html · https://api-security.owasp.org/editions/2023/en/0x11-t10 (phần chặn và @ là kiểu hỏng thường gặp, chưa có nguồn chuẩn riêng)
 
 ## Báo cáo vi phạm/kiểm duyệt
 
@@ -191,8 +181,6 @@ Hay sai:
 - Xoá hẳn nội dung khi gỡ ⇒ mất bằng chứng, không xử lý được khiếu nại.
 - Chỉ ẩn nút kiểm duyệt ở giao diện, API không kiểm vai trò.
 
-Nguồn: https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html · https://api-security.owasp.org/editions/2023/en/0x11-t10 · https://github.com/OWASP/ASVS/blob/master/5.0/en/0x11-V2-Validation-and-Business-Logic.md
-
 ## Trang công khai có SEO/ảnh chia sẻ/link ngắn
 
 Nhận ra khi: "trang hồ sơ công khai", "chia sẻ lên Facebook/Zalo hiện ảnh", "Google tìm thấy", "link ngắn", "trang giới thiệu", "trang bán hàng".
@@ -220,8 +208,6 @@ Hay sai:
 - Dựng ảnh chia sẻ bằng code nặng mỗi lượt xem.
 - Quên `noindex` cho trang riêng; Google đã lưu thì gỡ mất nhiều ngày.
 
-Nguồn: https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html · https://cheatsheetseries.owasp.org/cheatsheets/OAuth2_Cheat_Sheet.html (không chuyển hướng tới URL lấy từ query) · https://github.com/OWASP/ASVS/blob/master/5.0/en/0x23-V14-Data-Protection.md (phần SEO/OG chưa có nguồn chuẩn riêng)
-
 ## Điểm vào công khai không cần đăng nhập
 
 Nhận ra khi: "form liên hệ", "đăng ký nhận tin", "danh sách chờ", "waitlist", "mã mời", "góp ý không cần tài khoản", "đặt lịch tư vấn".
@@ -248,5 +234,3 @@ Hay sai:
 - Gắn widget Turnstile ở giao diện nhưng server không xác minh token.
 - Gửi email "Cảm ơn bạn" tới mọi địa chỉ nhập vào form.
 - Kiểm mã mời rồi mới đánh dấu đã dùng bằng hai câu riêng ⇒ một mã dùng được hai lần.
-
-Nguồn: https://developers.cloudflare.com/turnstile/plans/ · https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/ · https://cheatsheetseries.owasp.org/cheatsheets/Denial_of_Service_Cheat_Sheet.html (CAPTCHA chống lạm dụng chức năng, không chống DoS) · https://api-security.owasp.org/editions/2023/en/0x11-t10 · https://www.twilio.com/docs/verify/preventing-toll-fraud

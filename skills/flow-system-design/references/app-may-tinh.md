@@ -15,7 +15,6 @@ Dùng ở bước 5–8 của `flow-system-design`.
 - Báo crash
 - Khoá bí mật
 - Extension Chrome MV3
-- Nguồn
 
 ## Khác webapp ở đâu
 
@@ -88,7 +87,6 @@ Bản cũ vẫn chạy nhiều tuần sau khi phát hành bản mới ⇒ đổi
 
 - Đường dẫn: dùng `filepath.Join`, không ghép chuỗi bằng dấu phân cách cố định.
 - Kiểm trên cả 3 trước khi phát hành (`flow-qa`); khác biệt hay gặp nhất: font, phím tắt (Ctrl vs Cmd), quyền thư mục (kinh nghiệm).
-- Nguồn bảng: kinh nghiệm, chưa đối chiếu docs Wails.
 
 ## Quyền hệ điều hành
 
@@ -117,13 +115,3 @@ Bản cũ vẫn chạy nhiều tuần sau khi phát hành bản mới ⇒ đổi
 - Khoá dịch vụ trả phí ở server; extension chỉ gọi server của mình, server có rate limit theo người dùng.
 - Bản cũ tồn tại lâu (cửa hàng duyệt chậm, người dùng tắt cập nhật) ⇒ áp mục "Phiên bản tối thiểu được hỗ trợ" ở trên.
 - Quyền khai trong manifest: chỉ xin cái dùng (quyền tối thiểu — trang Chrome đã đọc không nói mục này, kinh nghiệm).
-
-## Nguồn
-
-- https://v3.wails.io/guides/updater
-- https://v3.wails.io/tutorials/04-self-update-a-wails-app/
-- https://pkg.go.dev/github.com/creativeprojects/go-selfupdate
-- https://developer.chrome.com/docs/extensions/develop/migrate/improve-security
-- https://docs.stripe.com/api/idempotent_requests (khuôn nhận lại thay đổi idempotent)
-- Chưa có nguồn trong bộ nghiên cứu: SQLite WAL/thư viện Go, offline-first, ghi sau thắng/gộp theo trường/CRDT, ký code
-  Windows, khác biệt 3 hệ điều hành, quyền hệ điều hành, báo crash, kho khoá hệ điều hành, quyền tối thiểu extension.

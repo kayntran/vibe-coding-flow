@@ -10,7 +10,7 @@ Dùng ở bước 4 của `flow-system-design` (bản mẫu theo loại tính n�
 - Thông báo trong app và tuỳ chọn nhận
 - Gọi dịch vụ ngoài trả phí (bản đồ, thời tiết, OCR…)
 
-Số mặc định trong bảng (5 lần, 10 phút, 90 ngày…) là kinh nghiệm, không phải số đo — chỉnh theo app. Giá mỗi email/SMS, trần ngày của gói: tra bảng số liệu có ngày.
+Số mặc định trong bảng (5 lần, 10 phút, 90 ngày…) là kinh nghiệm, không phải số đo — chỉnh theo app. Giá mỗi email/SMS, trần ngày của gói: tra trang giá chính thức lúc thiết kế.
 Điểm chung cả nhóm: mỗi lần gửi là một khoản tiền hoặc một lần làm phiền người nhận ⇒ mọi chỗ người ngoài bấm được mà gây gửi đi đều phải có giới hạn ở server.
 
 ## Email giao dịch
@@ -37,8 +37,6 @@ Hay sai:
 - Gửi thư ngay trong request đăng ký ⇒ nhà cung cấp chậm hoặc lỗi là đăng ký lỗi theo.
 - Dùng gói miễn phí tới lúc ra mắt; ngày đông nhất thư xác nhận ngừng đi mà không ai biết.
 
-Nguồn: https://cheatsheetseries.owasp.org/cheatsheets/Denial_of_Service_Cheat_Sheet.html · https://docs.stripe.com/api/idempotent_requests (mẫu khoá chống trùng) · https://developers.cloudflare.com/queues/platform/limits/ · https://resend.com/pricing (SPF/DKIM/DMARC chưa có nguồn trong nghiên cứu)
-
 ## Email marketing, bản tin và huỷ đăng ký
 Nhận ra khi: "gửi bản tin", "newsletter", "email khuyến mãi", "gửi hàng loạt cho khách", "chiến dịch email".
 
@@ -62,8 +60,6 @@ Bài kiểm bắt buộc:
 Hay sai:
 - Gửi quảng cáo cho mọi tài khoản vì "đã đăng ký app là đồng ý".
 - Link huỷ dạng `?email=a@b.com` ⇒ ai cũng huỷ hộ người khác được.
-
-Nguồn: chưa có nguồn chính thức trong nghiên cứu (luật thư quảng cáo như CAN-SPAM, GDPR về đồng ý chưa tra) — cả mục là suy luận; nhắc user kiểm luật nơi bán trước khi gửi.
 
 ## SMS và mã OTP
 Nhận ra khi: "gửi mã qua SMS", "OTP", "xác minh số điện thoại", "đăng nhập bằng số điện thoại".
@@ -90,8 +86,6 @@ Hay sai:
 - Chỉ giới hạn theo số điện thoại ⇒ kẻ bơm dùng hàng nghìn số khác nhau vẫn lọt.
 - Không có trần tiền ⇒ hoá đơn lớn qua một đêm.
 
-Nguồn: https://www.twilio.com/docs/verify/preventing-toll-fraud · https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html · https://api-security.owasp.org/editions/2023/en/0x11-t10
-
 ## Thông báo đẩy (web push)
 Nhận ra khi: "thông báo đẩy", "push notification", "báo lên điện thoại/máy tính kể cả khi đóng app".
 
@@ -114,8 +108,6 @@ Bài kiểm bắt buộc:
 Hay sai:
 - Xin quyền ngay khi vào trang ⇒ người dùng bấm Chặn, app không xin lại được.
 - Coi push là chắc tới (mỗi trình duyệt một hạn mức khác nhau); việc quan trọng (mã, hoá đơn) vẫn phải có email hoặc trong app.
-
-Nguồn: https://developer.mozilla.org/en-US/docs/Web/API/Push_API (khoá gửi VAPID chưa xác minh nguồn)
 
 ## Thông báo trong app và tuỳ chọn nhận
 Nhận ra khi: "chuông thông báo", "thông báo trong app", "cài đặt nhận thông báo", "tắt bớt thông báo".
@@ -141,8 +133,6 @@ Hay sai:
 - Mỗi tính năng tự gửi thẳng email/push ⇒ nút tắt chỉ có tác dụng ở nửa số chỗ; thêm loại thông báo mới thì chạy `flow-impact`.
 - Hỏi số chưa đọc mỗi giây ⇒ đốt lượt đọc DB (D1 bản Free chặn truy vấn khi chạm trần ngày).
 
-Nguồn: https://use-the-index-luke.com/no-offset · https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html (phần tuỳ chọn nhận là suy luận)
-
 ## Gọi dịch vụ ngoài trả phí (bản đồ, thời tiết, OCR…)
 Nhận ra khi: "bản đồ", "thời tiết", "OCR", "đọc chữ trong ảnh", "dịch", "tra cứu mã số thuế", "gọi API của bên X".
 
@@ -167,5 +157,3 @@ Bài kiểm bắt buộc:
 Hay sai:
 - Gọi thẳng từ trình duyệt kèm khoá API ⇒ khoá lộ, người lạ tiêu tiền của bạn (xử lý theo `flow-key-leak`).
 - Không đặt timeout ⇒ dịch vụ ngoài treo kéo cả app treo.
-
-Nguồn: https://api-security.owasp.org/editions/2023/en/0x11-t10 (API4, API10) · https://cheatsheetseries.owasp.org/cheatsheets/Denial_of_Service_Cheat_Sheet.html · https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html

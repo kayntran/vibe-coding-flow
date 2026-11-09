@@ -11,7 +11,6 @@ Dùng ở bước 6 của `flow-system-design`.
 - Phiên bản cho client cũ
 - Kiểm dữ liệu vào và trường được ghi
 - Quyền trên từng đối tượng
-- Nguồn
 
 ## Kiểu API
 
@@ -24,7 +23,7 @@ Dùng ở bước 6 của `flow-system-design`.
 
 - Mỗi endpoint: ai được gọi · đầu vào · đầu ra · lỗi có thể có · có tốn tiền/gửi ra ngoài không (⇒ cần idempotency + giới hạn tần suất).
 - Đặt tên theo danh từ số nhiều: `GET /api/notes`, `POST /api/notes`, `PATCH /api/notes/:id`. Hành động không phải CRUD: `POST /api/notes/:id/summarize`.
-- WebSocket trên Durable Objects: tin đến tính phí theo lô, tin đi không tính ⇒ tra bảng số liệu có ngày trước khi chọn cho tải lớn.
+- WebSocket trên Durable Objects: tin đến tính phí theo lô, tin đi không tính ⇒ tra trang giá chính thức lúc thiết kế trước khi chọn cho tải lớn.
 
 ## Định dạng lỗi thống nhất
 
@@ -106,16 +105,3 @@ Extension Chrome và app máy tính nằm trên máy user, cập nhật chậm h
 - Kiểm cả quyền theo chức năng: endpoint quản trị kiểm vai trò ở máy chủ, không chỉ ẩn nút.
 - Bài kiểm: hai tài khoản A, B; B gọi đọc/sửa/xoá/xuất đối tượng của A ⇒ 404 hoặc 403, dữ liệu A không đổi. Chạy bằng đúng vai trò
   và kết nối như bản thật. Chi tiết kiểm sau khi code ⇒ `flow-security`.
-
-## Nguồn
-
-- OWASP API Top 10 2023 (API1 quyền đối tượng, API3 quyền trên trường, API4 tiêu thụ tài nguyên, API6 luồng nghiệp vụ nhạy cảm): https://api-security.owasp.org/editions/2023/en/0x11-t10
-- IDOR: https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html
-- Mass assignment: https://cheatsheetseries.owasp.org/cheatsheets/Mass_Assignment_Cheat_Sheet.html
-- Idempotency: https://docs.stripe.com/api/idempotent_requests · webhook trùng: https://docs.stripe.com/webhooks
-- Keyset vs offset: https://use-the-index-luke.com/no-offset
-- Rate Limiting binding: https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/ · AI Gateway: https://developers.cloudflare.com/ai-gateway/configuration/rate-limiting/
-- Giới hạn cỡ request, việc nặng cần đăng nhập: https://cheatsheetseries.owasp.org/cheatsheets/Denial_of_Service_Cheat_Sheet.html
-- Phản hồi giống nhau chống dò tài khoản: https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html
-- Extension MV3: https://developer.chrome.com/docs/extensions/develop/migrate/improve-security · DO WebSocket: https://developers.cloudflare.com/durable-objects/platform/limits/
-- Chưa có nguồn trong bộ research: khuôn lỗi JSON cụ thể, header `Retry-After` đi kèm 429 (theo chuẩn HTTP, chưa mở trang), header `X-Client-Version`, bảng chọn SSE/WebSocket/polling.

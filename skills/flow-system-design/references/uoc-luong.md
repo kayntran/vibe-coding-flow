@@ -9,9 +9,8 @@ Dùng ở bước 2–3 của `flow-system-design`.
 - Ngưỡng kinh nghiệm
 - Số độ trễ cần nhớ
 - Uptime đổi ra thời gian ngừng
-- Nguồn
 
-Không ghi giá ở đây. Đơn giá và mức gồm sẵn từng gói ⇒ tra bảng số liệu có ngày của skill.
+Không ghi giá ở đây. Đơn giá và mức gồm sẵn từng gói ⇒ tra trang giá chính thức lúc thiết kế của skill.
 
 ## Bốn hạng quy mô
 
@@ -41,7 +40,7 @@ Ngưỡng dưới đây là kinh nghiệm, không phải số đo; giả định
 | Dung lượng 1 năm | ghi/ngày × byte mỗi bản ghi × 365 × 1,5 | 1,5 = dự phòng index (giả định) |
 | File lưu 1 năm | file tải lên/ngày × cỡ TB × 365 | Tách riêng, lưu R2/Storage, không trong DB |
 | Băng thông | request/giây đỉnh × cỡ phản hồi; tháng = request/tháng × cỡ phản hồi | Ảnh/file tính riêng |
-| Chi phí tháng | Σ (lượng dùng tháng − mức gồm sẵn) × đơn giá, **từng khoản** | Khoản hay đội nhất: AI, SMS, email, lưu file; tra đơn giá trong bảng số liệu có ngày |
+| Chi phí tháng | Σ (lượng dùng tháng − mức gồm sẵn) × đơn giá, **từng khoản** | Khoản hay đội nhất: AI, SMS, email, lưu file; tra đơn giá trong trang giá chính thức lúc thiết kế |
 
 Luôn ghi **phép tính**, không chỉ kết quả, và nguồn mỗi đầu vào: (user nói) · (SPEC) · (giả định).
 
@@ -67,7 +66,7 @@ mỗi ghi 1 hàng ~1 KB + 2 index; mỗi đọc quét ~20 hàng (có index); 2 l
 
 Chi phí tháng: lập bảng 4 khoản (Workers request, D1 hàng đọc/ghi + lưu trữ, AI theo token, email theo số thư) = lượng ở trên trừ
 mức gồm sẵn, nhân đơn giá tra ngày. Kết luận rút ra từ lượng: token AI là khoản lớn nhất và tăng thẳng theo người ⇒ "làm ngay"
-trần lượt AI theo người/ngày; email vượt trần ngày của gói miễn phí ⇒ chọn gói theo bảng số liệu. Tính lại ở 10× người dùng cho mục Chi phí.
+trần lượt AI theo người/ngày; email vượt trần ngày của gói miễn phí ⇒ chọn gói theo trang giá chính thức tra lúc thiết kế. Tính lại ở 10× người dùng cho mục Chi phí.
 
 ## Ngưỡng kinh nghiệm
 
@@ -110,13 +109,3 @@ một lõi CPU ~1.000 request đơn giản/giây.
 | 99,99% | ~52,6 phút | 52,6 | ~4,4 phút |
 
 Mỗi bậc "thêm một số 9" thường đòi thêm một lớp dự phòng và người trực (kinh nghiệm) ⇒ nói với user bằng phút ngừng và tiền, không bằng phần trăm.
-
-## Nguồn
-
-- Tầng quy mô, công thức QPS/đỉnh 2×/dung lượng/băng thông: https://github.com/codejunkie99/system-design-skill
-- 100 TPS, 17 write TPS, đọc:ghi 100:1, đỉnh 2–5×: https://github.com/pinchen147/system-design-skill (HEURISTICS.md)
-- Bảng tín hiệu (CPU 70%, cache 90%, P99, chờ vài giây): https://github.com/study8677/architecture-copilot (references/signals.md)
-- Bậc độ lớn mỗi máy, uptime: https://github.com/proyecto26/system-design-skills/blob/main/skills/back-of-the-envelope/references/numbers-to-remember.md
-- Độ trễ: https://colin-scott.github.io/personal_website/research/interactive_latency.html (số tới năm 2020, đọc từ công thức)
-- D1 tính theo hàng đọc/ghi: https://developers.cloudflare.com/d1/platform/pricing/
-- Ngưỡng 4 hạng (người dùng/ngày, request/giây, 20 request/người), hệ số dự phòng 1,5: kinh nghiệm, chưa có nguồn.

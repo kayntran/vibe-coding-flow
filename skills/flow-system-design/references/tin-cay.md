@@ -12,7 +12,6 @@ Dùng ở bước 8 của `flow-system-design`.
 - Sao lưu và kiểm khôi phục
 - Quay lại bản trước
 - Khi nào CHƯA cần
-- Nguồn
 
 Mục tiêu: mỗi hộp trong sơ đồ có một dòng ở mục "Khi có sự cố" của DESIGN.md — hỏng kiểu gì, người dùng thấy gì, hệ thống làm gì.
 
@@ -98,7 +97,7 @@ Hỏi user: "App ngừng 1 giờ giữa ngày thì bạn mất gì?" → khuyên
 | Đang tăng | 15 phút | 1 giờ | Như trên + đã diễn tập khôi phục |
 | Quy mô lớn | vài phút | dưới 1 giờ | Bản sao ở vùng khác, diễn tập định kỳ |
 
-Bảng trên là kinh nghiệm, không phải số đo; số ngày giữ bản sao lưu mỗi gói: tra bảng số liệu có ngày.
+Bảng trên là kinh nghiệm, không phải số đo; số ngày giữ bản sao lưu mỗi gói: tra trang giá chính thức lúc thiết kế.
 Dữ liệu tiền: nguồn sự thật nằm ở cổng thanh toán, đối soát lại được ⇒ ghi rõ trong DESIGN.md.
 Hỏi user: "Mất dữ liệu của 1 giờ gần nhất có chấp nhận được không?" → khuyên: được, với MVP.
 
@@ -124,15 +123,3 @@ Hỏi user: "Mất dữ liệu của 1 giờ gần nhất có chấp nhận đư
 - Đa vùng, bản sao nóng, chạy hai nơi cùng lúc: tới khi có hợp đồng uptime ≥ 99,95% hoặc quy mô lớn.
 - Circuit breaker riêng: khi chưa có dịch vụ ngoài nào nhận hàng chục request/giây.
 - Diễn tập phá hỏng có chủ đích (chaos testing): không ở prototype/MVP; diễn tập khôi phục sao lưu thì CÓ.
-
-## Nguồn
-
-- https://developers.cloudflare.com/d1/reference/time-travel/
-- https://supabase.com/pricing
-- https://cheatsheetseries.owasp.org/cheatsheets/Denial_of_Service_Cheat_Sheet.html
-- https://api-security.owasp.org/editions/2023/en/0x11-t10
-- https://docs.stripe.com/api/idempotent_requests
-- https://github.com/pinchen147/system-design-skill (kiểm khôi phục, đường khôi phục khớp mục tiêu, thứ tự deploy khi đổi schema)
-- https://github.com/codejunkie99/system-design-skill (timeout + retry có trần cho việc tính tiền/gửi)
-- https://github.com/study8677/architecture-copilot (uptime tăng bậc thì loại điểm chết đơn lẻ)
-- Chưa có nguồn trong bộ nghiên cứu: circuit breaker, mức SLO/RPO/RTO theo hạng, khôi phục theo thời điểm của Supabase.

@@ -11,7 +11,7 @@ Dùng ở bước 4 của `flow-system-design` (bản mẫu theo loại tính n�
 - Khoá bản quyền cho app máy tính và extension trả phí
 - Marketplace chia tiền cho người bán (mặc định để ngoài phạm vi)
 
-Số mặc định trong bảng (14 ngày, 3 máy…) là kinh nghiệm, không phải số đo — chỉnh theo app. Phí cổng thanh toán: tra bảng số liệu có ngày.
+Số mặc định trong bảng (14 ngày, 3 máy…) là kinh nghiệm, không phải số đo — chỉnh theo app. Phí cổng thanh toán: tra trang giá chính thức lúc thiết kế.
 Luật chung cả nhóm: **cổng thanh toán là nguồn sự thật**, app chỉ mở quyền theo webhook đã kiểm chữ ký + đối soát; không bao giờ theo trang "thanh toán thành công" hay dữ liệu từ trình duyệt.
 
 ## Thanh toán một lần
@@ -39,8 +39,6 @@ Hay sai:
 - Mở hàng khi trình duyệt quay về trang "success".
 - Parse JSON rồi mới kiểm chữ ký ⇒ chữ ký luôn sai, rồi "tạm tắt kiểm cho chạy".
 
-Nguồn: https://docs.stripe.com/webhooks · https://docs.stripe.com/api/idempotent_requests · https://docs.lemonsqueezy.com/help/webhooks/signing-requests · https://docs.lemonsqueezy.com/help/webhooks/webhook-requests (merchant of record và trang Stripe Checkout fulfillment chưa xác minh)
-
 ## Gói định kỳ
 Nhận ra khi: "gói tháng", "subscription", "bản Pro", "trả theo năm", "gia hạn tự động".
 
@@ -63,8 +61,6 @@ Bài kiểm bắt buộc:
 Hay sai:
 - `if (user.plan === 'pro')` rải khắp code ⇒ thêm gói mới là sót chỗ (thêm gói thì chạy `flow-impact`).
 - Sắp thứ tự webhook theo thời điểm tạo.
-
-Nguồn: https://docs.stripe.com/billing/subscriptions/webhooks · https://docs.stripe.com/webhooks · https://github.com/wendelandrady/production-saas-readiness (thứ cấp)
 
 ## Dùng thử, nâng/hạ gói, huỷ, hoàn tiền, tranh chấp
 Nhận ra khi: "dùng thử 7 ngày", "nâng cấp", "hạ gói", "huỷ gói", "hoàn tiền", "chargeback", "khách khiếu nại với ngân hàng".
@@ -90,8 +86,6 @@ Hay sai:
 - Tự tính tiền chênh nâng/hạ gói trong code ⇒ lệch với hoá đơn của cổng.
 - Bỏ qua event hoàn tiền/tranh chấp ⇒ khách lấy lại tiền mà vẫn giữ quyền.
 
-Nguồn: https://docs.stripe.com/billing/subscriptions/webhooks · https://docs.stripe.com/webhooks
-
 ## Điểm thưởng và mã giảm giá
 Nhận ra khi: "mã giảm giá", "coupon", "voucher", "tích điểm", "đổi điểm lấy quà".
 
@@ -114,8 +108,6 @@ Bài kiểm bắt buộc:
 Hay sai:
 - Kiểm "còn lượt" ở một bước rồi trừ ở bước khác ⇒ chạy đua, mã bị dùng vượt.
 - Tính giá sau giảm ở trình duyệt.
-
-Nguồn: https://api-security.owasp.org/editions/2023/en/0x11-t10 (API6) · https://github.com/OWASP/ASVS/blob/master/5.0/en/0x11-V2-Validation-and-Business-Logic.md (2.3.3, 2.3.4)
 
 ## Giới thiệu bạn bè (referral)
 Nhận ra khi: "mời bạn nhận thưởng", "giới thiệu bạn bè", "mã giới thiệu", "affiliate".
@@ -140,8 +132,6 @@ Bài kiểm bắt buộc:
 Hay sai:
 - Thưởng ngay khi đăng ký ⇒ bot tạo hàng nghìn tài khoản.
 - Trả hoa hồng bằng tiền mặt tự chuyển khoản ⇒ thành nghĩa vụ trả tiền và thuế; muốn affiliate thì dùng chương trình có sẵn của cổng thanh toán (suy luận).
-
-Nguồn: https://api-security.owasp.org/editions/2023/en/0x11-t10 (API6 — khuyến mãi bị lạm dụng) · chưa có nguồn riêng cho referral, phần còn lại là suy luận
 
 ## Khoá bản quyền cho app máy tính và extension trả phí
 Nhận ra khi: "license key", "kích hoạt bản quyền", "bán app máy tính", "extension trả phí", "giới hạn số máy".
@@ -168,8 +158,6 @@ Hay sai:
 - So khoá với một chuỗi cố định trong app, hoặc nhúng khoá bí mật API vào app.
 - Đòi có mạng mỗi lần mở ⇒ server sập là mọi khách đã trả tiền mất app.
 
-Nguồn: https://v3.wails.io/guides/updater (mẫu ký Ed25519 + khoá công khai nhúng, chỉ qua kết quả tìm kiếm) · https://developer.chrome.com/docs/extensions/develop/migrate/improve-security · chưa có nguồn riêng cho khoá bản quyền
-
 ## Marketplace chia tiền cho người bán (mặc định để ngoài phạm vi)
 Nhận ra khi: "người bán đăng hàng", "chia tiền cho người bán", "thu hộ", "hoa hồng sàn", "Stripe Connect".
 
@@ -195,5 +183,3 @@ Bài kiểm bắt buộc:
 Hay sai:
 - Thu tiền vào tài khoản của mình rồi chuyển khoản tay cho người bán.
 - Sửa số dư người bán bằng một câu UPDATE thay vì thêm bút toán.
-
-Nguồn: chưa có nguồn chính thức trong nghiên cứu (chỉ có cảnh báo của researcher) · https://docs.stripe.com/webhooks (đối soát, tranh chấp)

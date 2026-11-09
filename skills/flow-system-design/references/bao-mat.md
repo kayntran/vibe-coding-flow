@@ -14,7 +14,6 @@ Dùng ở bước 8 của `flow-system-design`.
 - OWASP Top 10 2025 thành câu hỏi thiết kế
 - OWASP API Top 10 2023 thành câu hỏi thiết kế
 - Khi nào CHƯA cần
-- Nguồn
 
 ## Phạm vi
 
@@ -131,20 +130,3 @@ Mỗi luồng chính đi một lượt 6 câu, ghi mối đe doạ có thật v�
 - Bảng quyền tuỳ biến, quyền theo thuộc tính: tới khi có khách trả tiền đòi.
 - DB riêng cho từng khách: tới khi hợp đồng đòi hoặc một khách quá lớn so với phần còn lại.
 - Tường lửa ứng dụng tự cấu hình chi tiết: Cloudflare mặc định + rate limit là đủ ở MVP (kinh nghiệm).
-
-## Nguồn
-
-- https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html
-- https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
-- https://developers.google.com/identity/gsi/web/guides/verify-google-id-token
-- https://cheatsheetseries.owasp.org/cheatsheets/Multi_Tenant_Security_Cheat_Sheet.html
-- https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html
-- https://cheatsheetseries.owasp.org/cheatsheets/Mass_Assignment_Cheat_Sheet.html
-- https://supabase.com/docs/guides/database/postgres/row-level-security
-- https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html
-- https://github.com/OWASP/ASVS/blob/master/5.0/en/0x23-V14-Data-Protection.md
-- https://top10.owasp.org/2025
-- https://api-security.owasp.org/editions/2023/en/0x11-t10
-- https://developer.chrome.com/docs/extensions/develop/migrate/improve-security
-- Chưa có nguồn trong bộ nghiên cứu: STRIDE, Better Auth trên Workers, RBAC theo tổ chức (chỉ có checklist cộng đồng
-  https://github.com/wendelandrady/production-saas-readiness).

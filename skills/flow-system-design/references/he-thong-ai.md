@@ -13,7 +13,6 @@ Dùng ở bước 4–8 của `flow-system-design`.
 - Agent hành động thay người dùng
 - OWASP LLM Top 10 2025 thành luật thiết kế
 - Khi nào CHƯA cần
-- Nguồn
 
 AI là khoản tiền đội nhanh nhất và là điểm vào người lạ lợi dụng được. Mọi luật dưới đây phục vụ ba câu: ai trả tiền mỗi lần
 gọi, khi model hỏng thì người dùng thấy gì, model có làm được việc gì nguy hiểm không.
@@ -62,7 +61,7 @@ Mọi lời gọi model đi qua **một chỗ** — không gọi SDK nhà cung c
 - Có nút **Dừng**; người dùng đóng tab/huỷ ⇒ ngắt lời gọi tới nhà cung cấp để không trả tiền phần không ai đọc.
 - Đếm token của phần đã stream cả khi bị huỷ.
 - Việc chạy quá lâu cho một request (tạo báo cáo dài) ⇒ chuyển sang việc nền + báo khi xong, không giữ kết nối.
-- Workers: kết nối dài tính theo thời gian chạy, xem giới hạn CPU/thời gian trong bảng số liệu có ngày.
+- Workers: kết nối dài tính theo thời gian chạy, xem giới hạn CPU/thời gian trong trang giá chính thức lúc thiết kế.
 
 ## Prompt: phiên bản và eval
 
@@ -108,14 +107,3 @@ Agent (AI được gọi công cụ: gửi email, sửa dữ liệu, mua hàng) 
 - Tự host model: tới khi có lý do riêng tư/hợp đồng hoặc khối lượng đủ lớn để rẻ hơn — kèm người vận hành GPU.
 - Fine-tune: tới khi prompt + ví dụ + eval đã hết cải thiện.
 - Vector DB, agent nhiều bước: tới khi SPEC thật cần (xem RAG và Agent ở trên).
-
-## Nguồn
-
-- https://genai.owasp.org/llm-top-10/
-- https://developers.cloudflare.com/ai-gateway/configuration/rate-limiting/
-- https://developers.cloudflare.com/workers-ai/platform/pricing/
-- https://developers.cloudflare.com/workers/platform/limits/
-- https://api-security.owasp.org/editions/2023/en/0x11-t10 (API4 tiêu thụ không giới hạn)
-- https://github.com/wendelandrady/production-saas-readiness (hạn mức thi hành ở server kể cả request đồng thời)
-- Chưa có nguồn trong bộ nghiên cứu: model dự phòng, cache câu trả lời, streaming và huỷ, phiên bản prompt, cỡ bộ eval,
-  cỡ chunk, Vectorize/pgvector, rate limit cụ thể của từng nhà cung cấp AI.

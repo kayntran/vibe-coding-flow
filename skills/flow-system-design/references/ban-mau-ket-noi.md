@@ -15,7 +15,7 @@ Dùng ở bước 4 của `flow-system-design`.
 - Báo lỗi tự động/crash report
 
 Cách dùng: nhận ra loại ⇒ hỏi các câu lúc viết SPEC (`flow-spec`) ⇒ "Làm ngay" thành `AC-nn` kèm bài kiểm ⇒ "Chừa chỗ" vào mục kiến
-trúc của plan ⇒ "Chưa làm" vào lộ trình theo ngưỡng. Giá và giới hạn gói: tra bảng số liệu có ngày, không ghi ở đây.
+trúc của plan ⇒ "Chưa làm" vào lộ trình theo ngưỡng. Giá và giới hạn gói: tra trang giá chính thức lúc thiết kế, không ghi ở đây.
 
 ## API cho bên ngoài gọi
 
@@ -44,8 +44,6 @@ Hay sai:
 - API trả nguyên hàng DB ⇒ lộ trường nội bộ, khó đổi schema.
 - Không có tiền tố phiên bản ⇒ đổi gì cũng phá tích hợp của khách.
 
-Nguồn: https://api-security.owasp.org/editions/2023/en/0x11-t10 · https://docs.stripe.com/api/idempotent_requests · https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/ · https://cheatsheetseries.owasp.org/cheatsheets/Mass_Assignment_Cheat_Sheet.html · https://github.com/wendelandrady/production-saas-readiness
-
 ## Nhận webhook
 
 Nhận ra khi: "Stripe/Lemon Squeezy báo về", "thanh toán xong thì…", "webhook", "dịch vụ kia gọi lại", "callback".
@@ -72,8 +70,6 @@ Hay sai:
 - Làm việc nặng trước khi trả 200 ⇒ bên kia hết giờ chờ, gửi lại ⇒ xử lý trùng.
 - Tin trang chuyển hướng "Thanh toán thành công" thay cho webhook ⇒ người dùng đóng tab là mất đơn.
 
-Nguồn: https://docs.stripe.com/webhooks · https://docs.lemonsqueezy.com/help/webhooks/signing-requests · https://docs.lemonsqueezy.com/help/webhooks/webhook-requests
-
 ## Gửi webhook ra ngoài
 
 Nhận ra khi: "báo sang hệ thống của khách khi có đơn", "khách nhập URL nhận thông báo", "tích hợp Slack/Discord", "gọi sang hệ thống khác khi…".
@@ -99,8 +95,6 @@ Hay sai:
 - Chỉ kiểm URL lúc khách lưu ⇒ tên miền đổi IP sau đó là lọt.
 - Gửi đồng bộ ngay trong request của người dùng ⇒ hệ thống khách chậm làm app mình chậm.
 - Không ký tin ⇒ khách không phân biệt được tin thật và tin giả.
-
-Nguồn: https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html · https://docs.stripe.com/webhooks (mẫu ký, thử lại, gửi lại thủ công) · https://developers.cloudflare.com/queues/platform/limits/
 
 ## Đồng bộ offline (app máy tính)
 
@@ -129,8 +123,6 @@ Hay sai:
 - Xoá thật không để dấu ⇒ máy khác đồng bộ lên làm bản ghi "sống lại".
 - Tin đồng hồ máy khách để chọn bản thắng ⇒ máy chỉnh giờ sai thắng mãi.
 
-Nguồn: https://docs.stripe.com/api/idempotent_requests (khử trùng bằng mã thay đổi) · https://cheatsheetseries.owasp.org/cheatsheets/Mass_Assignment_Cheat_Sheet.html (phần còn lại là kiểu hỏng thường gặp, chưa có nguồn chuẩn trong nghiên cứu)
-
 ## Tự cập nhật app máy tính
 
 Nhận ra khi: "tự cập nhật", "có bản mới thì báo", "cập nhật trong app", "không phải tải lại file cài", "đẩy bản sửa lỗi cho mọi người".
@@ -143,7 +135,7 @@ Hỏi user (lúc viết SPEC):
 | Mặt | Làm ngay | Chừa chỗ | Chưa làm (cần khi…) |
 |---|---|---|---|
 | Lạm dụng/spam | Ký bản phát hành bằng Ed25519 (chữ ký số): khoá riêng chỉ ở máy build/CI, khoá công khai nhúng trong app; app kiểm chữ ký TRƯỚC khi thay; manifest phiên bản (file mô tả bản mới) cũng được ký; chỉ tải qua HTTPS; macOS phải ký mã + notarize, Windows ký mã để không bị cảnh báo | Trường `phien_ban_toi_thieu` trong manifest | Kênh beta — khi có trên 100 người tự nguyện thử (kinh nghiệm, không phải số đo) |
-| Chi phí | File cài để trên R2 (không tính phí tải ra — tra bảng số liệu có ngày) | — | Bản vá chênh lệch (delta) — khi file cài lớn và người dùng than tải lâu |
+| Chi phí | File cài để trên R2 (không tính phí tải ra — tra trang giá chính thức lúc thiết kế) | — | Bản vá chênh lệch (delta) — khi file cài lớn và người dùng than tải lâu |
 | Chịu tải | App kiểm bản mới lúc mở và mỗi vài giờ, cộng độ lệch ngẫu nhiên để không dồn cùng phút | Trường `ti_le` trong manifest để phát hành dần theo phần trăm | — |
 | Dữ liệu (riêng tư, xoá, sao lưu) | Thay file chạy nguyên khối, giữ bản cũ để tự quay về nếu bản mới không khởi động; migration dữ liệu cục bộ chạy lại nhiều lần vẫn đúng | — | — |
 | Theo dõi sự cố | App gửi phiên bản đang chạy (ẩn danh); đếm lỗi khởi động sau cập nhật | Dừng phát hành bằng cách trỏ manifest về bản cũ (`flow-rollback`) | — |
@@ -157,8 +149,6 @@ Hay sai:
 - Chỉ kiểm checksum đặt cạnh file ⇒ ai chiếm được nơi để file thì thay được cả hai.
 - Để khoá riêng trong repo hoặc trong app.
 - Dự án còn ở Wails v2 mà làm theo hướng dẫn updater của v3 (v2 chưa thấy updater chính thức) ⇒ kiểm phiên bản Wails trong `go.mod` trước.
-
-Nguồn: https://v3.wails.io/guides/updater · https://v3.wails.io/tutorials/04-self-update-a-wails-app/ · https://pkg.go.dev/github.com/creativeprojects/go-selfupdate (hai trang Wails mới thấy qua kết quả tìm kiếm, chưa mở)
 
 ## Extension gọi server
 
@@ -187,8 +177,6 @@ Hay sai:
 - Xin quyền `<all_urls>` "cho tiện" ⇒ store duyệt lâu, người dùng sợ.
 - Tải script từ CDN ⇒ bị store từ chối.
 
-Nguồn: https://developer.chrome.com/docs/extensions/develop/migrate/improve-security · https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html (quyền tối thiểu và kiểm nguồn message: chưa có nguồn chuẩn trong nghiên cứu)
-
 ## Phiên bản API cho client cũ
 
 Nhận ra khi: "đổi API mà extension cũ vẫn chạy", "bản app cũ lỗi sau khi cập nhật server", "bắt người dùng cập nhật", "app máy tính và web dùng chung server".
@@ -214,8 +202,6 @@ Hay sai:
 - Bản đầu không có màn "Cần cập nhật" ⇒ về sau không bao giờ ép được người dùng cũ.
 - Đổi tên trường và deploy server trước khi bản extension mới được store duyệt (duyệt mất vài ngày).
 - Client không gửi phiên bản ⇒ không biết còn bao nhiêu người dùng bản cũ.
-
-Nguồn: https://developer.chrome.com/docs/extensions/develop/migrate/improve-security (mã không tải từ xa ⇒ extension chỉ đổi qua bản mới) · https://github.com/pinchen147/system-design-skill (đổi schema nêu chiều tương thích và thứ tự deploy) · https://v3.wails.io/guides/updater
 
 ## Nhập dữ liệu/kết nối dịch vụ khác qua OAuth
 
@@ -244,8 +230,6 @@ Hay sai:
 - Lưu token thô trong DB.
 - Không xử lý token hết hạn ⇒ nhập lỗi im lặng, người dùng tưởng đã đồng bộ.
 
-Nguồn: https://cheatsheetseries.owasp.org/cheatsheets/OAuth2_Cheat_Sheet.html · https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html
-
 ## Báo lỗi tự động/crash report
 
 Nhận ra khi: "app văng thì gửi báo lỗi", "biết người dùng gặp lỗi gì", "Sentry", "gửi log cho tôi", "extension lỗi trên máy khách".
@@ -271,5 +255,3 @@ Hay sai:
 - Gửi nguyên file log có token, mật khẩu.
 - Không hỏi đồng ý trước khi gửi.
 - Endpoint không giới hạn ⇒ bị spam làm đầy kho log.
-
-Nguồn: https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html · https://github.com/OWASP/ASVS/blob/master/5.0/en/0x23-V14-Data-Protection.md · https://cheatsheetseries.owasp.org/cheatsheets/Denial_of_Service_Cheat_Sheet.html

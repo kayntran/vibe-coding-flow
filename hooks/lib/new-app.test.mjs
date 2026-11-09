@@ -252,7 +252,7 @@ describe('safe-log.ts của mẫu (AC-30)', () => {
 })
 
 describe('công thức nền dữ liệu: nhật ký an toàn + nguồn log (AC-30, AC-48e)', () => {
-  const recipe = (name) => fs.readFileSync(path.join(KIT_DIR, '..', 'skills', 'flow-new-app', 'references', `${name}.md`), 'utf8')
+  const recipe = (name) => fs.readFileSync(path.join(KIT_DIR, '..', 'skills', 'flow-system-design', 'references', `noi-luu-${name}.md`), 'utf8')
   // Nguồn log hợp lệ theo hợp đồng .claude/release.json (PLAN dot4, mục Hợp đồng): logs.source
   const SOURCES = ['workers-observability', 'supabase', 'vps-journald', 'none']
   const loggedSource = (text) => /"logs": \{ "source": "([a-z-]+)", "retentionDays": (\d+) \}/.exec(text)

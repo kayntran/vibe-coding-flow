@@ -1,7 +1,7 @@
 # Công thức: Cloudflare Workers + D1 + Better Auth
 
-Hợp khi: user muốn gọn một nhà Cloudflare, chạy thử trên máy không cần cài thêm. Nguồn: research đợt 3 §1c (docs
-Cloudflare/Better Auth 2026-10). D1 Free: 5 triệu dòng đọc/ngày, 100k dòng ghi/ngày, 5 GB — hết hạn mức thì truy vấn lỗi.
+Hợp khi: user muốn gọn một nhà Cloudflare, chạy thử trên máy không cần cài thêm. Gói miễn phí của D1 hết hạn mức ngày thì
+**truy vấn báo lỗi** (không tự tính thêm tiền) ⇒ nói với user; hạn mức cụ thể tra trang giá lúc chọn.
 
 - **Đăng nhập:** Better Auth (MIT) chạy trong Worker, lưu phiên vào D1. Cookie `HttpOnly; Secure; SameSite=Lax`.
 - **Chặn quyền:** D1 là SQLite, KHÔNG có RLS ⇒ chặn ở code Worker. MỌI route đọc/ghi dữ liệu người dùng đi qua MỘT hàm
@@ -17,9 +17,9 @@ Cloudflare/Better Auth 2026-10). D1 Free: 5 triệu dòng đọc/ngày, 100k dò
 - **Nhật ký (log):** Workers Logs KHÔNG che dữ liệu nhạy cảm ⇒ che ở code. Worker ghi log CHỈ qua `safeLog` — chép `src/shared/safe-log.ts`
   của mẫu web (cùng hàm: danh sách trường cho phép, phần còn lại bị che); cấm `console.log` thẳng body, header `Authorization`/`Cookie`,
   email, token. Bật lưu lịch sử trong cấu hình wrangler: `"observability": { "enabled": true }` (wrangler ≥ 3.78.6; `head_sampling_rate`
-  để giảm lượng khi gần trần). Free: 200.000 sự kiện/ngày, giữ 3 ngày (Paid 7 ngày) ⇒ hỏi lỗi cũ hơn thế thì nói thật là log đã hết.
+  để giảm lượng khi gần trần). Log có trần sự kiện/ngày và chỉ giữ vài ngày (số theo gói, tra trang giá) ⇒ hỏi lỗi cũ hơn hạn giữ thì nói thật là log đã hết.
   Đọc lịch sử qua Telemetry Query API (token chỉ-đọc); `wrangler tail` chỉ để xem trực tiếp, không lưu. Ghi nguồn log vào
-  `.claude/release.json`: `"logs": { "source": "workers-observability", "retentionDays": 3 }`. Bài thử: `wrangler dev` tự ghi
+  `.claude/release.json`: `"logs": { "source": "workers-observability", "retentionDays": 3 }` (số ngày gói miễn phí lúc viết; tra lại trang giá, đổi gói thì sửa). Bài thử: `wrangler dev` tự ghi
   `.wrangler/logs/*.log`; máy kiểm `log-secrets` của `flow check` quét các file này và `test-results/` ⇒ thấy thứ giống bí mật là đỏ.
 - **DB thử:** `wrangler dev` (Miniflare, không Docker) + `wrangler d1 migrations apply --local`; mỗi worktree có thư mục
   `.wrangler/state` riêng ⇒ dữ liệu tách sẵn; cổng từ `wt-env.mjs alloc`.

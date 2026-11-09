@@ -16,7 +16,7 @@ Dùng ở bước 4 của `flow-system-design` (bản mẫu theo loại tính n�
 - Xoá tài khoản và xuất dữ liệu
 - API key cá nhân của người dùng
 
-Số mặc định trong bảng (5 lần, 15 phút, 90 ngày…) là kinh nghiệm, không phải số đo — chỉnh theo app. Giá, hạn mức gói: tra bảng số liệu có ngày.
+Số mặc định trong bảng (5 lần, 15 phút, 90 ngày…) là kinh nghiệm, không phải số đo — chỉnh theo app. Giá, hạn mức gói: tra trang giá chính thức lúc thiết kế.
 
 ## Đăng ký và đăng nhập bằng mật khẩu
 Nhận ra khi: "đăng ký", "đăng nhập", "tạo tài khoản", "login", "mỗi người một tài khoản".
@@ -43,8 +43,6 @@ Hay sai:
 - Tự băm bằng SHA-256/MD5 hoặc lưu thô "tạm thời".
 - Chỉ đếm theo IP (kẻ dò xoay hàng nghìn IP vẫn lọt), hoặc khoá cứng vĩnh viễn (kẻ xấu cố tình khoá người khác).
 
-Nguồn: https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html · https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html · https://github.com/OWASP/ASVS/blob/master/5.0/en/0x15-V6-Authentication.md · https://cheatsheetseries.owasp.org/cheatsheets/Credential_Stuffing_Prevention_Cheat_Sheet.html
-
 ## Quên và đổi mật khẩu
 Nhận ra khi: "quên mật khẩu", "đặt lại mật khẩu", "đổi mật khẩu", "reset password".
 
@@ -69,8 +67,6 @@ Hay sai:
 - Báo "email này chưa đăng ký" ⇒ kẻ xấu dò ra danh sách khách hàng.
 - Lưu token thô trong DB, hoặc token đoán được (dựa thời gian, ID tăng dần).
 
-Nguồn: https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html · https://github.com/OWASP/ASVS/blob/master/5.0/en/0x15-V6-Authentication.md · https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
-
 ## Đổi email hoặc số điện thoại
 Nhận ra khi: "đổi email", "đổi số điện thoại", "cập nhật thông tin liên hệ".
 
@@ -94,8 +90,6 @@ Hay sai:
 - Ghi đè email ngay khi gõ ⇒ gõ nhầm là mất tài khoản; kẻ có phiên tạm chiếm luôn.
 - Dùng email làm khoá liên kết giữa các bảng ⇒ đổi email là vỡ dữ liệu.
 
-Nguồn: https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html · https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html (thời gian chờ hoàn tác là suy luận)
-
 ## Đăng nhập không mật khẩu (magic link, mã email, passkey)
 Nhận ra khi: "magic link", "đăng nhập bằng mã gửi email", "không cần mật khẩu", "passkey", "vân tay", "Face ID".
 
@@ -118,8 +112,6 @@ Bài kiểm bắt buộc:
 Hay sai:
 - Mã 6 số không giới hạn lần nhập ⇒ dò hết được trong vài phút.
 - Đăng nhập ngay khi link được mở (GET) ⇒ bộ quét link của hộp thư công ty bấm trước làm hỏng link; nên mở trang có nút xác nhận (suy luận).
-
-Nguồn: https://cheatsheetseries.owasp.org/cheatsheets/Credential_Stuffing_Prevention_Cheat_Sheet.html · https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html (chưa có nguồn riêng cho magic link/passkey)
 
 ## Đăng nhập Google và OAuth
 Nhận ra khi: "đăng nhập bằng Google", "Sign in with Apple/GitHub", "SSO", "OAuth".
@@ -145,8 +137,6 @@ Hay sai:
 - Tìm người dùng theo email trả về từ Google ⇒ chiếm tài khoản qua email chưa xác nhận.
 - Tự viết luồng OAuth thay vì dùng tính năng có sẵn của thư viện đăng nhập.
 
-Nguồn: https://cheatsheetseries.owasp.org/cheatsheets/OAuth2_Cheat_Sheet.html · https://developers.google.com/identity/gsi/web/guides/verify-google-id-token
-
 ## Xác thực 2 lớp
 Nhận ra khi: "2FA", "xác thực hai bước", "mã từ app Authenticator", "bảo mật thêm cho admin".
 
@@ -170,8 +160,6 @@ Hay sai:
 - Bước 2 chỉ chặn ở giao diện, API đã mở ngay sau bước mật khẩu.
 - Không có đường khôi phục ⇒ hỗ trợ tắt 2 lớp bằng tay cho ai gọi điện tới (mở cửa cho lừa đảo).
 
-Nguồn: https://github.com/OWASP/ASVS/blob/master/5.0/en/0x15-V6-Authentication.md · https://cheatsheetseries.owasp.org/cheatsheets/Credential_Stuffing_Prevention_Cheat_Sheet.html · https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html
-
 ## Phiên và thiết bị
 Nhận ra khi: "đăng xuất mọi nơi", "thiết bị đang đăng nhập", "nhớ đăng nhập", "tự đăng xuất".
 
@@ -194,8 +182,6 @@ Bài kiểm bắt buộc:
 Hay sai:
 - Đăng xuất chỉ xoá cookie ở trình duyệt, phiên ở server vẫn sống.
 - Token tự chứa (JWT) sống nhiều ngày, không có cách thu hồi; dùng loại này thì để hạn ngắn + token làm mới thu hồi được (suy luận).
-
-Nguồn: https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html · https://cheatsheetseries.owasp.org/cheatsheets/Credential_Stuffing_Prevention_Cheat_Sheet.html
 
 ## Vai trò và phân quyền
 Nhận ra khi: "admin", "quản lý", "nhân viên chỉ được xem", "phân quyền", "vai trò".
@@ -221,8 +207,6 @@ Hay sai:
 - Chỉ ẩn nút trên giao diện, API vẫn nhận lệnh.
 - Tin ID khó đoán (UUID) thay cho kiểm quyền — link lộ là lộ dữ liệu.
 
-Nguồn: https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html · https://cheatsheetseries.owasp.org/cheatsheets/Mass_Assignment_Cheat_Sheet.html · https://api-security.owasp.org/editions/2023/en/0x11-t10 · https://supabase.com/docs/guides/database/postgres/row-level-security
-
 ## Nhiều công ty dùng chung một app (multi-tenant)
 Nhận ra khi: "nhiều công ty cùng dùng", "mỗi khách một không gian riêng", "workspace", "tổ chức", "SaaS cho doanh nghiệp".
 
@@ -245,8 +229,6 @@ Bài kiểm bắt buộc:
 Hay sai:
 - Thêm `tenant_id` khi đã có dữ liệu ⇒ phải gán lại mọi hàng, dễ sót hàng lộ.
 - Test RLS bằng tài khoản quản trị (bỏ qua RLS) ⇒ test xanh mà bản thật lộ.
-
-Nguồn: https://cheatsheetseries.owasp.org/cheatsheets/Multi_Tenant_Security_Cheat_Sheet.html · https://supabase.com/docs/guides/database/postgres/row-level-security · https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html
 
 ## Mời thành viên và chia sẻ bằng link
 Nhận ra khi: "mời đồng nghiệp", "thêm thành viên", "chia sẻ link", "ai có link đều xem được".
@@ -273,8 +255,6 @@ Hay sai:
 - Link chia sẻ chứa ID tăng dần ⇒ đoán được mọi tài liệu.
 - Token mời không hạn, dùng nhiều lần ⇒ link bị chuyển tiếp là ai cũng vào nhóm.
 
-Nguồn: https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html · https://api-security.owasp.org/editions/2023/en/0x11-t10 · https://github.com/wendelandrady/production-saas-readiness (thứ cấp; phần thư mời bị mượn gửi lừa đảo là suy luận)
-
 ## Xoá tài khoản và xuất dữ liệu
 Nhận ra khi: "xoá tài khoản", "tải dữ liệu của tôi", "GDPR", "quyền riêng tư".
 
@@ -299,8 +279,6 @@ Hay sai:
 - Chỉ đặt `deleted_at`, quên file đã tải lên và bản ở dịch vụ ngoài.
 - Xoá cứng ngay làm vỡ dữ liệu chung của nhóm.
 
-Nguồn: https://gdpr-info.eu/art-17-gdpr/ · https://github.com/OWASP/ASVS/blob/master/5.0/en/0x23-V14-Data-Protection.md · https://community.owasp.org/attacks/CSV_Injection · https://developers.cloudflare.com/d1/reference/time-travel/ (quyền xuất dữ liệu GDPR Điều 20 chưa có nguồn)
-
 ## API key cá nhân của người dùng
 Nhận ra khi: "API key", "token cá nhân", "cho người dùng gọi API", "kết nối Zapier", "gọi từ script".
 
@@ -324,5 +302,3 @@ Bài kiểm bắt buộc:
 Hay sai:
 - Lưu key thô để "hiện lại cho người dùng".
 - Bỏ kiểm quyền theo công ty vì "máy gọi thì tin được"; key lộ thì xử lý theo `flow-key-leak`.
-
-Nguồn: https://github.com/wendelandrady/production-saas-readiness (thứ cấp) · https://api-security.owasp.org/editions/2023/en/0x11-t10 · https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html (tiền tố nhận diện là suy luận)

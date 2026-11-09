@@ -14,10 +14,15 @@ bắt đầu bằng hiểu người dùng (`flow-ux`) rồi 5 bản demo (`flow-
   làm việc với file trên máy) · **extension** (gắn vào Chrome, làm việc trên trang web đang xem). Điện thoại ⇒ chưa có
   mẫu; đề nghị webapp.
 - Tên app (đặt tên thư mục, không dấu) + nơi đặt (mặc định thư mục cha của phiên).
-- App có tài khoản người dùng / dữ liệu riêng từng người ⇒ "dữ liệu để đâu?" [d8dk] — gợi ý theo nhu cầu, đọc
-  `references/` cùng thư mục: Supabase (có trang xem dữ liệu, đăng nhập sẵn — khuyên khi chưa có gì) · Cloudflare D1 (gọn
-  một nhà, chạy thử không cần cài thêm) · Postgres trên VPS (user đã có máy chủ) · dịch vụ user đang dùng. Ghi sổ chốt.
+- App có tài khoản người dùng / dữ liệu riêng từng người ⇒ **hỏi nhu cầu, không hỏi tên dịch vụ** [nyfb]: đã có máy chủ hay dịch vụ
+  dữ liệu nào chưa · có cần trang xem/sửa dữ liệu bằng tay không · mỗi tháng chịu chi bao nhiêu · năm đầu khoảng bao nhiêu người dùng.
   Chỉ dùng trên máy, không tài khoản ⇒ bỏ câu này.
+
+## 1b. Thiết kế rút gọn rồi mới chọn nơi lưu
+Chạy `flow-system-design` bước 1–3 (yêu cầu, hạng quy mô, ước lượng + phí tháng) từ câu trả lời trên, rồi AI tự chọn nơi lưu theo
+công thức `noi-luu-*.md` của skill đó (Supabase · Cloudflare D1 · Postgres trên VPS · dịch vụ user đang dùng). Báo user một câu: chọn gì,
+vì sao (theo nhu cầu vừa nói), phí tháng ước tính kèm "theo bảng giá ngày …". Gợi ý gói miễn phí Supabase ⇒ nói luôn cảnh báo tạm dừng
+và không sao lưu ghi trong công thức. Ghi sổ chốt.
 
 ## 2. Kiểm máy
 `node ~/.claude/hooks/new-app.mjs doctor --type web|desktop|extension` ⇒ thiếu gì thì đưa ĐÚNG lệnh cài nó in (winget/
@@ -30,7 +35,7 @@ mẫu có `data-s`) + bật git + điểm lưu "Tạo app". Lỗi ⇒ nói lại
 diệt virus) + việc user cần làm; không thử lách.
 Mở phiên làm việc trong thư mục app mới (hoặc thêm thư mục vào phiên) trước khi sửa tiếp — mọi sửa sau đó theo
 `flow-worktree`.
-Ngay sau khi tạo: dựng **bộ token tối thiểu** (`~/.claude/skills/flow-ui-design/references/tokens.md`: 3 tầng, đủ 8 nhóm, trạng thái, sáng/tối, độ dày)
+Ngay sau khi tạo: chốt **những thứ khó đổi sau** theo đúng mục loại app trong `references/chot-tu-dau.md` [sww8]. Dựng **bộ token tối thiểu** (`~/.claude/skills/flow-ui-design/references/tokens.md`: 3 tầng, đủ 8 nhóm, trạng thái, sáng/tối, độ dày)
 vào đúng chỗ của stack, màn đầu dùng token đó; chọn xong bản demo thì chốt lại giá trị [zgp6].
 
 ## 4. Chạy và mở
@@ -39,12 +44,10 @@ duyệt; app máy tính: cửa sổ app), chụp màn đầu. `node ~/.claude/ho
 Báo user theo khuôn: app đã mở ở đâu · thấy gì · bước tiếp là chốt luồng và chọn giao diện.
 
 ## 5. Nền dữ liệu
-Áp công thức đã chọn (`references/<tên>.md`) như task đầu của PLAN tính năng đầu tiên: đăng nhập, chặn quyền, kiểm dữ
+Áp công thức nơi lưu đã chọn (`noi-luu-<tên>.md` trong skill `flow-system-design`) như task đầu của PLAN tính năng đầu tiên: đăng nhập, chặn quyền, kiểm dữ
 liệu vào, DB thử cho từng làn, test `P-nn` + lần "tắt chặn quyền". Khoá bí mật chỉ ở biến môi trường (`.env.local` /
 biến của nền tảng), không bao giờ trong code chạy ở trình duyệt; khoá đi qua kho khoá (`khoa.mjs luu` rồi `lay`), không viết giá trị vào code hay câu trả lời.
 
 ## Đọc khi cần
 
-- `references/supabase.md` — khi user chọn Supabase cho nền dữ liệu (bước 1, 5)
-- `references/cloudflare-d1.md` — khi user chọn Cloudflare D1 (bước 1, 5)
-- `references/postgres-vps.md` — khi user chọn Postgres trên VPS (bước 1, 5)
+- `references/chot-tu-dau.md` — ngay sau khi tạo (bước 3), chỉ đọc mục đúng loại app

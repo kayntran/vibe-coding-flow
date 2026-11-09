@@ -10,7 +10,6 @@ Dùng ở bước 6–7 của `flow-system-design`.
 - Cache stampede
 - Cache và quyền
 - Tín hiệu chỉnh cache
-- Nguồn
 
 Mở khi có chỗ đọc nhiều hoặc chậm. Cache (bản sao dữ liệu để đọc nhanh hơn) là **bản dẫn xuất**: mất là dựng lại được từ nguồn gốc; không bao giờ là nơi duy nhất giữ dữ liệu.
 
@@ -33,7 +32,7 @@ do đọc (kinh nghiệm), gọi dịch vụ ngoài chậm/tốn tiền mà kế
 |---|---|---|
 | Trình duyệt (`Cache-Control` trên phản hồi) | File tĩnh có băm trong tên (cache lâu), ảnh | Dữ liệu riêng ⇒ `private` hoặc `no-store`; dữ liệu nhạy cảm ⇒ header chống cache |
 | CDN Cloudflare (cache tại mạng biên) | File tĩnh, trang công khai giống nhau cho mọi người | **Không** cache phản hồi có dữ liệu riêng người dùng; cookie/đăng nhập ⇒ bỏ qua cache |
-| KV (kho khoá-giá trị của Cloudflare) | Cấu hình, cờ tính năng, kết quả tính sẵn đọc nhiều ghi ít | Ghi cùng một khoá bị giới hạn tần suất ⇒ không làm bộ đếm; bản đọc ở nơi khác có thể cũ một lúc sau khi ghi (chưa xác minh khoảng thời gian); trần cụ thể tra bảng số liệu có ngày |
+| KV (kho khoá-giá trị của Cloudflare) | Cấu hình, cờ tính năng, kết quả tính sẵn đọc nhiều ghi ít | Ghi cùng một khoá bị giới hạn tần suất ⇒ không làm bộ đếm; bản đọc ở nơi khác có thể cũ một lúc sau khi ghi (chưa xác minh khoảng thời gian); trần cụ thể tra trang giá chính thức lúc thiết kế |
 | Trong app (biến trong bộ nhớ isolate Worker) | Dữ liệu nhỏ, đổi rất hiếm, dùng trong vài giây | Mỗi isolate một bản, mất bất cứ lúc nào; không dùng cho dữ liệu phải nhất quán |
 | DB (bảng tổng hợp, cột tính sẵn, bản đọc phụ) | Thống kê, số đếm hiển thị, danh sách xếp hạng | Vẫn là SQL, có giao dịch; thường là bước đầu tiên nên thử |
 
@@ -85,13 +84,3 @@ Kinh nghiệm, không phải số đo:
 | Tải DB vọt khi khoá hết hạn | Stampede ⇒ TTL ngẫu nhiên, tính sẵn |
 
 Theo dõi: tỉ lệ trúng, độ trễ có/không cache, số lần xoá khoá — ghi vào mục giám sát của DESIGN.md.
-
-## Nguồn
-
-- Tenant trong mọi khoá cache, kiểm quyền trước khi đọc cache: https://cheatsheetseries.owasp.org/cheatsheets/Multi_Tenant_Security_Cheat_Sheet.html
-- Đọc:ghi ~100:1 mới nghĩ tới cache; cache là bản dẫn xuất: https://github.com/pinchen147/system-design-skill (HEURISTICS.md)
-- Tỉ lệ trúng < 90%, CPU DB 70%: https://github.com/study8677/architecture-copilot (references/signals.md)
-- KV ghi cùng khoá bị giới hạn: https://developers.cloudflare.com/kv/platform/limits/
-- Header chống cache cho dữ liệu nhạy cảm: https://github.com/OWASP/ASVS/blob/master/5.0/en/0x23-V14-Data-Protection.md
-- Cache để giảm việc nặng trong request: https://cheatsheetseries.owasp.org/cheatsheets/Denial_of_Service_Cheat_Sheet.html
-- Chưa có nguồn trong bộ research: cache-aside/write-through, stampede và TTL ngẫu nhiên, KV nhất quán cuối cùng (khoảng trễ), cách CDN Cloudflare xử lý cookie, cache trong bộ nhớ isolate.

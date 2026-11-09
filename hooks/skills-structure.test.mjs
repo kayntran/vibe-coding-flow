@@ -137,8 +137,18 @@ test('bài đo thiết kế hệ thống đủ khuôn: ≥ 5 đề có must, có
     assert.ok(types.length >= 4, `${f}: ít hơn 4 loại`)
     for (const s of types) {
       const name = s.split('\n')[0]
-      for (const must of ['Hỏi user', '| Mặt |', 'Làm ngay', 'Chừa chỗ', 'Chưa làm', 'Bài kiểm bắt buộc', 'Nguồn'])
+      for (const must of ['Hỏi user', '| Mặt |', 'Làm ngay', 'Chừa chỗ', 'Chưa làm', 'Bài kiểm bắt buộc'])
         assert.ok(s.includes(must), `${f} › ${name}: thiếu "${must}"`)
+    }
+  }
+})
+
+test('skill không ghi giá gói hay dòng nguồn (giá đổi liên tục ⇒ tra trang chính thức lúc làm; nguồn tốn token khi AI đọc)', () => {
+  for (const n of ['flow-system-design', 'flow-new-app']) {
+    for (const f of subfiles(n).filter((x) => x.endsWith('.md'))) {
+      const t = fs.readFileSync(path.join(DIR, n, f), 'utf8')
+      assert.doesNotMatch(t, /\$\d[\d.,]*\s*(?:\/|mỗi|tháng|triệu|nghìn|per)/, `${n}/${f}: có giá kiểu $…/tháng — bỏ, tra trang chính thức lúc làm`)
+      assert.doesNotMatch(t, /^(?:## )?Nguồn\b/m, `${n}/${f}: có mục/dòng Nguồn — bỏ để đỡ token`)
     }
   }
 })

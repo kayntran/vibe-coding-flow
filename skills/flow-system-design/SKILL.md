@@ -71,9 +71,10 @@ hành vi app, con số kinh doanh và tiền: số người dùng, ngân sách t
 |---|---|
 | `references/yeu-cau.md` | bước 1, câu hỏi yêu cầu |
 | `references/uoc-luong.md` | bước 2–3, hạng quy mô, công thức |
-| `references/so-lieu.md` | cần giá, giới hạn gói (có ngày tra) |
+| `references/so-lieu.md` | cần giá, giới hạn gói: tra trang chính thức, skill không ghi số |
 | `references/kien-truc.md` | bước 5, kiểu kiến trúc |
 | `references/du-lieu.md` · `references/api.md` | bước 6 |
+| `references/noi-luu-supabase.md` · `references/noi-luu-cloudflare-d1.md` · `references/noi-luu-postgres-vps.md` | chọn nơi lưu (bước 6, app mới), rồi áp công thức đã chọn |
 | `references/cache.md` | đọc nhiều hoặc chậm |
 | `references/bat-dong-bo.md` | việc nền, queue, gửi hàng loạt |
 | `references/tin-cay.md` | bước 8, sự cố, sao lưu, khôi phục |

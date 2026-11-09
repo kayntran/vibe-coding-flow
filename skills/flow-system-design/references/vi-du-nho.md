@@ -21,7 +21,7 @@ Dùng ở bước 1–10 của `flow-system-design`, khi cần xem một DESIGN.
 ## Cách đọc
 
 Chỉ có các mục bắt buộc (M), giữ đúng số mục của mẫu DESIGN.md; app mới thật thì viết thêm các mục còn lại.
-Không có Redis, microservices, staging — vì không con số nào đòi. Giá: không ghi số ở đây, tra bảng số liệu có ngày.
+Không có Redis, microservices, staging — vì không con số nào đòi. Giá: không ghi số ở đây, tra trang giá chính thức lúc thiết kế.
 
 ## Hạng quy mô (M)
 
@@ -57,13 +57,13 @@ trả phí tối thiểu; **SMS là khoản lớn nhất** (~60.000 tin/tháng).
 - Trung bình 40.000 / 86.400 ≈ 0,46 request/giây. 80% dồn vào 12 giờ mở cửa: 32.000 / 43.200 ≈ 0,74/giây; giờ đông ×4 (giả định) ≈ **3/giây**.
 - Đọc:ghi ≈ 20:1 (đa số là xem giờ trống).
 - Hàng ghi/ngày: mỗi lượt ~8 hàng (1 lượt đặt + 3 ô 15 phút + 1 khách + 1 việc SMS + 2 cập nhật trạng thái) × 2 cho index
-  (giả định) × 2.000 ≈ 32.000. Chiếm phần đáng kể trần ghi/ngày của D1 Free (tra bảng số liệu có ngày), mà Free **chặn truy vấn**
+  (giả định) × 2.000 ≈ 32.000. Chiếm phần đáng kể trần ghi/ngày của D1 Free (tra trang giá chính thức lúc thiết kế), mà Free **chặn truy vấn**
   khi chạm trần ⇒ dùng gói trả phí từ ngày đầu.
 - Hàng đọc/ngày: ~20.000 lượt xem giờ × ~50 hàng ≈ 1 triệu.
 - Dung lượng: ~1 KB/lượt × 730.000 lượt/năm ≈ 0,7 GB/năm; dọn ô giờ đã qua hằng đêm ⇒ còn khoảng nửa. Xa trần một DB D1.
 - Băng thông: trang ~150 KB lần đầu (tĩnh, cache ở CDN), API ~2 KB/lần ⇒ không đáng kể.
 - Chi phí tháng: Workers + D1 + Queues trong phần gồm sẵn gói tối thiểu · email (quên mật khẩu, vài trăm/tháng) trong gói miễn phí
-  nhà cung cấp · **SMS 2.000 × 30 = 60.000 tin × giá một tin nội địa** (tra nhà cung cấp ngày viết) ⇒ gấp nhiều lần hạ tầng.
+  nhà cung cấp · **SMS 2.000 × 30 = 60.000 tin × giá một tin nội địa** (tra trang giá chính thức của nhà cung cấp lúc thiết kế, ghi ngày tra) ⇒ gấp nhiều lần hạ tầng.
 
 ## 5. Bản mẫu tính năng đã áp (M)
 
@@ -156,9 +156,3 @@ Mô hình ô giờ và cách tách tiệm khó đảo ngược ⇒ ADR-001.
 
 Tự soát bằng danh sách soát thiết kế: nhận #8 (thêm trần SMS/tiệm), #11 (`UNIQUE` cho `sms_log`); bác #23 cho Queue —
 có lý do: 60.000 tin/tháng cần thử lại tách khỏi request.
-
-Nguồn: https://developers.cloudflare.com/d1/platform/pricing/ · https://developers.cloudflare.com/d1/reference/time-travel/ ·
-https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/ · https://www.twilio.com/docs/verify/preventing-toll-fraud ·
-https://github.com/OWASP/ASVS/blob/master/5.0/en/0x11-V2-Validation-and-Business-Logic.md (2.3.4 chống đặt trùng) ·
-https://cheatsheetseries.owasp.org/cheatsheets/Multi_Tenant_Security_Cheat_Sheet.html · https://docs.stripe.com/api/idempotent_requests.
-Chưa có nguồn: D1 ghi gộp chạy như một giao dịch, Better Auth trên D1, giá SMS nội địa.

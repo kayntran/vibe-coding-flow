@@ -7,7 +7,6 @@ Dùng ở bước 9 của `flow-system-design`, trước khi chốt DESIGN.md.
 - Dấu hiệu làm thừa
 - Đề bài bẫy
 - Thiếu thiết kế: thứ KHÔNG được cắt
-- Nguồn
 
 ## Câu hỏi chặn chung
 
@@ -86,19 +85,3 @@ App nhỏ vẫn phải có, vì để sau là mất tiền, lộ dữ liệu ho�
 | Khoá bí mật ở server | Khoá lộ trong bundle/app là bị dùng ngay | Biến bí mật của nền tảng |
 | Xem lỗi bản thật + quay lại bản trước | Lỗi không ai biết, không lùi được | `flow-publish`, `flow-rollback` |
 | Xoá dữ liệu khi người dùng yêu cầu | Nghĩa vụ pháp lý ở nhiều nơi | Luồng xoá/ẩn danh hoá có sẵn trong mô hình dữ liệu |
-
-## Nguồn
-
-- https://github.com/proyecto26/system-design-skills (eval over-decomposition-trap, thang scale bậc 4–6)
-- https://github.com/pinchen147/system-design-skill (HEURISTICS: ~100 request/giây, ~17 ghi/giây, đọc:ghi 100:1, mọi cơ chế phân tán phải có lý do)
-- https://github.com/study8677/architecture-copilot (signals: shard khi hàng chục–trăm triệu dòng; tách service khi nhiều đội chặn nhau)
-- https://github.com/codejunkie99/system-design-skill (bắt đầu bằng monolith + một DB SQL)
-- https://github.com/wshobson/agents/blob/main/plugins/backend-development/skills/architecture-patterns/SKILL.md (mẫu cần tránh làm mặc định)
-- https://api-security.owasp.org/editions/2023/en/0x11-t10
-- https://www.twilio.com/docs/verify/preventing-toll-fraud
-- https://docs.stripe.com/webhooks
-- https://docs.stripe.com/api/idempotent_requests
-- https://use-the-index-luke.com/no-offset
-- https://gdpr-info.eu/art-17-gdpr/
-- Chưa có nguồn trong bộ nghiên cứu: các ngưỡng "khi nào mới đúng" cho Kafka, Kubernetes, GraphQL, CQRS, event sourcing,
-  search engine, WebSocket (kinh nghiệm).

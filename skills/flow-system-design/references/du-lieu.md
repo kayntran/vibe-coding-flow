@@ -8,13 +8,11 @@ Dùng ở bước 6 của `flow-system-design`.
 - Khoá định danh
 - Index theo truy vấn chính
 - Giao dịch và chống đặt trùng
-- Nguồn gốc và bản dẫn xuất
 - Outbox thay ghi kép
 - Migration tương thích hai chiều
 - Giữ bao lâu, xoá thế nào
 - Sao lưu và kiểm khôi phục
 - Khi nào bản đọc phụ, chia nhỏ
-- Nguồn
 
 ## Chọn nơi lưu
 
@@ -28,7 +26,7 @@ chỉ thêm khi một truy vấn cụ thể không làm được bằng SQL + in
 | **Postgres trên VPS** | Đã có người kỹ thuật vận hành, cần toàn quyền cấu hình, quy mô lớn nơi phí managed đội | Team 1–2 người không code (N8 ở bước 1) | Tự lo sao lưu, vá bảo mật, giám sát, ổ đầy — mỗi thứ là một chỗ sập lúc 2 giờ sáng |
 | SQLite tại máy (app Wails) | Dữ liệu tại máy, offline | Cần chia sẻ nhóm | Sao lưu là việc của app; xem bước 5 trong SKILL.md |
 
-Số cụ thể (trần cỡ DB, hàng đọc/ghi, sao lưu từng gói) ⇒ tra bảng số liệu có ngày.
+Số cụ thể (trần cỡ DB, hàng đọc/ghi, sao lưu từng gói) ⇒ tra trang giá chính thức lúc thiết kế.
 
 ## Mô hình dữ liệu
 
@@ -60,12 +58,6 @@ Số cụ thể (trần cỡ DB, hàng đọc/ghi, sao lưu từng gói) ⇒ tra
 - Tài nguyên có hạn (chỗ ngồi, tồn kho, lượt dùng) ⇒ khoá cấp nghiệp vụ: `UPDATE … SET con_lai = con_lai - 1 WHERE id = ? AND con_lai > 0`
   rồi kiểm số hàng bị đổi; không đọc-rồi-ghi hai bước (hai request đồng thời cùng thấy "còn 1").
 - D1: dùng `batch()` để chạy nhiều câu như một giao dịch; giao dịch kiểu `BEGIN … COMMIT` tương tác chưa xác minh là dùng được — kiểm docs D1 trước khi dựa.
-
-## Nguồn gốc và bản dẫn xuất
-
-- Mỗi nơi lưu ghi rõ là **nguồn gốc** (sự thật, mất là mất hẳn) hay **bản dẫn xuất** (cache, bảng thống kê, chỉ mục tìm kiếm — dựng lại được từ nguồn gốc).
-- Bản dẫn xuất phải có cách dựng lại (job chạy lại từ đầu). Chỉ nguồn gốc cần sao lưu đủ mục tiêu RPO/RTO.
-- Trạng thái thanh toán: một nguồn sự thật duy nhất (bảng quyền của người dùng cập nhật từ webhook), màn hình chỉ đọc từ đó.
 
 ## Outbox thay ghi kép
 
@@ -108,17 +100,3 @@ phải chịu được tin trùng. Chưa cần khi: thao tác phụ mất cũng 
   `withSession()` + bookmark để người vừa ghi đọc lại thấy ngay dữ liệu của mình.
 - Chia nhỏ (shard): bảng hàng chục–trăm triệu hàng, DB vài trăm GB (kinh nghiệm). Trên D1 cách tự nhiên là một DB mỗi tenant khi
   tenant tách bạch (suy luận) — chỉ quyết khi có số đo.
-
-## Nguồn
-
-- Nguồn gốc/dẫn xuất, outbox, migration nêu chiều tương thích + thứ tự triển khai, kiểm khôi phục: https://github.com/pinchen147/system-design-skill
-- D1 giới hạn và giá: https://developers.cloudflare.com/d1/platform/limits/ · https://developers.cloudflare.com/d1/platform/pricing/
-- D1 Time Travel: https://developers.cloudflare.com/d1/reference/time-travel/ · bản đọc phụ: https://developers.cloudflare.com/d1/best-practices/read-replication/
-- Supabase RLS: https://supabase.com/docs/guides/database/postgres/row-level-security · gói: https://supabase.com/pricing
-- Tenant từ danh tính đã xác minh: https://cheatsheetseries.owasp.org/cheatsheets/Multi_Tenant_Security_Cheat_Sheet.html
-- ID khó đoán chỉ là lớp phụ: https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html
-- Giao dịch, khoá cấp nghiệp vụ: https://github.com/OWASP/ASVS/blob/master/5.0/en/0x11-V2-Validation-and-Business-Logic.md
-- Tự xoá dữ liệu hết hạn, không để trong URL: https://github.com/OWASP/ASVS/blob/master/5.0/en/0x23-V14-Data-Protection.md · quyền xoá: https://gdpr-info.eu/art-17-gdpr/
-- Dùng `sub` của Google: https://developers.google.com/identity/gsi/web/guides/verify-google-id-token
-- Ngưỡng replica/shard: https://github.com/study8677/architecture-copilot (references/signals.md)
-- Chưa có nguồn: UUID v7/ULID đỡ phân mảnh index, D1 `batch()` thay giao dịch tương tác, tiền lưu số nguyên, các bước mở rộng → thu gọn chi tiết.

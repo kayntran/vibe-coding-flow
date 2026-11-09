@@ -12,7 +12,6 @@ Dùng ở bước 8 của `flow-system-design`.
 - Phát hành dần, cờ tính năng, quay lại
 - Hạ tầng dạng code
 - Khi nào CHƯA cần
-- Nguồn
 
 Kết quả ghi vào mục "Giám sát" và "Triển khai" của DESIGN.md. Cỡ M chỉ cần dòng nào khác mặc định của dự án.
 
@@ -37,7 +36,7 @@ Log có cấu trúc (mỗi dòng log là một đối tượng JSON có trườn
 | Lỗi | Bao nhiêu thất bại | Tỉ lệ 5xx, tỉ lệ việc nền lỗi, tỉ lệ SMS/email không giao |
 | Độ bão hoà | Còn bao xa trần | Hàng đọc/ghi D1 so với trần ngày, tồn đọng queue, tiền AI đã tiêu so với trần |
 
-Trên Workers/D1, "bão hoà" thường là **trần gói** chứ không phải CPU máy ⇒ đo số đã dùng so với trần (tra bảng số liệu có ngày).
+Trên Workers/D1, "bão hoà" thường là **trần gói** chứ không phải CPU máy ⇒ đo số đã dùng so với trần (tra trang giá chính thức lúc thiết kế).
 
 ## Cảnh báo
 
@@ -105,13 +104,3 @@ IaC (hạ tầng dạng code — mô tả DB, queue, tên miền bằng file tro
 - Hệ thống trace phân tán, bảng điều khiển tự dựng: chưa cần khi có dưới ~3 thành phần chạy riêng; dùng log có sẵn của nền tảng.
 - Trực sự cố theo ca, quy trình sau sự cố dài: một người vận hành ⇒ ghi một dòng "chuyện gì, sửa gì" là đủ.
 - Staging riêng ở prototype; Terraform ở MVP một nhà cung cấp.
-
-## Nguồn
-
-- https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html
-- https://sre.google/sre-book/monitoring-distributed-systems/
-- https://developers.cloudflare.com/ai-gateway/configuration/rate-limiting/
-- https://developers.cloudflare.com/d1/platform/pricing/ (D1 Free chặn khi chạm trần ngày)
-- https://github.com/codejunkie99/system-design-skill (walking skeleton, deploy sớm)
-- Chưa có nguồn trong bộ nghiên cứu: ngưỡng cảnh báo cụ thể, cờ tính năng, phát hành dần, IaC, cảnh báo chi tiêu của
-  từng nhà cung cấp.

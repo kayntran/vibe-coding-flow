@@ -10,7 +10,6 @@ Dùng ở bước 5 của `flow-system-design`.
 - Thang tiến hoá
 - Walking skeleton
 - Quy tắc sơ đồ Mermaid
-- Nguồn
 
 ## Mặc định
 
@@ -24,7 +23,7 @@ cửa đã khai). Khớp `flow-architecture`: ranh giới module ghi ở `docs/a
 |---|---|---|---|
 | Một khối (monolith) | Prototype, một người, một miền | — | Không chia module thì lớn lên thành rối; khó giao việc song song |
 | **Một khối chia module** (mặc định) | MVP tới đang tăng; 1–10 người | Prototype vứt đi sau 2 tuần | Phải giữ kỷ luật ranh giới (`flow-architecture` lo) |
-| Serverless (hàm chạy theo request, nền tảng tự co giãn — Workers) | Tải lên xuống thất thường, không muốn quản máy | — đây là nền mặc định của kit, không phải lựa chọn thêm | Trần CPU/bộ nhớ mỗi request, việc dài phải chạy nền; tra bảng số liệu có ngày |
+| Serverless (hàm chạy theo request, nền tảng tự co giãn — Workers) | Tải lên xuống thất thường, không muốn quản máy | — đây là nền mặc định của kit, không phải lựa chọn thêm | Trần CPU/bộ nhớ mỗi request, việc dài phải chạy nền; tra trang giá chính thức lúc thiết kế |
 | Hướng sự kiện (event-driven — phần này phát tin, phần kia nghe và làm sau) | Việc chậm, gửi đi hàng loạt, gọi dịch vụ ngoài hay lỗi, đợt dồn có thể đoán | Mọi việc xong trong một request dưới vài trăm ms | Khó lần theo lỗi, phải chịu tin trùng và sai thứ tự; dùng từng chỗ (queue), không cả hệ |
 | Microservices (nhiều dịch vụ triển khai riêng) | Nhiều đội chặn nhau khi phát hành; một phần cần co giãn hoặc độ tin cậy khác hẳn | Team dưới ~10 người, chưa có đội trực, chưa đo được điểm nghẽn | Gọi qua mạng thay gọi hàm, giao dịch xuyên dịch vụ, nhiều thứ để sập lúc 2 giờ sáng |
 | App máy tính dữ liệu tại máy (local-first) | Một người một máy, dữ liệu riêng tư, cần chạy offline | Cần chia sẻ nhóm, nhiều thiết bị ngay từ đầu | Đồng bộ và sao lưu là việc của app; bản cũ ở máy user không tự cập nhật |
@@ -95,13 +94,3 @@ Bản mỏng nhất chạy được **từ đầu tới cuối** (màn hình →
 - Mỗi hộp trong sơ đồ có đúng một dòng trong luồng chính đánh số, và ngược lại; lệch ⇒ sửa trước khi đưa ra.
 - Không vẽ thành phần thuộc hạng cao hơn hạng hiện tại; ghi chúng vào lộ trình.
 - Dịch vụ ngoài (thanh toán, email, AI) vẽ viền nét đứt hoặc ghi "(ngoài)" để thấy rõ chỗ có thể chết mà mình không sửa được.
-
-## Nguồn
-
-- Bảng tín hiệu scale, mặc định modular monolith: https://github.com/study8677/architecture-copilot (references/signals.md)
-- Thang tiến hoá, "đa số dừng ở bậc 4–6", dọc trước ngang sau, bẫy over-decomposition: https://github.com/proyecto26/system-design-skills (skills/scaling-evolution/references/scaling-ladder.md, evals/)
-- Monolith + một DB SQL trước, walking skeleton, Mermaid ≤ 12 nút: https://github.com/codejunkie99/system-design-skill
-- Phương án đơn giản nhất trước, cơ chế phân tán phải có con số: https://github.com/pinchen147/system-design-skill
-- Extension MV3 cấm mã từ xa: https://developer.chrome.com/docs/extensions/develop/migrate/improve-security
-- Mẫu cần tránh làm mặc định (Clean/Hexagonal/DDD không bàn chi phí): https://github.com/wshobson/agents/blob/main/plugins/backend-development/skills/architecture-patterns/SKILL.md
-- Bảng serverless/event-driven, local-first vs client-server, ngưỡng "~10 người": suy luận, chưa có nguồn riêng.

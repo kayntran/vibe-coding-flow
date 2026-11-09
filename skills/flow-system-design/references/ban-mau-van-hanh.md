@@ -12,7 +12,7 @@ Dùng ở bước 4 của `flow-system-design`.
 - Đồng ý cookie/analytics/phiên bản điều khoản
 
 Cách dùng: nhận ra loại ⇒ hỏi các câu lúc viết SPEC (`flow-spec`) ⇒ "Làm ngay" thành `AC-nn` kèm bài kiểm ⇒ "Chừa chỗ" vào mục kiến
-trúc của plan ⇒ "Chưa làm" vào lộ trình theo ngưỡng. Giá và giới hạn gói: tra bảng số liệu có ngày, không ghi ở đây.
+trúc của plan ⇒ "Chưa làm" vào lộ trình theo ngưỡng. Giá và giới hạn gói: tra trang giá chính thức lúc thiết kế, không ghi ở đây.
 
 ## Trang quản trị
 
@@ -41,8 +41,6 @@ Hay sai:
 - Đường dẫn "bí mật" kiểu `/admin-xyz123` thay cho kiểm quyền.
 - Nhiều người dùng chung một tài khoản admin ⇒ không biết ai đã làm gì.
 
-Nguồn: https://cheatsheetseries.owasp.org/cheatsheets/Credential_Stuffing_Prevention_Cheat_Sheet.html (MFA bắt đầu từ quản trị viên) · https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html (nhập lại trước thao tác nhạy cảm) · https://api-security.owasp.org/editions/2023/en/0x11-t10 (API5) · https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html · https://supabase.com/docs/guides/database/postgres/row-level-security
-
 ## Nhật ký thao tác (audit log)
 
 Nhận ra khi: "ai đã sửa cái này", "lịch sử hoạt động", "nhật ký", "truy vết", "kiểm toán", "xem nhân viên đã làm gì".
@@ -68,8 +66,6 @@ Hay sai:
 - Ghi nguyên body request vào nhật ký ⇒ lộ mật khẩu, token.
 - Cho app quyền xoá nhật ký "để dọn" ⇒ kẻ chiếm app xoá được dấu vết.
 - Nhật ký không có tenant ⇒ không lọc được cho chủ nhóm, dễ lộ chéo.
-
-Nguồn: https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html · https://cheatsheetseries.owasp.org/cheatsheets/Multi_Tenant_Security_Cheat_Sheet.html
 
 ## Đa ngôn ngữ/múi giờ/tiền tệ
 
@@ -98,8 +94,6 @@ Hay sai:
 - Tiền dùng số thực ⇒ lệch vài đồng khi cộng nhiều món.
 - Chữ viết cứng trong code ⇒ thêm ngôn ngữ phải lục từng file.
 
-Nguồn: chưa có nguồn chuẩn trong nghiên cứu; các mục trên dựa vào kiểu hỏng thường gặp (lệch múi giờ, lệch tiền do số thực, sót chữ chưa dịch).
-
 ## Cài đặt người dùng
 
 Nhận ra khi: "trang cài đặt", "tuỳ chọn", "bật/tắt thông báo", "chế độ tối", "đổi tên hiển thị", "ngôn ngữ của tôi".
@@ -125,8 +119,6 @@ Hay sai:
 - Gán thẳng body request vào bản ghi người dùng.
 - Cho đổi email ngay trong form cài đặt, không xác nhận ⇒ đường chiếm tài khoản.
 - Chỉ lưu cài đặt trong `localStorage` ⇒ đổi máy là mất.
-
-Nguồn: https://cheatsheetseries.owasp.org/cheatsheets/Mass_Assignment_Cheat_Sheet.html · https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html
 
 ## Cờ tính năng/chế độ bảo trì
 
@@ -155,8 +147,6 @@ Hay sai:
 - Bảo trì làm mất bản nháp người dùng đang gõ.
 - Cờ không bao giờ được dọn ⇒ code đầy nhánh chết.
 
-Nguồn: https://developers.cloudflare.com/kv/platform/limits/ · https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html (phần cờ và bảo trì còn lại: kiểu hỏng thường gặp, chưa có nguồn chuẩn trong nghiên cứu)
-
 ## Đồng ý cookie/analytics/phiên bản điều khoản
 
 Nhận ra khi: "banner cookie", "Google Analytics", "đo lượt truy cập", "điều khoản sử dụng", "chính sách riêng tư", "người dùng phải đồng ý".
@@ -183,5 +173,3 @@ Hay sai:
 - Gắn Google Analytics ngay từ đầu mà không hỏi.
 - Chỉ lưu "đã đồng ý = true", không phiên bản, không thời điểm ⇒ không chứng minh được khi tranh chấp.
 - Banner chỉ có nút "Đồng ý".
-
-Nguồn: https://gdpr-info.eu/art-17-gdpr/ (rút đồng ý là căn cứ xoá; không phải tư vấn pháp lý) · https://github.com/OWASP/ASVS/blob/master/5.0/en/0x23-V14-Data-Protection.md (luật cookie/ePrivacy chưa có nguồn trong nghiên cứu)

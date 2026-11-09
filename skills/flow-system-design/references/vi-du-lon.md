@@ -18,7 +18,6 @@ Dùng ở bước 3, 5, 7 và 9 của `flow-system-design`, khi cần xem cách 
 - Khi có sự cố
 - Đánh đổi
 - Đi từ nhỏ lên
-- Nguồn
 
 ## Yêu cầu
 
@@ -106,7 +105,7 @@ dựng lại feed khi họ quay lại (tiết kiệm phần lớn lượt ghi �
 ## Bộ đếm nóng
 
 - ~830 lần ghi/s vào một hàng ⇒ khoá hàng, nghẽn. Trên Cloudflare: KV giới hạn tần suất ghi cùng một khoá, Durable Objects có
-  trần mềm request/giây mỗi đối tượng (tra bảng số liệu có ngày) ⇒ đều không chịu một khoá nóng.
+  trần mềm request/giây mỗi đối tượng (tra trang giá chính thức lúc thiết kế) ⇒ đều không chịu một khoá nóng.
 - Chia mảnh: N mảnh (vd 32), mỗi lượt thích cộng vào một mảnh ngẫu nhiên; đọc = tổng, cache vài giây.
 - Hoặc: ghi sự kiện thích vào Queue, gom theo lô mỗi vài giây rồi cộng một lần.
 - Chống thích trùng: bảng (người, bài) `UNIQUE` — tách khỏi bộ đếm hiển thị.
@@ -144,15 +143,3 @@ Không dựng bản trên ngay. Lộ trình mỗi bậc chỉ khi số đo chạ
 3. Queue + đẩy khi ghi khi mở feed chậm vượt mục tiêu dù đã cache.
 4. Lai đẩy/kéo khi có tài khoản vượt ngưỡng người theo dõi.
 5. Chia mảnh khi bảng tới hàng chục–trăm triệu dòng hoặc vài trăm GB.
-
-## Nguồn
-
-- https://github.com/proyecto26/system-design-skills (thang scale; có skill sharded-counters — mới thấy tên, chưa đọc)
-- https://github.com/study8677/architecture-copilot (tín hiệu: CPU DB ~70%, cache trúng ~90%, shard ở hàng chục–trăm triệu dòng)
-- https://github.com/pinchen147/system-design-skill (đọc:ghi ~100:1 mới nghĩ tới cache/replica; cao điểm 2–5× trung bình)
-- https://use-the-index-luke.com/no-offset
-- https://developers.cloudflare.com/kv/platform/limits/
-- https://developers.cloudflare.com/durable-objects/platform/limits/
-- https://developers.cloudflare.com/queues/platform/limits/
-- Chưa có nguồn trong bộ nghiên cứu: mô hình fan-out đẩy/kéo/lai, ngưỡng người nổi tiếng, cỡ feed giữ sẵn, bỏ đẩy cho người
-  không hoạt động, số mảnh bộ đếm.

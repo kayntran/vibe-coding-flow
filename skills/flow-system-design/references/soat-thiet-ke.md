@@ -8,7 +8,6 @@ Dùng ở bước soát (sau bước 10) của `flow-system-design`.
 - Danh sách soát một DESIGN.md
 - Soát hệ thống có sẵn
 - Ghi kết quả
-- Nguồn
 
 ## Cách dùng
 
@@ -88,15 +87,3 @@ Dùng ở bước soát (sau bước 10) của `flow-system-design`.
 
 Một dòng cuối DESIGN.md: `Soát: <tự soát | model> · nhận #6, #11 · bác #23 (Queues đã có lý do: gửi 60.000 SMS/tháng)`.
 Soát hệ thống có sẵn: báo trong chat theo khuôn trên, tối đa 10 phát hiện, nặng trước.
-
-## Nguồn
-
-- https://github.com/study8677/architecture-copilot (kiểm repo, nhãn observed/inferred/unknown, bảng tín hiệu)
-- https://github.com/pinchen147/system-design-skill (mục chưa kiểm ghi "unknown", mọi khuyến nghị trích con số/kiểu hỏng)
-- https://github.com/codejunkie99/system-design-skill (pre-mortem, sơ đồ không quá ~12 nút)
-- https://github.com/proyecto26/system-design-skills (bảng quyết định có điều kiện đổi)
-- https://cheatsheetseries.owasp.org/cheatsheets/Multi_Tenant_Security_Cheat_Sheet.html
-- https://api-security.owasp.org/editions/2023/en/0x11-t10
-- https://developers.cloudflare.com/d1/platform/pricing/
-- https://supabase.com/pricing
-- Chưa có nguồn trong bộ nghiên cứu: thang "sửa tốn gì" (nhỏ/vừa/lớn).

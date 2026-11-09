@@ -10,7 +10,7 @@ Dùng ở bước 4 của `flow-system-design` (bản mẫu theo loại tính n�
 - AI agent hành động thay người dùng
 - Sinh ảnh, âm thanh, video
 
-Số mặc định trong bảng (20 lượt, 2 luồng, 30 ngày…) là kinh nghiệm, không phải số đo — chỉnh theo app. Giá token, trần miễn phí của nhà cung cấp: tra bảng số liệu có ngày.
+Số mặc định trong bảng (20 lượt, 2 luồng, 30 ngày…) là kinh nghiệm, không phải số đo — chỉnh theo app. Giá token, trần miễn phí của nhà cung cấp: tra trang giá chính thức lúc thiết kế.
 Mục "Hạn mức, credit" dùng chung cho mọi thứ tốn tiền mỗi lần gọi (AI, SMS, dịch vụ ngoài): các mục khác trong nhóm trỏ về nó.
 
 ## Gọi AI trả lời văn bản
@@ -38,8 +38,6 @@ Hay sai:
 - Khoá API của model nằm trong code trình duyệt hoặc extension.
 - Không có trần ⇒ một bot gọi vòng lặp cả đêm, sáng ra hoá đơn lớn.
 
-Nguồn: https://genai.owasp.org/llm-top-10/ (LLM01, 02, 05, 06, 07, 10) · https://developers.cloudflare.com/ai-gateway/configuration/rate-limiting/ · https://api-security.owasp.org/editions/2023/en/0x11-t10
-
 ## Trả lời hiện dần (streaming) và huỷ giữa chừng
 Nhận ra khi: "chữ hiện dần như ChatGPT", "streaming", "nút dừng", "trả lời dài".
 
@@ -62,8 +60,6 @@ Bài kiểm bắt buộc:
 Hay sai:
 - Nút dừng chỉ dừng giao diện; server vẫn đọc hết luồng và trả đủ tiền.
 - Trừ trước theo mức tối đa rồi quên hoàn phần thừa, hoặc trừ sau mà quên trừ khi lỗi giữa chừng.
-
-Nguồn: chưa có nguồn riêng cho streaming trong nghiên cứu — suy luận; liên quan https://genai.owasp.org/llm-top-10/ (LLM10) · https://developers.cloudflare.com/durable-objects/platform/limits/
 
 ## Hạn mức, credit, tính tiền theo mức dùng
 Nhận ra khi: "mỗi người X lượt", "credit", "token", "tính tiền theo lượt", "gói 100 lượt", "hết lượt thì mua thêm"; và mọi tính năng tốn tiền mỗi lần gọi (AI, SMS, dịch vụ ngoài trả phí).
@@ -90,8 +86,6 @@ Hay sai:
 - Đọc số dư, kiểm trong code, rồi mới ghi ⇒ request đồng thời tiêu vượt.
 - Đếm lượt ở trình duyệt hoặc localStorage.
 
-Nguồn: https://genai.owasp.org/llm-top-10/ (LLM10) · https://api-security.owasp.org/editions/2023/en/0x11-t10 (API4) · https://github.com/OWASP/ASVS/blob/master/5.0/en/0x11-V2-Validation-and-Business-Logic.md (2.3.3, 2.3.4) · https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/ · https://docs.stripe.com/api/idempotent_requests · https://github.com/wendelandrady/production-saas-readiness (thứ cấp)
-
 ## Tìm kiếm theo ý nghĩa và hỏi đáp trên tài liệu (RAG)
 Nhận ra khi: "hỏi đáp trên tài liệu của tôi", "tìm theo ý nghĩa", "chatbot đọc tài liệu công ty", "embedding", "vector", "RAG".
 
@@ -115,8 +109,6 @@ Bài kiểm bắt buộc:
 Hay sai:
 - Lấy 10 kết quả gần nhất rồi mới lọc theo quyền ⇒ lộ dữ liệu, hoặc trả rỗng dù có tài liệu đúng.
 - Xoá tài liệu mà quên xoá vector.
-
-Nguồn: https://genai.owasp.org/llm-top-10/ (LLM08, LLM01, LLM02) · https://cheatsheetseries.owasp.org/cheatsheets/Multi_Tenant_Security_Cheat_Sheet.html
 
 ## AI agent hành động thay người dùng
 Nhận ra khi: "AI tự làm", "agent", "AI gửi email/đặt lịch/sửa dữ liệu thay tôi", "tool use", "AI bấm nút giúp".
@@ -142,8 +134,6 @@ Hay sai:
 - Đưa agent khoá `service_role` hoặc quyền admin "cho tiện".
 - Giữ quyền bằng câu trong prompt ("đừng đọc dữ liệu người khác") thay vì kiểm trong code.
 
-Nguồn: https://genai.owasp.org/llm-top-10/ (LLM06, LLM01, LLM05)
-
 ## Sinh ảnh, âm thanh, video
 Nhận ra khi: "tạo ảnh bằng AI", "đọc thành giọng nói", "tạo video", "xoá phông", "làm nét ảnh".
 
@@ -167,5 +157,3 @@ Bài kiểm bắt buộc:
 Hay sai:
 - Giữ request mở chờ video vài phút ⇒ hết thời gian, người dùng bấm lại, trả tiền hai lần.
 - Để file sinh ra công khai vĩnh viễn trong bucket.
-
-Nguồn: https://genai.owasp.org/llm-top-10/ (LLM10) · https://developers.cloudflare.com/r2/api/s3/presigned-urls/ · https://developers.cloudflare.com/queues/platform/limits/ · https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html (chưa có nguồn riêng cho sinh media)

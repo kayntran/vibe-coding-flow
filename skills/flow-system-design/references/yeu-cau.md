@@ -8,7 +8,6 @@ Dùng ở bước 1 của `flow-system-design`.
 - Yêu cầu phi chức năng
 - Câu trả lời → ảnh hưởng thiết kế
 - Ghi vào DESIGN.md
-- Nguồn
 
 ## Cách hỏi theo vòng
 
@@ -73,7 +72,7 @@ Mỗi mặc định là **giả định** — ghi vào mục "Giả định" c�
 | N5 vài phút | Cần khôi phục về mốc thời gian bất kỳ (D1 Time Travel; Supabase phải ở gói có sao lưu) |
 | N5 một ngày | Sao lưu hằng ngày là đủ |
 | N6 vài giờ | Phải có bài khôi phục đã thử thật (`flow-backup`) và các bước ghi sẵn |
-| N7 thấp | Ưu tiên gói miễn phí nhưng nêu kiểu hỏng: D1 Free chặn truy vấn khi chạm trần ngày, Supabase Free tạm dừng khi không dùng và không sao lưu — tra bảng số liệu có ngày |
+| N7 thấp | Ưu tiên gói miễn phí nhưng nêu kiểu hỏng: D1 Free chặn truy vấn khi chạm trần ngày, Supabase Free tạm dừng khi không dùng và không sao lưu — tra trang giá chính thức lúc thiết kế |
 | N7 có trần AI/SMS | Đếm và chặn theo người dùng phía máy chủ trước khi gọi dịch vụ trả phí |
 | N8 không ai vận hành | Không tự chạy máy chủ (VPS) hay DB tự quản; chỉ dịch vụ managed |
 | N9 gần | Cắt phạm vi, nhưng không cắt phần khó sửa sau: mô hình dữ liệu, khoá định danh, tách dữ liệu khách hàng |
@@ -88,15 +87,3 @@ Mỗi mặc định là **giả định** — ghi vào mục "Giả định" c�
 - Mục 3 (phi chức năng): mỗi dòng một con số + nguồn trong ngoặc: (user nói) · (SPEC) · (giả định).
 - Câu user trả lời làm đổi quyết định sản phẩm ⇒ ghi vào sổ chốt, không ghi vào progress.md.
 - Giả định nào làm đổi hạng quy mô nếu sai (N1, N2) ⇒ đưa vào "Rủi ro và câu hỏi mở".
-
-## Nguồn
-
-- Vòng hỏi đánh số, mỗi câu kèm đáp án đề xuất: https://github.com/mattpocock/skills/blob/main/skills/productivity/grilling/SKILL.md
-- Mặc định kèm lý do, nhận mặc định = ghi giả định, chọn tầng quy mô: https://github.com/codejunkie99/system-design-skill
-- Hỏi tối đa 3 vòng, chỉ hỏi thứ không tự tra được; RPO/RTO gắn đường khôi phục: https://github.com/pinchen147/system-design-skill
-- Hỏi 1–3 câu mỗi lượt, danh sách "MVP không làm": https://github.com/study8677/architecture-copilot
-- Đổi uptime ra thời gian ngừng: https://github.com/proyecto26/system-design-skills/blob/main/skills/back-of-the-envelope/references/numbers-to-remember.md
-- Dữ liệu nhạy cảm, tự xoá dữ liệu hết hạn: https://github.com/OWASP/ASVS/blob/master/5.0/en/0x23-V14-Data-Protection.md
-- Quyền xoá (châu Âu): https://gdpr-info.eu/art-17-gdpr/
-- Tách dữ liệu nhiều công ty: https://cheatsheetseries.owasp.org/cheatsheets/Multi_Tenant_Security_Cheat_Sheet.html
-- Ngưỡng mặc định 1.000 người/ngày, 300 ms, 2–3 vòng: kinh nghiệm, chưa có nguồn.

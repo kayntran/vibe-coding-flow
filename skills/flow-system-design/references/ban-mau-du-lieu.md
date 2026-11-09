@@ -15,7 +15,7 @@ Dùng ở bước 4 của `flow-system-design`.
 - Bộ đếm nóng/lượt thích/lượt xem/bảng xếp hạng
 
 Cách dùng: nhận ra loại ⇒ hỏi các câu lúc viết SPEC (`flow-spec`) ⇒ "Làm ngay" thành `AC-nn` kèm bài kiểm ⇒ "Chừa chỗ" vào mục kiến
-trúc của plan ⇒ "Chưa làm" vào lộ trình theo ngưỡng. Giá và giới hạn gói: tra bảng số liệu có ngày, không ghi ở đây.
+trúc của plan ⇒ "Chưa làm" vào lộ trình theo ngưỡng. Giá và giới hạn gói: tra trang giá chính thức lúc thiết kế, không ghi ở đây.
 
 ## Danh sách dài/phân trang
 
@@ -43,8 +43,6 @@ Hay sai:
 - OFFSET + `COUNT(*)` mỗi lần ⇒ trang sau chậm dần, hoá đơn đọc tăng.
 - Sắp xếp theo cột không duy nhất (ngày) mà không kèm id ⇒ sót/lặp hàng.
 - Tải hết về trình duyệt rồi chia trang ở client.
-
-Nguồn: https://use-the-index-luke.com/no-offset · https://cheatsheetseries.owasp.org/cheatsheets/Denial_of_Service_Cheat_Sheet.html · https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html · https://developers.cloudflare.com/d1/platform/pricing/
 
 ## Tìm kiếm
 
@@ -74,8 +72,6 @@ Hay sai:
 - LIKE `'%x%'` không giới hạn trên bảng lớn, mở công khai ⇒ một bot làm chậm cả app.
 - Người dùng xoá dữ liệu nhưng chỉ mục tìm kiếm bên ngoài vẫn còn.
 
-Nguồn: https://use-the-index-luke.com/no-offset · https://cheatsheetseries.owasp.org/cheatsheets/Denial_of_Service_Cheat_Sheet.html · https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html (bậc FTS5/Postgres full-text và ngưỡng chuyển dịch vụ riêng: chưa có nguồn chuẩn trong nghiên cứu)
-
 ## Nhập/xuất Excel-CSV
 
 Nhận ra khi: "nhập từ Excel", "import danh sách", "xuất ra Excel", "tải CSV", "tải dữ liệu của tôi", "chuyển dữ liệu từ app cũ".
@@ -104,8 +100,6 @@ Hay sai:
 - Đọc cả file lớn trong một request ⇒ hết giờ/hết bộ nhớ.
 - Nhập từng dòng không gom lô, lỗi giữa chừng để lại nửa dữ liệu không biết dòng nào đã vào.
 
-Nguồn: https://community.owasp.org/attacks/CSV_Injection · https://cheatsheetseries.owasp.org/cheatsheets/Mass_Assignment_Cheat_Sheet.html · https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html · https://developers.cloudflare.com/d1/platform/limits/ · https://developers.cloudflare.com/queues/platform/limits/
-
 ## Thống kê/dashboard
 
 Nhận ra khi: "thống kê", "dashboard", "biểu đồ doanh thu", "báo cáo theo tháng", "bao nhiêu người dùng hôm nay", "trang tổng quan".
@@ -132,8 +126,6 @@ Hay sai:
 - `COUNT` cả bảng mỗi lần mở trang tổng quan.
 - Gom ngày theo UTC ⇒ đơn buổi sáng sớm giờ Việt Nam nằm ở ngày hôm trước.
 - Job tổng hợp cộng dồn, chạy lại một lần là số sai gấp đôi.
-
-Nguồn: https://developers.cloudflare.com/d1/platform/pricing/ · https://cheatsheetseries.owasp.org/cheatsheets/Multi_Tenant_Security_Cheat_Sheet.html · https://sre.google/sre-book/monitoring-distributed-systems/ (ngưỡng chuyển kho phân tích: kinh nghiệm, chưa có nguồn chuẩn)
 
 ## Việc chạy nền/hẹn giờ/nhắc việc
 
@@ -162,8 +154,6 @@ Hay sai:
 - Việc không idempotent ⇒ thử lại là gửi trùng email/trừ tiền hai lần.
 - Không ai biết job đã ngừng chạy từ tuần trước.
 
-Nguồn: https://developers.cloudflare.com/workers/platform/limits/ · https://developers.cloudflare.com/queues/platform/limits/ · https://developers.cloudflare.com/queues/platform/pricing/ · https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html · https://docs.stripe.com/api/idempotent_requests
-
 ## Tạo báo cáo/PDF/xuất hàng loạt
 
 Nhận ra khi: "xuất PDF", "in hoá đơn", "tạo báo cáo tháng", "tải tất cả", "gửi hàng loạt", "nén thành file zip".
@@ -191,8 +181,6 @@ Hay sai:
 - File xuất để public "cho dễ tải".
 - Không giới hạn ⇒ một người xuất cả DB nhiều lần mỗi giờ.
 
-Nguồn: https://developers.cloudflare.com/workers/platform/limits/ · https://developers.cloudflare.com/queues/platform/limits/ · https://cheatsheetseries.owasp.org/cheatsheets/Denial_of_Service_Cheat_Sheet.html · https://docs.stripe.com/api/idempotent_requests
-
 ## Xoá mềm/thùng rác/hoàn tác/lịch sử phiên bản
 
 Nhận ra khi: "thùng rác", "lỡ xoá", "khôi phục", "hoàn tác", "xem bản cũ", "lịch sử chỉnh sửa", "ai sửa lúc nào".
@@ -219,8 +207,6 @@ Hay sai:
 - Thêm xoá mềm khi đã có 50 truy vấn ⇒ sót một chỗ là "đã xoá vẫn hiện".
 - Unique trên tên làm người dùng không tạo lại được tên đã xoá.
 - Tưởng Time Travel là thùng rác ⇒ khôi phục một bản ghi làm mất mọi thay đổi của người khác sau mốc.
-
-Nguồn: https://developers.cloudflare.com/d1/reference/time-travel/ · https://gdpr-info.eu/art-17-gdpr/ (không phải tư vấn pháp lý) · https://github.com/OWASP/ASVS/blob/master/5.0/en/0x23-V14-Data-Protection.md (14.2.7 tự xoá dữ liệu hết hạn)
 
 ## Đặt chỗ/tồn kho/hạn mức có hạn
 
@@ -250,8 +236,6 @@ Hay sai:
 - Giữ chỗ không có hạn ⇒ "chỗ ma" không ai dùng mà không ai đặt được.
 - Nhả chỗ bằng `setTimeout` ⇒ Worker kết thúc là không bao giờ nhả.
 
-Nguồn: https://github.com/OWASP/ASVS/blob/master/5.0/en/0x11-V2-Validation-and-Business-Logic.md (2.3.3 giao dịch, 2.3.4 khoá chống đặt trùng) · https://docs.stripe.com/api/idempotent_requests · https://api-security.owasp.org/editions/2023/en/0x11-t10 (API6) · https://developers.cloudflare.com/durable-objects/platform/limits/
-
 ## Bộ đếm nóng/lượt thích/lượt xem/bảng xếp hạng
 
 Nhận ra khi: "lượt thích", "thả tim", "lượt xem", "số người đang xem", "bảng xếp hạng", "top tuần", "bài nổi bật".
@@ -279,5 +263,3 @@ Hay sai:
 - Đọc số đếm ra code, cộng 1, ghi lại ⇒ mất lượt khi đông.
 - Dùng KV làm bộ đếm ⇒ số nhảy lung tung, ghi bị từ chối.
 - Ghi DB mỗi lượt xem ⇒ hoá đơn ghi tăng theo lượt truy cập.
-
-Nguồn: https://developers.cloudflare.com/kv/platform/limits/ · https://developers.cloudflare.com/durable-objects/platform/limits/ · https://developers.cloudflare.com/d1/platform/pricing/
