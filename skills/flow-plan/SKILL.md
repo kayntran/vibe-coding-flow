@@ -1,6 +1,6 @@
 ---
 name: flow-plan
-description: Lập plan kỹ thuật từ SPEC đã duyệt — kiến trúc, task có ô tick và lệnh kiểm, chia làn song song, soát bằng model khác, mở sổ tiến độ, tóm tắt rồi hỏi user. Dùng khi SPEC đã xong, "lập plan", "chia việc", "chia làn". Làm trọn tính năng thì dùng flow-feature. KHÔNG dùng khi yêu cầu còn mơ hồ (flow-spec), để thi công (flow-build), sửa nhỏ một câu.
+description: Lập plan kỹ thuật từ SPEC đã duyệt — kiến trúc, task có ô tick và lệnh kiểm, chia làn song song, soát bằng model khác, mở sổ tiến độ, báo một câu rồi làm tiếp (không chờ gật). Dùng khi SPEC đã xong, "lập plan", "chia việc", "chia làn". Làm trọn tính năng thì dùng flow-feature. KHÔNG dùng khi yêu cầu còn mơ hồ (flow-spec), để thi công (flow-build), sửa nhỏ một câu.
 ---
 
 # Lập plan kỹ thuật
@@ -39,7 +39,7 @@ Mỗi task:
 - Không có "kiểm tra lại cho chắc": **Verify phải có lệnh chạy được và kết quả mong đợi**.
 - Mọi tiêu chí của SPEC có task phủ; mỗi task có test của nó. Việc làm dần thì đánh dấu ô tick; plan hoàn tất nằm **cùng commit** với code.
 - Việc chia thành nhiều làn: viết bảng làn rồi `node ~/.claude/hooks/lane-check.mjs plan <PLAN.md>`, exit 1 thì sửa tới khi sạch.
-- Plan chỉ có **MỘT** bước review code (`flow-review`), ở cuối.
+- Plan có MỘT bước soát cuối (`flow-review`); việc M/L ghi mốc soát giữa chừng (`(mốc)` cuối task kết thúc mỗi mốc) cho `flow-build` [lcly].
 - Có màn mới hoặc làm lại giao diện: task phụ thuộc bản demo ghi `(chờ demo)` ở cuối dòng; các task còn lại không được phụ thuộc vào
   task đó, để làm song song trong lúc user chọn bản demo [xwuk].
 - Có **kế hoạch test** và **QA charter** từ tiêu chí (vai, trạng thái đầu, dữ liệu, bằng chứng cần có).
@@ -62,21 +62,18 @@ Hợp nhất: kiểm từng mục vào SPEC, PLAN, code; sửa plan; ghi đúng/
 (file sắp tạo ghi `(mới)`, sẽ xoá hay đổi tên ghi `(xoá)`, `(đổi tên)`), mỗi task có Verify. Exit 1 ⇒ tự sửa chi tiết kỹ thuật như đường dẫn hay task thiếu theo SPEC đã duyệt; đổi thứ người dùng
 thấy hoặc bỏ yêu cầu thì hỏi user. Lệnh chỉ nhắc, không chặn, và không chạy lệnh trong Verify.
 
-## Tóm tắt và LUÔN hỏi user
+## Báo một câu rồi làm tiếp (không chờ gật)
 
-Không có thi công khi user chưa trả lời. Trong tin nhắn, bằng lời đời thường, không bắt mở file:
+Giao trọn là mặc định [vyt1] [69u6]: user không duyệt plan kỹ thuật; plan đã qua `plan-check` và soát bằng model khác thì làm tiếp. Báo
+một tin ngắn, đời thường: sẽ làm theo thứ tự nào · đã chọn gì thay user và vì sao · phí phát sinh (nếu có). Không dán plan; bản xem chép vào
+thư mục mở phiên. Quyết định mới ghi sổ chốt.
 
-- Sẽ làm gì, theo thứ tự nào; người dùng thấy gì khác ở mỗi bước.
-- Đã chọn gì thay user và vì sao (tác động: nhanh hơn, an toàn hơn, tốn phí hơn).
-- Rủi ro lớn nhất, soát plan phát hiện gì và đã sửa thế nào.
-- Phí phát sinh; phần chưa kiểm được.
-
-Rồi hỏi bằng AskUserQuestion: "Làm theo plan này?", nút chính "Làm theo plan", kèm "Sửa plan". Không dán plan đầy đủ. Bản xem chép vào thư mục mở
-phiên và mở sẵn. Quyết định mới ghi sổ chốt.
+**Chỉ dừng hỏi** khi plan đụng thứ user phải quyết: cắt hoặc đổi điều đã duyệt trong SPEC · thêm khoản phí chưa được duyệt · việc không đảo
+ngược mà SPEC chưa nêu (xoá/đổi dữ liệu thật, đổi quyền). Hỏi bằng AskUserQuestion, chỉ đúng điểm đó, không hỏi "làm theo plan?".
 
 ## Sổ tiến độ
 
-User gật ⇒ mở `progress.md` cạnh SPEC.md, thi công theo `flow-build`. Mẫu ở `references/plan-format.md`.
+Plan sạch ⇒ mở `progress.md` cạnh SPEC.md, thi công theo `flow-build`. Mẫu ở `references/plan-format.md`.
 
 Hook SessionStart nạp lại sổ đang dở khi mở phiên mới hoặc sau khi nén, nên sổ phải đủ để người khác làm tiếp. Cập nhật khi đổi pha, xong
 một làn. **Đang chờ user gật thì ghi rõ trong sổ; sau khi nén phải hỏi lại, không coi là đã được gật.** Quyết định user duyệt ghi sổ chốt, không ghi

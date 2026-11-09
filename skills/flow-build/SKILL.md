@@ -43,6 +43,18 @@ Một mình làm được thì không chia. Chạy song song ⇒ theo `flow-team
 
 PLAN cũ không có ô tick ⇒ ghi vào mục `## Kết quả`, không bắt viết lại plan.
 
+### Soát theo mốc (việc M/L) [lcly]
+
+**Mốc** = một làn xong, hoặc một khối 2–4 task liền nhau tạo thành phần chạy được (vd "lưu và đọc lượt đặt"). Plan có ghi mốc thì
+theo plan; không ghi thì tự chọn, không để quá ~4 task mà chưa soát. Xong mốc (đã commit) ⇒ một lượt AI khác hãng soát nhanh:
+`review-ext.mjs` theo bậc lượt thường của `flow-review` với `--base <commit cuối mốc trước>` (mốc đầu: nhánh chính của repo, `main` hoặc `master`), `--note` chỉ tả mốc
+làm gì + "SOÁT MỐC: chỉ BLOCKER/MAJOR; xem cả chỗ gọi tới phần vừa đổi ngoài diff; kiểm task đánh dấu xong có thật xong".
+- Lỗi thật ⇒ sửa ngay, kiểm hẹp lại, rồi mới sang mốc sau; không xây mốc mới đè lên lỗi nặng.
+- Kiểm từng lỗi như bước 4 của `flow-review` (không có `path:line` + kịch bản hỏng ⇒ loại). MINOR ⇒ gom để soát cuối, không sửa vặt giữa chừng.
+- Ghi mỗi lượt vào `progress.md` mục `## Soát mốc` (commit, AI nào, nhận/bác gì) để soát cuối không báo lại.
+- AI ngoài hết lượt ⇒ dùng bậc dự phòng của `flow-review`; không còn gì ⇒ bỏ soát mốc, ghi "mốc chưa soát", soát cuối bù.
+- Cỡ S: không soát mốc, chỉ soát cuối.
+
 Xong hết task ⇒ **kiểm rộng:** `node ~/.claude/hooks/flow-check.mjs --dir <worktree>` và test của những chỗ gọi tới phần vừa sửa.
 Bộ đủ để dành cho `flow-qa`. Kết quả cũ chỉ dùng lại được khi code, dữ liệu vào và môi trường không đổi.
 

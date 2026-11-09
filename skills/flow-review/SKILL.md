@@ -1,12 +1,13 @@
 ---
 name: flow-review
-description: Soát chất lượng code của cả nhánh bằng model khác, một lần trước khi hỏi gộp — đối chiếu yêu cầu, kiểm từng lỗi rồi mới nhận, đóng dấu review. Dùng khi nhánh đã qua test và QA, hoặc user nói "review", "soát code", "code này ổn chưa". KHÔNG dùng cho riêng bảo mật hay lỗ hổng (flow-security), soát plan (flow-plan), soát giao diện (flow-ui-design), hay sau từng làn.
+description: Soát cuối chất lượng code của cả nhánh bằng model khác, một lần trước khi hỏi gộp — đối chiếu yêu cầu, kiểm từng lỗi rồi mới nhận, đóng dấu review. Dùng khi nhánh đã qua test và QA, hoặc user nói "review", "soát code", "code này ổn chưa". KHÔNG dùng cho riêng bảo mật hay lỗ hổng (flow-security), soát plan (flow-plan), soát giao diện (flow-ui-design), hay soát mốc trong lúc làm (flow-build).
 ---
 
 # Flow — soát code
 
-**Một lần cho cả tính năng:** chạy trên nhánh tính năng hoặc nhánh tích hợp, ngay trước khi hỏi gộp. Không chạy sau từng
-giai đoạn, từng làn, từng commit.
+**Soát cuối, một lần cho cả tính năng** [lcly]: chạy trên nhánh tính năng hoặc nhánh tích hợp, ngay trước khi hỏi gộp, bằng lượt AI
+mới không mang ngữ cảnh lúc làm. Việc M/L đã có soát theo mốc trong `flow-build`; lượt này nhìn thứ soát mốc không thấy: các phần ghép
+có khớp không, có đúng yêu cầu đã duyệt không, bảo mật tổng thể. Lỗi đã nhận hoặc bác ở `## Soát mốc` của `progress.md` không báo lại.
 
 Soát chỉ là báo và kiểm. Sửa thuộc bước 4, gộp thuộc skill `flow-merge`; bắt đầu soát không có nghĩa là được gộp.
 
