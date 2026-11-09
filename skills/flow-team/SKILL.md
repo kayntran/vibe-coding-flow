@@ -9,33 +9,12 @@ user-invocable: false
 **Đang chạy trong Paseo** (hook mở phiên báo, hoặc `node ~/.claude/hooks/paseo.mjs on` ra "có") ⇒ chọn vai như dưới, nhưng
 giao bằng phiên Paseo theo skill `flow-paseo` thay cho Agent tool và CLI ngoài.
 
-## Ai làm gì
+## Chọn worker
 
-| Vai | Ai | Giao khi | Không giao |
-|---|---|---|---|
-| Research prior art | `researcher` (Sonnet high) — tự tìm GitHub + gọi thêm **Grok** + **agy** để có thêm góc nhìn | ý tưởng cỡ M/L, dò edge case cỡ L | quyết định |
-| Đọc thô / tra docs | `recon` (Sonnet high) | đọc >30KB trong repo, tra API/CVE, trả kết luận `path:line` | quyết định |
-| Code có mẫu | `coder-lite` (Sonnet high) | i18n, docs, sửa lặp, test theo spec rõ, lint/type, bug hẹp có test tái hiện | logic mới, schema, đồng thời, bảo mật |
-| Code khó | `coder` (Sonnet xhigh) | service, SQL/transaction/schema, khoá đồng thời, bảo mật, logic mới | việc chép lặp |
-| Việc nhỏ | `coder-mini` (Haiku medium) | mini project độc lập, tính năng cỡ S 1–2 file có mẫu, sửa nhanh có test tái hiện | logic mới phức tạp, schema, bảo mật, UI |
-| Kiểm cơ học | `test-runner` (Haiku medium) | lint/typecheck/test/build, trả CHỈ phần đỏ | đoán nguyên nhân, sửa code |
-| Test thực tế | `qa-tester` (Sonnet high) | chạy app, lái Playwright như người dùng theo QA charter | sửa code |
-| Debug | `debugger` (Sonnet xhigh, hỏi thêm **Codex**) | test đỏ, CI đỏ, log server, stack trace ⇒ nguyên nhân gốc | sửa code |
-| Soát plan | chuỗi Codex Sol high → Opus high qua agy → `code-reviewer` opus (đang ở Codex: Sol high), 1 lượt — CHỈ cỡ L (skill `flow-plan`) | sau khi viết PLAN.md, thay cho việc user duyệt plan | cỡ S/M (captain tự soát) |
-| Review code + bảo mật + hiệu năng | theo rủi ro (thường: **Grok** · nhạy cảm: **Codex Sol high** + Grok · tiền/dữ liệu: + **Gemini Flash**), tất cả qua `review-ext.mjs --model …` | MỘT lần cho cả tính năng, trước khi gộp (skill `flow-review`) | sau từng giai đoạn/làn |
-| Review dự phòng | Codex → Grok → Gemini Flash → `code-reviewer` (Opus medium) | lượt nào lỗi thì sang model kế chưa dùng | — |
+Vai nào, giao khi nào, không giao gì, model nào ⇒ `references/chon-worker.md`.
 
-- **Model luôn là bản mới nhất của dòng** (`kit/roles.json`): Claude ghi tên dòng (`sonnet|opus|haiku`) trong
-  frontmatter agent; CLI ngoài lấy id bằng `node ~/.claude/hooks/models.mjs pick <app> <vai>` — KHÔNG ghi cứng id.
-  User đổi model cho vai bằng lời ⇒ `models.mjs set <vai> <app> <dòng>[:mức]` (ghi `~/.claude/flow.local.json`, giữ khi
-  cập nhật kit), `reset <vai>` để trả mặc định.
 - **Trước mọi lần gọi CLI ngoài** (codex, agy, cursor-agent, grok, devin): `node ~/.claude/hooks/cli-check.mjs <tên>`.
   Chưa sẵn sàng ⇒ dùng worker native; chỉ đưa user lệnh đăng nhập khi lý do là `not-logged-in` (hết lượt/mất mạng thì không).
-- **agy** dùng cho research và soát plan (Opus mới nhất), không dùng review code.
-- Ưu tiên provider khác cho vai **đánh giá** (review, research, ý kiến debug thứ hai): người viết ≠ người chấm.
-- Viết code giữ Sonnet — A/B 2026-09-29, 39 lượt việc thật, 2 giám khảo chấm mù: Sonnet xhigh 46,0/50 cao nhất ở
-  DB+khoá và bảo mật (~$0,8/việc); Sonnet high 45,1 rẻ nhất ($0,39). Sonnet low/medium tụt mạnh ở việc khó. Codex
-  viết code chưa đo — muốn dùng thì A/B trước; khi Codex viết thì Claude review.
 - Không truyền `model` khi gọi Agent, trừ bậc leo Opus.
 
 Captain tự làm: tìm kiếm "X ở đâu" bằng MỘT lệnh `rg` nhiều path + nhiều `-e` (worker tìm kiếm tốn 30–45K token và
@@ -43,73 +22,26 @@ sót dòng — đo 2026-09-28) · phỏng vấn · viết plan · UI · việc d
 
 ## Chạy song song
 
-**Trước khi giao** — bảng `## Làn` trong PLAN.md phải qua `node ~/.claude/hooks/lane-check.mjs plan <PLAN.md>` (exit 0).
-Giao theo **wave** nó in ra: làn cùng wave giao trong MỘT message, wave sau chỉ giao khi wave trước đã gộp vào nhánh
-tích hợp.
-
-**Khi giao:**
-- Mỗi làn một worker `isolation: "worktree"`, chạy nền, tối đa **3–4 làn viết code đồng thời**, mỗi làn ≈ 5–6 task.
-  Captain làm UI cùng lúc.
-- Brief ghi `lane=<tên>` và `scope=` đúng glob của làn trong bảng. Worker cần sửa file ngoài scope ⇒ DỪNG, trả
-  `return=needs_context` kèm tên file (luật nằm sẵn trong body `coder`/`coder-lite`).
-- Làn cần chạy app/dev server/`qa-tester` ⇒ cấp port: `node ~/.claude/hooks/wt-env.mjs alloc <đường worktree>` ⇒ in
-  `PORT_BASE=<n>`; app dùng các port `n..n+19`, ghi `PORT_BASE` vào brief. Không bao giờ dùng port mặc định của dự án.
-- Cô lập dữ liệu mỗi làn: `alloc` in thêm `FLOW_DB_NAME`, `FLOW_TEST_DATA`; `wt-env.mjs env <worktree>` in khối biến cho
-  `.env.local` của worktree. Mỗi làn một database thử riêng (nhánh Supabase/Neon KHÔNG mang dữ liệu thật, `supabase
-  start`, hoặc container), dữ liệu thử riêng, khoá test riêng. Brief ghi rõ; cấm chép `.env` của thư mục chính, cấm nối
-  database thật.
-  Worktree chỉ cô lập file: không chạy migration đồng thời lên cùng DB local.
-- Việc đánh giá độc lập (research, review plan, nhiều debugger cho nhiều lỗi, 2 lượt Codex) gửi trong MỘT message.
+Chia nhiều làn ⇒ đọc `references/chay-song-song.md` trước khi giao. Cốt lõi:
+- Bảng `## Làn` trong PLAN.md phải qua `node ~/.claude/hooks/lane-check.mjs plan <PLAN.md>` (exit 0); giao theo wave nó in ra.
+- Mỗi làn một worker `isolation: "worktree"`, tối đa **3–4 làn viết code đồng thời**; brief ghi `lane=` và `scope=`.
+- Cô lập dữ liệu mỗi làn: database thử riêng, dữ liệu thử riêng, khoá test riêng, ghi rõ trong brief; cấm chép `.env` của thư mục
+  chính, cấm nối database thật. Worktree chỉ cô lập file: không chạy migration đồng thời lên cùng DB local.
+- Làn cần chạy app/dev server/`qa-tester` ⇒ cấp port bằng `wt-env.mjs alloc`, không bao giờ dùng port mặc định của dự án.
 - Giao xong không ngó chừng (không sleep/poll/đọc log) — hệ thống tự báo khi xong.
+- Làn trả về: `lane-check.mjs audit` trước khi nhận; có file ngoài scope (`OUTSIDE`) ⇒ không gộp.
+- KHÔNG song song khi: cỡ S hoặc tổng việc < ~30 phút · `lane-check plan` vẫn báo OVERLAP/HOT sau một lần chỉnh bảng · việc nguyên khối
+  · chuỗi wave > 3 mà mỗi wave chỉ 1 làn · cần soát diff >4 làn một lúc (giữ ≤4).
 
-**Gom lần báo xong — tiết kiệm token.** Mỗi lần worker/lệnh nền báo xong, phiên chính thức dậy và gửi lại CẢ ngữ cảnh
-(đo 2026-10-13 trên kit: 53% lần thức là do báo xong, tốn ~64% chi phí phiên chính; ngữ cảnh lúc thức trung vị ~400k):
-- **≥3 việc độc lập chỉ cần kết quả cuối** (test nhiều nền, nhiều lượt review độc lập trên CÙNG một diff đã xanh,
-  research nhiều góc, quét nhiều file, nhiều làn code độc lập) ⇒ chạy bằng tool `Workflow`: cả đợt chỉ báo MỘT lần.
-  Tool `Workflow` chỉ chạy khi chính user nói rõ "dùng workflow" ⇒ trước đợt đó hỏi user MỘT câu (AskUserQuestion: số
-  agent, việc gì, ước "đỡ ~N lượt đọc lại ngữ cảnh"); user đã nói "dùng workflow" trong lượt này thì khỏi hỏi. Không thấy
-  tool `Workflow` (cài đặt `enableWorkflows` tắt) ⇒ nói user một dòng, không lặng lẽ giao từng việc. Việc sửa code dùng
-  `isolation: 'worktree'` + `agentType: 'coder'` cho từng làn, trả receipt qua `schema`; giữ ≤4 agent viết code cùng lúc
-  như trên (đã đo 2026-10-13: 5 làn code một Workflow vẫn chạy được, mỗi làn một worktree). KHÔNG gom các
-  bước có thứ tự cổng (test xanh → QA → user duyệt giao diện → review) vào một Workflow, và không dùng Workflow khi giữa
-  chừng cần captain quyết hoặc hỏi user (Workflow không nhận ý kiến giữa chừng) — tách thành nhiều Workflow theo chặng.
-- Lệnh nền liên quan nhau (test Windows + Mac, build + test) ⇒ gộp vào MỘT lệnh nền in một tổng kết, không hai lệnh.
-- Một worker xong gửi HAI tín hiệu (báo cáo + thông báo "completed"): xử lý ở tín hiệu đầu; tín hiệu sau không có gì
-  mới ⇒ không gọi tool, không nhắn user.
-- Brief luôn đòi receipt ngắn (chi tiết ghi ra file, chỉ báo đường file + vài dòng kết luận).
-
-**Khi làn trả về** — trước khi nhận:
-`node ~/.claude/hooks/lane-check.mjs audit <PLAN.md> <lane> --branch <nhánh làn> --base <mốc làn tách ra>`
-(mốc = nhánh tích hợp nếu làn tách từ đó ở wave sau, `main` nếu wave đầu). Audit tính cả file chưa commit trong
-worktree của làn.
-Có file ngoài scope (`OUTSIDE`) ⇒ không gộp; xem file đó: hợp lý thì cập nhật bảng + chạy lại `plan` (có thể đụng làn
-khác), không hợp lý thì trả worker gỡ ra.
-
-**Khi nào KHÔNG song song** (số đo: hai agent khác nhau sửa song song ⇒ 41,7% PR xung đột, arXiv 2607.04697):
-- Cỡ S, hoặc tổng việc < ~30 phút cho một worker ⇒ một worker làm tuần tự.
-- `lane-check plan` vẫn báo OVERLAP/HOT sau một lần chỉnh bảng ⇒ gộp các làn đó thành một.
-- Việc nguyên khối (một luồng logic xuyên nhiều file, refactor đổi tên rộng, nâng framework) ⇒ không tách.
-- Các làn phụ thuộc nhau thành chuỗi dài (wave > 3 mà mỗi wave chỉ 1 làn) ⇒ tuần tự thật sự, bỏ song song.
-- Captain không đủ sức soát diff >4 làn một lúc ⇒ giữ ≤4: nút cổ chai là review, không phải tốc độ viết.
+Mỗi lần worker báo xong là một lần phiên chính đọc lại cả ngữ cảnh ⇒ ≥3 việc độc lập chỉ cần kết quả cuối thì xem
+`references/gom-bao-xong.md`. Một worker xong gửi HAI tín hiệu: xử lý ở tín hiệu đầu, tín hiệu sau không có gì mới ⇒
+không gọi tool, không nhắn user.
 
 ## Brief & receipt
 
-Brief tự đủ (worker không đọc được hội thoại), < 800 ký tự, chỉ phần riêng của việc (quy ước chung nằm sẵn trong
-body agent). Spec dài ⇒ ghi file rồi trỏ đường dẫn.
-
-```
-outcome=<một kết quả kiểm được>
-scope=<path được sửa; còn lại chỉ đọc>
-constraints=<điều cấm quan trọng>
-accept=<lệnh chính xác, xanh = xong>
-plan=<PLAN.md> lane=<tên> base=<nhánh mốc>     ← khi giao làn song song (hook kiểm bảng làn, audit lúc nộp)
-PORT_BASE=<n>                                  ← khi worker chạy app (hook chặn qa-tester thiếu port)
-```
-
-Receipt: `return=done|done_with_concerns|needs_context|blocked; paths=…; checks=<output accept có số thật>; blocker=…; stop`
-(`test-runner`: `return=green|red|blocked`). Claim không có `path:line`/URL ⇒ vứt; khẳng định phủ định cũng cần bằng
-chứng. Kết quả về captain ≤ ~1.500 token; dài hơn ⇒ worker ghi file, trả path. Hỏi tiếp cùng chủ đề ⇒ SendMessage
-worker cũ (giữ ngữ cảnh, rẻ hơn spawn mới).
+Brief tự đủ, < 800 ký tự, theo `assets/brief-receipt.md` (outcome · scope · constraints · accept). Brief luôn đòi receipt
+ngắn. Claim không có `path:line`/URL ⇒ vứt; khẳng định phủ định cũng cần bằng chứng. Kết quả về captain ≤ ~1.500 token;
+dài hơn ⇒ worker ghi file, trả path. Hỏi tiếp cùng chủ đề ⇒ SendMessage worker cũ (giữ ngữ cảnh, rẻ hơn spawn mới).
 
 ## Thang leo
 
@@ -121,3 +53,10 @@ lại quá một lần; brief mơ hồ thì sửa brief.
 Dự án có `.claude/worker-log.md` ⇒ mỗi lần giao, sau khi kiểm xong, thêm một dòng: ngày · worker/model/effort · việc
 ≤8 chữ · `ok`/`ok-noisy`/`fabricated`/`blocked`/`wrong` · một mệnh đề bằng chứng. Quá 25 dòng từ lần tổng kết trước ⇒
 tổng kết theo số đếm, đề xuất nâng/hạ/bỏ worker.
+
+## Đọc khi cần
+
+- `references/chon-worker.md` — đọc khi chọn worker/model cho một việc (bảng vai, cách chọn model, A/B)
+- `references/chay-song-song.md` — đọc khi chia nhiều làn song song, cấp port/dữ liệu cho làn, nhận làn trả về, hoặc cân nhắc có nên song song
+- `references/gom-bao-xong.md` — đọc khi có ≥3 việc độc lập chỉ cần kết quả cuối, hoặc nhiều lệnh nền liên quan nhau
+- `assets/brief-receipt.md` — đọc khi viết brief hoặc cần dạng receipt chuẩn

@@ -33,7 +33,7 @@ Dòng ⚙ do `ui-check` kiểm được khi dự án có `.claude/ui.json`; còn
 
 - ⚙ Màu, cỡ chữ, khoảng cách, bo góc, bóng lấy từ token; không gõ số rời (`#1a2b3c`, `text-[13px]`, `style={{ color: … }}`) — máy
   `ui-token` của `flow-check` nhắc.
-- Màn chỉ dùng token tầng vai trò hoặc thành phần, không dùng thẳng giá trị gốc (`tokens.md`).
+- Màn chỉ dùng token tầng vai trò hoặc thành phần, không dùng thẳng giá trị gốc (tầng 1 của bộ token 3 tầng).
 - Thành phần bấm được thấy rõ đủ 6 trạng thái: mặc định, hover, nhấn, focus (Tab), tắt, đang chọn.
 - Chế độ tối (nếu app có) và chế độ dày đặc (nếu có): soát lại tương phản, vòng focus, vùng bấm.
 

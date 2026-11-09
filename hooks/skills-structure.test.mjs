@@ -53,6 +53,67 @@ test('skill luồng chỉ ghi thứ tự: ngắn, có cột xử lý', () => {
   for (const n of ['flow-feature', 'flow-bugfix', 'flow-release']) assert.match(read(n), /Hỏng thì/, n)
 })
 
+// Chuẩn Anthropic (platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices): SKILL.md là bản điều phối ngắn
+// (quy trình + luật + chỉ file nào đọc khi nào), chi tiết ở file phụ chỉ nạp khi cần, tham chiếu một cấp, file phụ dài có mục lục.
+const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]))
+const subfiles = (n) => walk(path.join(DIR, n)).filter((f) => path.basename(f) !== 'SKILL.md' && !path.basename(f).startsWith('.'))
+  .map((f) => path.relative(path.join(DIR, n), f).replaceAll('\\', '/'))
+const body = (t) => t.replace(/^---\n[\s\S]*?\n---\n/, '')
+
+test('SKILL.md là bản điều phối gọn: ≤ 110 dòng và ≤ 9.000 byte (chuẩn: dưới 5.000 token) phần thân', () => {
+  for (const n of names) {
+    const b = body(read(n).replaceAll('\r\n', '\n'))
+    assert.ok(b.split('\n').length <= 110, `${n}: thân ${b.split('\n').length} dòng — tách chi tiết ra references/`)
+    assert.ok(Buffer.byteLength(b) <= 9000, `${n}: thân ${Buffer.byteLength(b)} byte — tách chi tiết ra references/`)
+  }
+})
+
+test('mọi file phụ đều được SKILL.md chỉ tới (một cấp), và có mục "Đọc khi cần"', () => {
+  for (const n of names) {
+    const subs = subfiles(n).filter((f) => f.endsWith('.md'))
+    if (!subs.length) continue
+    const t = read(n)
+    assert.match(t, /^## Đọc khi cần/m, `${n}: có file phụ nhưng thiếu mục "## Đọc khi cần"`)
+    for (const f of subs) assert.ok(t.includes(f), `${n}: SKILL.md không chỉ tới ${f} (file thừa hoặc bị quên)`)
+  }
+})
+
+test('file phụ không trỏ tiếp sang file phụ khác cùng skill (tham chiếu chỉ một cấp)', () => {
+  for (const n of names) {
+    const subs = subfiles(n).filter((f) => f.endsWith('.md'))
+    for (const f of subs) {
+      const t = fs.readFileSync(path.join(DIR, n, f), 'utf8')
+      for (const other of subs) {
+        if (other === f) continue
+        assert.ok(!t.includes(other) && !t.includes(`(${path.posix.basename(other)})`), `${n}/${f} trỏ tới ${other}: đưa chỉ dẫn lên SKILL.md`)
+      }
+    }
+  }
+})
+
+test('file phụ dài hơn 100 dòng có mục lục ở đầu; không dùng đường dẫn kiểu Windows', () => {
+  for (const n of names) {
+    for (const f of subfiles(n).filter((x) => x.endsWith('.md'))) {
+      const t = fs.readFileSync(path.join(DIR, n, f), 'utf8')
+      if (t.split('\n').length > 100) assert.match(t.split('\n').slice(0, 15).join('\n'), /^## Mục lục/m, `${n}/${f}: dài mà thiếu "## Mục lục" ở đầu`)
+    }
+    assert.doesNotMatch(read(n), /(?:references|assets|scripts)\\/, `${n}: đường dẫn dùng \\`)
+  }
+})
+
+// Chuẩn mở agentskills.io/specification: thư mục phụ references/ · assets/ · scripts/; name khớp tên thư mục, chữ thường/số/gạch nối,
+// không bắt đầu/kết thúc bằng gạch nối, không "--"; description 1-1024 ký tự.
+test('đúng đặc tả agentskills.io: thư mục phụ chuẩn, name và description hợp lệ', () => {
+  for (const n of names) {
+    const dirs = fs.readdirSync(path.join(DIR, n), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
+    for (const d of dirs) assert.ok(['references', 'assets', 'scripts'].includes(d), `${n}/${d}: chỉ dùng references/, assets/, scripts/`)
+    assert.match(n, /^[a-z0-9]+(?:-[a-z0-9]+)*$/, `${n}: tên sai đặc tả`)
+    assert.ok(n.length <= 64)
+    const d = read(n).match(/^description: (.+)$/m)?.[1] ?? ''
+    assert.ok(d.length >= 1 && d.length <= 1024, `${n}: description ${d.length} ký tự`)
+  }
+})
+
 test('mẫu bàn giao có đủ phần cốt lõi', () => {
   const t = fs.readFileSync(path.join(DIR, 'flow-sessions/references/handoff.md'), 'utf8')
   for (const must of ['Bước đầu tiên an toàn', 'Đang chờ user gật', 'Chưa kiểm', 'Che mọi khoá', 'không rõ']) assert.ok(t.includes(must), must)

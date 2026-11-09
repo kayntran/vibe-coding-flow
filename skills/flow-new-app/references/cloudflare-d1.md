@@ -32,7 +32,7 @@ Cloudflare/Better Auth 2026-10). D1 Free: 5 triệu dòng đọc/ngày, 100k dò
   `x-flow-version` = `env.CF_VERSION_METADATA.id` trên mọi phản hồi của Worker (mẫu Hono):
   `app.use('*', async (c, next) => { await next(); c.res.headers.set('x-flow-version', c.env.CF_VERSION_METADATA.id) })`.
   Trang tĩnh phục vụ thẳng từ `assets` không qua Worker nên không có header ⇒ đặt `"assets": { "run_worker_first": true }`.
-  Thiếu header ⇒ `release cf` dừng, không mở bản mới (chi tiết: `skills/flow-publish/recipes/cloudflare-workers.md`).
+  Thiếu header ⇒ `release cf` dừng, không mở bản mới (chi tiết: `skills/flow-publish/references/cloudflare-workers.md`).
 - **Test P-nn:** test API hai phiên chạy vào `wrangler dev` (hoặc `@cloudflare/vitest-pool-workers`): đăng ký A, B → A
   tạo → B đọc/sửa/xoá phải 403/404 → chưa đăng nhập phải 401. Tắt chặn quyền để chứng minh đỏ: tạm bỏ điều kiện
   `owner_id` của đúng route trong worktree (không commit) → test phải ĐỎ → khôi phục. Ghi `P-nn: đỏ khi tắt: có — <file>`.

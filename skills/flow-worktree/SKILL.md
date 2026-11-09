@@ -25,20 +25,7 @@ Sửa file dùng chung thì thêm vào cuối, không format lại phần ngư�
 - Worktree tạo từ commit hiện tại (`worktree.baseRef: head`). File sửa dở chưa commit ở thư mục chính không đi theo — cần chúng thì
   báo user một dòng trước.
 - Cần chạy app hoặc test mà chưa có thư viện ⇒ cài một lần theo file khoá của dự án, không làm đổi file khoá. Việc không cần thì không cài.
-
-| File khoá | Lệnh |
-|---|---|
-| `pnpm-lock.yaml` | `pnpm install --frozen-lockfile` |
-| `package-lock.json` | `npm ci` |
-| `yarn.lock` | `yarn install --immutable` (bản cũ: `--frozen-lockfile`) |
-| `bun.lock` | `bun install --frozen-lockfile` |
-| `uv.lock` | `uv sync --frozen` |
-| `poetry.lock` | `poetry install --no-update` hoặc `poetry sync` |
-| `go.sum` | `go mod download` |
-| `Cargo.lock` | `cargo fetch --locked` |
-
-Dự án ghi lệnh riêng trong `CLAUDE.md` ⇒ dùng lệnh đó. Lệnh báo file khoá lệch ⇒ báo một dòng, chỉ cập nhật khi việc đang làm có đổi thư viện.
-
+  Lệnh theo từng loại file khoá: `references/cai-thu-vien.md`. Dự án ghi lệnh riêng trong `CLAUDE.md` ⇒ dùng lệnh đó.
 - Hai phiên không chạy dev server cùng cổng: lấy cổng bằng `node ~/.claude/hooks/wt-env.mjs alloc <worktree>`. Ghi lại lệnh và cổng của
   mọi tiến trình mình bật để còn dừng lúc dọn.
 - Không có hook chặn sửa thẳng (chốt 8kxf, như AgentKit): tự giác tách worktree trước khi sửa. Repo có `.claude/allow-direct-edit` ⇒ sửa thẳng, bỏ bước này.
@@ -70,3 +57,7 @@ lựa chọn dọn chung: hỏi riêng từng bản, nói rõ sẽ mất gì. `p
 
 - Xoá worktree/branch không do phiên mình tạo khi user chưa gật (`locked` = phiên khác đang dùng).
 - `git push --force` lên nhánh chính, `git reset --hard` ở thư mục chính.
+
+## Đọc khi cần
+
+- `references/cai-thu-vien.md` — đọc khi worktree mới cần cài thư viện để chạy app hoặc test (bảng file khoá → lệnh)

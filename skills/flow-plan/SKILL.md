@@ -49,22 +49,7 @@ Mỗi task:
 khó đảo ngược nào thiếu ADR?
 
 **Cỡ L:** một lượt soát mức high, chỉ tìm lỗi thiết kế khó sửa về sau. Kiểm `node ~/.claude/hooks/cli-check.mjs <tên>` trước, chưa sẵn sàng
-thì sang bậc sau:
-
-- Đang ở Claude: **Codex** (`pick codex plan-reviewer`) → **Opus qua agy** (`pick agy plan-reviewer`) → Agent `code-reviewer` với `model: "opus"`.
-- Đang ở Codex: **Sol high** (`pick codex plan-reviewer`).
-
-```bash
-# codex-run.mjs = codex exec, tự đổi tài khoản Codex khi hết lượt và báo một dòng
-node ~/.claude/hooks/codex-run.mjs exec --sandbox read-only -m "$(node ~/.claude/hooks/models.mjs pick codex plan-reviewer)" \
-  -c model_reasoning_effort="high" -C "<gốc repo>" -o "<scratchpad>/plan-review.md" "<ĐỀ>" < /dev/null
-# agy: cd vào thư mục trống, agy -p "<ĐỀ, kèm đường dẫn tuyệt đối SPEC/PLAN>" --model "$(node ~/.claude/hooks/models.mjs pick agy plan-reviewer)" --mode plan
-```
-
-`<ĐỀ>`: "Review plan: <SPEC.md> và <PLAN.md>. Kiểm chéo SPEC↔PLAN. Chỉ báo lỗi thiết kế KHÓ SỬA SAU khi đã code: sai kiến trúc/contract, yêu
-cầu bị sót, tính năng anh em dùng chung registry/danh sách mà plan quên hoặc thiếu test đối chiếu, làn giao file, rủi ro bảo mật/dữ liệu. KHÔNG
-báo câu chữ, đặt tên, chi tiết code. CẤM đề xuất thêm tính năng. Tối đa 7 mục: mức, vấn đề, bằng chứng path:line, hướng sửa." (Bash
-`run_in_background`, ghi file, luôn `< /dev/null`.)
+thì sang bậc sau. Bậc model, lệnh chạy và `<ĐỀ>`: `references/soat-plan-model-khac.md`.
 
 Hợp nhất: kiểm từng mục vào SPEC, PLAN, code; sửa plan; ghi đúng/bác kèm lý do cuối PLAN.md.
 
@@ -93,3 +78,8 @@ User gật ⇒ mở `progress.md` cạnh SPEC.md, thi công theo `flow-build`. M
 Hook SessionStart nạp lại sổ đang dở khi mở phiên mới hoặc sau khi nén, nên sổ phải đủ để người khác làm tiếp. Cập nhật khi đổi pha, xong
 một làn. **Đang chờ user gật thì ghi rõ trong sổ; sau khi nén phải hỏi lại, không coi là đã được gật.** Quyết định user duyệt ghi sổ chốt, không ghi
 vào sổ này. Bước gộp (`flow-merge`) tự ghi `Trạng thái: xong`.
+
+## Đọc khi cần
+
+- `references/plan-format.md` — đọc khi viết PLAN.md (kiến trúc 9 dòng, bảng làn, plan sống) và khi mở `progress.md`
+- `references/soat-plan-model-khac.md` — đọc khi plan cỡ L cần soát bằng model khác

@@ -21,8 +21,12 @@ node ~/.claude/hooks/backup.mjs trang-thai <thư-mục-app>               # ch�
 User nói không ⇒ `chon off … --dong-y` để ghi lại lựa chọn (kiểm trước phát hành không đòi nữa).
 
 **Supabase gói miễn phí có dữ liệu thật:** chỉ khuyên nâng Pro (nói phí); user đồng ý thì ghi `chon on <app> --supabase-free --dong-y`.
-Không tự sao lưu. Trang `docs/BACKUP.md` do `backup.mjs` sinh; mẫu ở `templates/BACKUP.md`.
+Không tự sao lưu. Trang `docs/BACKUP.md` do `backup.mjs` sinh (mẫu: mục "Đọc khi cần").
 
 Khôi phục vào dữ liệu thật là ghi đè: nêu tên dữ liệu và thời điểm bản sao, hỏi user trước.
+
+## Đọc khi cần
+
+- `assets/BACKUP.md` — khi cần xem mẫu trang `docs/BACKUP.md`
 
 **Báo user:** đã làm gì · sao lưu nằm ở đâu, bao lâu một lần · lần khôi phục thử gần nhất · còn gì cần bạn làm.

@@ -556,7 +556,7 @@ function cfFirstRelease({ dir, run, wr, pw, url, worker, sha, msg, tick, stateOp
         ],
       }
     }
-    if (!conf.ok) notes.push(`Cảnh báo: ${conf.error ? `không gọi được ${url} (${conf.error})` : `${url} không trả header ${VERSION_HEADER}`} nên chưa chắc đây là app của Worker vừa tạo — thêm binding version_metadata và header theo công thức Workers (recipes/cloudflare-workers.md).`)
+    if (!conf.ok) notes.push(`Cảnh báo: ${conf.error ? `không gọi được ${url} (${conf.error})` : `${url} không trả header ${VERSION_HEADER}`} nên chưa chắc đây là app của Worker vừa tạo — thêm binding version_metadata và header theo công thức Workers (skills/flow-publish/references/cloudflare-workers.md).`)
   }
   say('Đang chạy bài thử nhanh trên địa chỉ thật…')
   const sm = smoke({ dir, run, pw, url })
@@ -650,7 +650,7 @@ function cfGradual({ dir, run, wr, pw, url, worker, sha, tick, stateOpts, say, s
     const reason = !conf.saw
       ? (conf.error
         ? `Không gọi được ${url} để xác nhận bản đang phục vụ (${conf.error})`
-        : `${url} không trả header ${VERSION_HEADER} nên chưa xác nhận được bài thử chạm đúng bản mới — thêm binding "version_metadata" và đặt header ${VERSION_HEADER} = env.CF_VERSION_METADATA.id trong Worker theo công thức Workers (recipes/cloudflare-workers.md), rồi phát hành lại`)
+        : `${url} không trả header ${VERSION_HEADER} nên chưa xác nhận được bài thử chạm đúng bản mới — thêm binding "version_metadata" và đặt header ${VERSION_HEADER} = env.CF_VERSION_METADATA.id trong Worker theo công thức Workers (skills/flow-publish/references/cloudflare-workers.md), rồi phát hành lại`)
       : `Sau ${PROBE_TRIES} lần dò, ${url} vẫn trả bản ${shortId(conf.seen)} chứ không phải bản mới (${shortId(id)}) — header chọn bản chưa áp dụng, hoặc --worker/--url trỏ nhầm app`
     return pullBack(`${reason}, nên CHƯA mở bản mới cho người dùng`)
   }

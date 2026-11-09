@@ -83,3 +83,4 @@ Mặc định chỉ báo, không tự sửa. Báo cáo một trang trong chat, n
 
 Khuôn: **đã kiểm phần nào · lỗi theo mức · đã xét và bác · chưa kiểm được gì · đây không phải pentest**.
 Lưu báo cáo ở `docs/specs/<tính năng>/notes/security.md` khi có thư mục tính năng; không ghi giá trị khoá vào đó.
+

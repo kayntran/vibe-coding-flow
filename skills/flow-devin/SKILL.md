@@ -50,7 +50,7 @@ Làm từng bước tay thì theo thứ tự:
 2. `sync` — máy ảo chạy đúng bản đang sửa: so cây git hai bên, lệch ⇒ dừng. `--setup` chạy luôn lệnh `setup` của
    `devin.json`; `--full` chép cả bản code (kho không ở GitHub kayntran thì tự làm vậy).
 3. `run -- "<cài phụ thuộc>"` (nếu chưa `--setup`).
-4. Mở app (mục 3).
+4. Mở app (mục 3, `references/theo-loai-app.md`).
 5. `forward` nếu cần.
 6. Lái app, chụp màn hình.
 7. `get` ảnh về `<scratchpad>/qa/`.
@@ -70,26 +70,7 @@ kết quả (ảnh, JSON) lấy bằng `get`. Gọi từ Git Bash thì `/c` bị
 dùng `-- cmd.exe /c …`.
 
 ## 3. Theo loại app
-- **Webapp / tiện ích (linux):** làm hết trên máy ảo:
-  - `run -- "<setup>"`;
-  - lần đầu chạy `npx playwright install --with-deps chromium`;
-  - chạy dev server nền, rồi chạy Playwright ngay trên máy ảo, ảnh ghi vào một thư mục rồi `get` về.
-
-  Muốn mở bằng trình duyệt máy user (cho user xem) ⇒ `forward <PORT_BASE>:<cổng app>`.
-- **Desktop Windows:** lệnh qua ssh chạy ở phiên ẩn, nên app GUI phải mở bằng `gui [--cwd <thư mục>] -- <exe> <args>`
-  (hiện trên màn hình của máy ảo).
-  - Electron: thêm `--remote-debugging-port=<R>`. Bản dev: `gui --cmd "npm run dev -- --remoteDebuggingPort <R>"`.
-  - Wails/WebView2: đặt `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=<R>`.
-
-  Sau đó `forward <PORT_BASE>:<R>`, rồi Playwright trên máy user `chromium.connectOverCDP('http://127.0.0.1:<PORT_BASE>')`.
-  Chỉ một kết nối CDP, không mở trình duyệt ngầm nào trên máy user.
-- **Âm thanh trên Windows:** dịch vụ âm thanh tắt sẵn. `"audio": true` ⇒ `up` bật dịch vụ. Máy ảo không có loa/mic
-  thật, chỉ có thiết bị ảo do app cài (vd VB-CABLE). Cần mic/loa thật ⇒ nhãn `real-audio` ⇒ máy user.
-- **App Mac:** máy macos, cùng các bước.
-- **Thử cài trên máy sạch:** tải bản cài trên máy ảo (`run -- "curl -L -o …"`), cài im lặng, mở bằng `gui`. Máy của dự
-  án đã cài bản cũ mà cần máy sạch thật ⇒ `rm` rồi `up`, mất đồ đã cài (ghi vào báo cáo).
-- **Kit trên Mac:** `node ~/.claude/hooks/mac-check.mjs` mặc định chạy trên máy macOS Devin. `--host <ssh>` chỉ dùng
-  khi có Mac riêng.
+Cách mở app và lái theo từng loại (webapp, desktop Windows, âm thanh, Mac, máy sạch, kit trên Mac) ⇒ `references/theo-loai-app.md`.
 
 ## 4. Khoá
 `run --env TÊN1,TÊN2 -- <lệnh>` (hoặc `--env @config` = danh sách `env` trong `devin.json`). Giá trị lấy từ môi trường hoặc `.env` của dự án, chỉ sống trong lần chạy đó. Không ghi
@@ -103,16 +84,11 @@ Thêm dòng `Nơi chạy: máy ảo Devin <os> (<id>)` hoặc `Nơi chạy: máy
 - Exit 3 (Devin chưa đăng nhập, lỗi hoặc hết hạn mức) ⇒ chạy máy user, báo một dòng. Không vòng thử lại.
 - Máy của dự án bị Devin xoá ⇒ `up` tự tạo máy mới.
 - `sync` báo cây lệch ⇒ dừng, không test bản sai.
-- Hai `job` cùng dự án (vd 2–3 qa-tester song song) dùng chung một máy: job sau tự chờ job trước (≤ 20 phút, quá hạn ⇒ máy
-  user). `sleep` báo máy bận ⇒ để job kia tự cho ngủ; `--force` chỉ khi chắc job kia đã chết. Làm từng bước tay (không
-  `job`) thì không có giữ chỗ ⇒ đừng chạy song song với job khác của cùng dự án.
+- Hai `job` cùng dự án dùng chung một máy; làm từng bước tay (không `job`) thì không có giữ chỗ ⇒ đừng chạy song song với
+  job khác của cùng dự án. Chi tiết chạy chung, xoá máy, chế độ tạo máy, phanh hạn mức, phí ⇒ `references/van-hanh-han-muc.md`.
 - User nói "xoá máy ảo của dự án" ⇒ `rm --dir <repo> [--os <os>]`, kể user rằng code và khoá trên máy đó mất theo.
-  Devin bỏ qua lệnh xoá khi máy đang ngủ, nên công cụ tự đánh thức máy trước (~30 s) rồi mới xoá.
-- Công cụ tự chọn chế độ rẻ nhất Devin còn cho khi tạo máy (`swe-2-medium` → `lite` → `normal` → mặc định; đổi chế độ thì
-  ghi `mode-fallback` vào `devin-vm.log`). Không giao việc cho AI của Devin, không gửi prompt nào khác.
-- Phanh hạn mức: hạn mức NGÀY của Devin còn dưới 20% ⇒ `where` trả `runner:"local"` (kèm giờ hồi, giờ Việt Nam) và
-  `up` từ chối bật/đánh thức máy, nên `job` tự chạy máy user. Đổi ngưỡng bằng biến `DEVIN_VM_MIN_DAILY`. `status` cho
-  thấy `quota` (`daily`/`weekly` %, giờ hồi); không đọc được số thì không chặn. `devin-vm.log` ghi % ngày lúc bắt đầu và
-  lúc xong của `up` / `job` để biết mỗi lần chạy tốn bao nhiêu.
-- Phí: máy thức trừ hạn mức Devin (~2% ngày / 30 phút), máy ngủ không trừ. Xem máy đang thức: `status --all`. Đo thật
-  31/10: một ngày dựng và thử (8 máy, có lúc 3–4 máy thức cùng lúc) tốn 100% hạn mức ngày và 53% hạn mức tuần.
+
+## Đọc khi cần
+
+- `references/theo-loai-app.md` — đọc khi bắt đầu mở app và lái: chọn cách theo loại app (webapp, Windows, âm thanh, Mac, máy sạch, kit trên Mac)
+- `references/van-hanh-han-muc.md` — đọc khi có nhiều job cùng dự án, khi xoá máy ảo, khi `where`/`up` trả về do hạn mức Devin, hoặc khi cần biết phí

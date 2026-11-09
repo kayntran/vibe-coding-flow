@@ -36,18 +36,8 @@ Song song: nhiều `create_agent` trong MỘT message, giới hạn làn như `f
 
 ## Soát code bằng model khác (thay review-ext gọi CLI)
 
-Chỉ khi `pick` ra `viaPaseo: true` (macOS/Linux); Windows xem đầu skill.
-
-1. `node ~/.claude/hooks/review-ext.mjs --model codex --wt "<WT>" --brief <BRIEF> --note "<…>" --prepare "<thư mục mới>"` ⇒ JSON
-   `{workspace, prompt, result}`: bản sao HEAD đã lọc khoá/dữ liệu riêng, không có .git. Exit 3 ⇒ không gửi, như cũ.
-2. `create_workspace {isolation:"local", path:<workspace>}` → `create_agent` với `pick security-reviewer|code-reviewer` (Codex),
-   prompt: "Đọc `<prompt>` và làm đúng như nó yêu cầu. Chỉ đọc code, không sửa file nào ngoài `<result>`. Ghi JSON review vào
-   `<result>`."
-3. Phiên xong ⇒ `node ~/.claude/hooks/review-ext.mjs --collect "<workspace>/<result>" --out "<S>/review-codex.json" --model codex`
-   (bóc JSON, quét khoá; exit 3 ⇒ coi như lượt hỏng, sang model dự phòng). Rồi `archive_workspace` + `don.mjs` thư mục đó.
-4. Grok/Gemini (Cursor, agy) vẫn qua `review-ext.mjs --model grok|flash` như cũ.
-
-Tìm lỗi (`debugger` hỏi thêm Codex) cũng vậy: phiên Codex `pick debugger --host codex`, chỉ phân tích, không sửa.
+Chỉ khi `pick` ra `viaPaseo: true` (macOS/Linux); Windows xem đầu skill. Các bước (`review-ext.mjs --prepare` → phiên Codex →
+`--collect`), cả tìm lỗi bằng Codex ⇒ `references/soat-code-model-khac.md`.
 
 ## Nhắn, bàn giao
 
@@ -60,3 +50,7 @@ Tìm lỗi (`debugger` hỏi thêm Codex) cũng vậy: phiên Codex `pick debugg
 Máy tự kiểm vẫn bằng Playwright (`flow-qa`). Khi hỏi user "giao diện đã ổn chưa?" ⇒ mở app bằng `browser_new_tab`/`browser_navigate`
 tới địa chỉ dev server, chụp `browser_screenshot` ở 3 cỡ (`browser_resize`), để user xem ngay trong Paseo. Tool browser chưa bật
 ⇒ gửi ảnh chụp như cũ.
+
+## Đọc khi cần
+
+- `references/soat-code-model-khac.md` — đọc khi cần soát code hoặc tìm lỗi bằng phiên Codex/model khác và `pick` ra `viaPaseo: true`

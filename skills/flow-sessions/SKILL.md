@@ -28,3 +28,7 @@ nhắn ghi "From <tên phiên>", không bị giữ; không gửi lại lần ba.
 ## Bàn giao sang phiên mới
 
 Phiên mới nhận việc dở thì tin đầu viết theo `references/handoff.md`, có bước đầu tiên an toàn và phần chưa biết ghi rõ.
+
+## Đọc khi cần
+
+- `references/handoff.md` — đọc khi bàn giao việc dở sang phiên mới (mẫu tin đầu)

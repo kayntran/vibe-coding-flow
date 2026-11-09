@@ -17,7 +17,7 @@ dùng đang thấy gì, bản nào đang chạy; không tự quay.
 
 - Cloudflare Workers: `node ~/.claude/hooks/release.mjs rollback [--version-id <mã>] [--url https://…]`.
 - VPS: `node ~/.claude/hooks/release.mjs vps --rollback --run` (thiếu `--run` chỉ in lệnh).
-- Pages, Supabase, tiện ích, desktop: không có lệnh ⇒ làm theo công thức của nền trong `../flow-publish/recipes/`.
+- Pages, Supabase, tiện ích, desktop: không có lệnh ⇒ làm theo công thức của nền trong `../flow-publish/references/`.
 
 Lệnh quay lại không qua kiểm trước phát hành vì đây là cứu hộ.
 

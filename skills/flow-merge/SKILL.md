@@ -41,16 +41,15 @@ Thiếu bước kiểm không phải lý do đứng lại: test, review, QA là 
    `flow-devin`, bản đã commit; exit 3 = Devin không dùng được ⇒ báo user một dòng, không chặn gộp).
    Rebase làm diff đổi nội dung (xung đột, main có sửa chạm vùng mình) ⇒ chạy lại `flow-review` (và `flow-qa` nếu đụng UI) cho phần đổi.
 4. `ExitWorktree` `action: "keep"` → về thư mục chính, soi lại `git worktree list` + file các phiên khác đang đổi, rồi
-   `git merge --ff-only <branch>`. File nằm sẵn ở thư mục chính trùng tên với file của nhánh ⇒ thuộc việc dở của phiên khác thì giữ nguyên và hỏi user; còn lại AI so nội dung, cất sang thư mục
-   sao lưu rồi gộp tiếp; không đưa lệnh cho user chép, không sửa kit.
-5. **Đóng sổ (sau gộp, trước push):** có `docs/specs/<YYYY-MM-DD>-<slug>/progress.md` ⇒ chạy
+   `git merge --ff-only <branch>`. File trùng tên đã nằm sẵn ở thư mục chính: việc dở của phiên khác thì giữ nguyên và hỏi user; còn lại cất sao lưu rồi gộp tiếp.
+5. **Đóng sổ (sau gộp, trước push):** Có `docs/specs/<YYYY-MM-DD>-<slug>/progress.md` ⇒ chạy
    `node ~/.claude/hooks/lib/so-chot.mjs xong <projectRoot> <YYYY-MM-DD>-<slug>` — ghi `Trạng thái: xong` + `Xong ngày` vào
    progress.md (hook thôi nạp sổ này), cất kho các quyết định ✅ phạm vi tính năng (điều `chung` và điều ⚠️ chờ xem lại giữ nguyên) và
    sinh lại INDEX/ROADMAP. Dùng lệnh này, KHÔNG sửa progress.md bằng Edit (lệnh còn cất kho quyết định và sinh lại INDEX/ROADMAP). Việc có chạy
    `flow-impact` ⇒ cập nhật mục tương ứng trong `docs/feature-map.md` (registry · tính năng tiêu thụ · file test đối chiếu). Rồi commit
    phần đóng sổ, kèm `docs/IDEAS.md` nếu có dòng chưa commit (sổ ý tưởng luôn ghi ở thư mục chính, kể cả khi gọi từ worktree, nên
    nhánh không mang nó).
-6. **Rút kinh nghiệm (sau gộp, cùng commit đóng sổ):** nhìn lại việc vừa xong — lỗi QA/review, vòng sửa, phát hiện bất ngờ trong PLAN.
+6. **Rút kinh nghiệm (sau gộp, cùng commit đóng sổ):** Nhìn lại việc vừa xong — lỗi QA/review, vòng sửa, phát hiện bất ngờ trong PLAN.
    Mỗi điều QUA "durable bar" (đọc code/test/tài liệu hiện có KHÔNG suy ra được, và quên nó sẽ tái phạm) ⇒
    `node ~/.claude/hooks/solutions.mjs ghi <projectRoot> -` (JSON qua stdin); điều tầm thường ⇒ không ghi. Lỗi khớp bài học cũ ⇒
    `solutions.mjs gap <projectRoot> <dang_loi>`; lặp lần 2 mà chưa có máy kiểm ⇒ đề xuất theo thang nó in (luật có sẵn → luật cấm tuỳ
@@ -62,25 +61,12 @@ Thiếu bước kiểm không phải lý do đứng lại: test, review, QA là 
 8. **Trước khi push:** `git log --oneline origin/main..main`. Ngoài commit của mình còn commit khác chưa push (của phiên khác/việc cũ) ⇒
    liệt kê cho user, hỏi có push kèm không — push là đẩy tất cả. Rồi `git push origin main` (nếu có remote).
 9. **Dọn:** theo mục "Dọn" của skill `flow-worktree` cho đúng worktree vừa gộp.
-10. Thứ tự cố định: gộp → `so-chot.mjs xong` → commit → push → dọn worktree. Bị ngắt giữa chừng ⇒ chạy lại từ bước 5: `xong` idempotent,
-    không tạo thay đổi trùng (đã `xong` thì không ghi lại, không có thay đổi thì không commit).
-11. `merge --ff-only` bị từ chối ⇒ không ép, không stash hộ, không đụng file dở của phiên khác. Main có commit mới ⇒ `EnterWorktree` `path`
-    quay lại, làm lại bước 1–10; trùng file dở ⇒ hỏi user.
-
-## Nhiều làn song song
-
-1. Mỗi làn đã qua `lane-check audit` (không có file ngoài scope) — xem skill `flow-team`.
-2. Dò xung đột cả bộ một lần: `node ~/.claude/hooks/lane-check.mjs conflicts --base <nhánh-tích-hợp> <làn1> <làn2> …` ⇒ in cặp xung đột +
-   **thứ tự gộp gợi ý**. Hai làn xung đột ⇒ gộp nối tiếp, làn sau rebase lên nhánh tích hợp rồi test lại trước khi gộp; không gộp song song.
-3. Gộp từng làn vào **nhánh tích hợp** của tính năng (không vào main) theo thứ tự đó, kết hợp thứ tự phụ thuộc (contract → backend →
-   frontend → test → docs), chạy test giữa mỗi lần gộp.
-4. Trên nhánh tích hợp: test đủ bộ + `flow-qa` các luồng chính + `flow-review` MỘT lần cho cả nhánh.
-5. Rồi gộp nhánh tích hợp vào main theo mục "Một nhánh" (gồm bước đóng sổ). Xong: dọn từng worktree làn theo `flow-worktree`
-   (hoặc `node ~/.claude/hooks/wt-env.mjs prune`).
+10. Thứ tự cố định: gộp → `so-chot.mjs xong` → commit → push → dọn worktree. Bị ngắt giữa chừng ⇒ chạy lại từ bước 5.
+11. `merge --ff-only` bị từ chối ⇒ không ép, không stash hộ, không đụng file dở của phiên khác.
 
 ## Sau push
 
-CI đỏ ⇒ Agent `debugger` với run id (`gh run view <id> --log-failed`) ⇒ sửa trên nhánh mới theo skill `flow-fix`.
+CI đỏ ⇒ Agent `debugger`, sửa trên nhánh mới theo skill `flow-fix`.
 Báo user theo khuôn: đã gộp gì · người dùng thấy gì khác · phần chưa kiểm. Gộp chưa phải phát hành: không trình bày như app đã lên mạng,
 và không tự phát hành; muốn lên mạng là việc riêng, phải hỏi.
 
@@ -88,3 +74,8 @@ và không tự phát hành; muốn lên mạng là việc riêng, phải hỏi.
 
 - Xoá worktree/branch không do phiên mình tạo (`locked` = phiên khác đang dùng).
 - `git push --force` lên nhánh chính, `git reset --hard` ở thư mục chính.
+
+## Đọc khi cần
+
+- `references/nhieu-lan-song-song.md` — đọc khi gộp nhiều làn song song (vào nhánh tích hợp, không vào main)
+- `references/tinh-huong-git.md` — đọc khi file trùng tên, bị ngắt giữa chừng, `--ff-only` bị từ chối, CI đỏ

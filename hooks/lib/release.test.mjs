@@ -540,7 +540,7 @@ test('finding 2 cf: Worker KHÔNG trả header x-flow-version ⇒ exit 1 trướ
   assert.match(x.text, new RegExp(`không trả header ${VERSION_HEADER}`))
   assert.match(x.text, /version_metadata/)
   assert.match(x.text, /CF_VERSION_METADATA\.id/)
-  assert.match(x.text, /recipes\/cloudflare-workers\.md/)
+  assert.match(x.text, /references\/cloudflare-workers\.md/)
 })
 
 test('finding 2 cf: không gọi được địa chỉ (mạng/DNS) ⇒ cũng không mở; nói lý do thật', () => {

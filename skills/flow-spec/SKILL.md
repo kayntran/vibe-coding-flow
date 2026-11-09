@@ -57,26 +57,14 @@ script, tác vụ nền) ⇒ bỏ bước này, thay bằng **một tình huốn
 
 ## 5. Viết SPEC
 
-`docs/specs/<YYYY-MM-DD>-<slug>/SPEC.md`: phần user duyệt đứng đầu, đời thường, kỹ thuật tách sau. Máy kiểm:
-`node ~/.claude/hooks/spec-check.mjs spec <SPEC.md>` (định dạng ADR-0006).
-
-```
-## Bạn duyệt
-### Ai dùng
-### Các màn hình            ← mỗi màn: #### <tên màn> + bảng | mã | khi | thấy gì | làm được gì |; mã S-nn duy nhất toàn dự án, tiếp số sau mã lớn nhất trong docs/specs
-                            ← đủ trạng thái có dữ liệu · trống · đang tải · lỗi ("Không tải dữ liệu" ⇒ chỉ cần có dữ liệu)
-### Làm được gì
-### Để sau
-### Phí phát sinh
-### Ai thấy/sửa được dữ liệu gì   ← - P-01: <ai> <thấy|sửa|xoá> <gì> · hoặc "Không áp dụng — <lý do>" (P-nn cũng duy nhất toàn dự án)
-## Kỹ thuật
-```
+`docs/specs/<YYYY-MM-DD>-<slug>/SPEC.md`: phần user duyệt đứng đầu, đời thường, kỹ thuật tách sau, theo mẫu `assets/spec.md`
+(định dạng ADR-0006). Máy kiểm: `node ~/.claude/hooks/spec-check.mjs spec <SPEC.md>`.
 
 - Trong "Làm được gì" và phần kỹ thuật: mỗi tiêu chí có mã `AC-nn`, dạng `KHI <tình huống> THÌ HỆ THỐNG PHẢI <hành vi>`, mỗi dòng dịch thẳng thành test.
 - Yêu cầu phi chức năng (hiệu năng, offline, i18n…) chỉ khi có thật.
 - Chỗ chưa rõ đánh `[CẦN LÀM RÕ]`; còn dấu này thì chưa xong.
 - App có tài khoản/dữ liệu mà chưa chốt chỗ để ⇒ hỏi một câu "dữ liệu để đâu" [d8dk], không mặc định; gợi ý theo nhu cầu từ
-  `~/.claude/skills/flow-new-app/recipes/` (Supabase, Cloudflare D1, Postgres trên VPS, dịch vụ user đã có).
+  `~/.claude/skills/flow-new-app/references/` (Supabase, Cloudflare D1, Postgres trên VPS, dịch vụ user đã có).
 - Mỗi `P-nn` sẽ thành test ở lớp chặn quyền thật (skill `flow-qa`).
 - Chạm thứ dùng chung (provider, model, gói, cài đặt, tool AI agent…) ⇒ chạy `flow-impact`; kết quả ghi vào SPEC.
 
@@ -91,3 +79,8 @@ Tóm tắt ngắn trong chat, chép bản xem vào thư mục mở phiên và m�
 hỏi bằng AskUserQuestion. Đây là cổng về PHẠM VI. Quyết định vừa duyệt ghi sổ chốt, không ghi vào progress.md.
 
 Duyệt xong: đang chạy trong `flow-feature` thì quay về bảng của luồng. User chỉ nhờ viết SPEC thì dừng ở đây, nói bước tiếp là gì.
+
+## Đọc khi cần
+
+- `assets/spec.md` — khi viết SPEC.md (bước 5)
+- `references/edge-cases.md` — khi dò trường hợp hiếm (bước 6)

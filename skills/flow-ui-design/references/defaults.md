@@ -16,4 +16,4 @@ cách.
 
 Không tạo số liệu, lời khen, logo giả. Dữ liệu mẫu chỉ dùng cho bản xem thử.
 
-Bảng trên là giá trị khởi đầu cho bộ token 3 tầng ở `tokens.md` (có ngay từ đầu, đủ 8 nhóm, trạng thái, sáng/tối, độ dày).
+Bảng trên là giá trị khởi đầu cho bộ token 3 tầng.

@@ -1,7 +1,7 @@
 # Design token — 3 tầng, đủ từ đầu [zgp6]
 
 Mọi app có giao diện phải có bộ token này **trước màn đầu tiên** (`flow-new-app` dựng ngay khi tạo; app có sẵn chưa có token thì
-dựng trước khi làm màn mới). Giá trị đầu lấy từ `defaults.md`; chọn xong bản demo thì chốt lại theo bản đó, ghi hướng gu vào sổ chốt.
+dựng trước khi làm màn mới). Giá trị đầu lấy từ bảng mặc định khi chưa có gu; chọn xong bản demo thì chốt lại theo bản đó, ghi hướng gu vào sổ chốt.
 Định dạng tham chiếu: W3C Design Tokens (DTCG) — không bắt buộc xuất file JSON, chỉ cần một nguồn trong code.
 
 ## 3 tầng

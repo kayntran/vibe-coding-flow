@@ -14,7 +14,8 @@ Hai chế độ dùng chung một bộ luật: **Làm** khi đang viết giao di
 3. Bản demo đã chọn và `UX.md`.
 4. Luật phong cách UI ở `~/.claude/rules/ui-style.md` (đọc nếu chưa nạp): mỗi màn một việc, ít chữ, nhãn 1-3 chữ dạng động từ,
    phản hồi bằng trạng thái, lỗi một dòng cạnh chỗ sai. Trùng với luật ở đây thì luật đó thắng.
-5. Mặc định trong `references/defaults.md`, chỉ khi các nguồn trên không nói.
+5. Mặc định trong `references/defaults.md`, chỉ khi các nguồn trên không nói. Bảng đó là giá trị khởi đầu cho bộ token 3 tầng
+   (`references/tokens.md`): có ngay từ đầu, đủ 8 nhóm, trạng thái, sáng/tối, độ dày.
 
 ## Chế độ Làm
 
@@ -63,3 +64,9 @@ Mỗi dòng: `màn, cỡ, trạng thái | thấy gì | ảnh | hướng sửa`. 
 
 Báo theo khuôn: đã sửa gì, người dùng thấy gì khác, còn gì cần user quyết, phần nào chưa kiểm. Có đụng giao diện thì hỏi "giao diện
 đã ổn chưa?" theo luật trong `CLAUDE.md`; sửa rất nhỏ chỉ gửi ảnh trước/sau.
+
+## Đọc khi cần
+
+- `references/tokens.md` — khi dựng hoặc thêm token (chế độ Làm, bước 0 và 2), hoặc soát màn dùng sai tầng token
+- `references/defaults.md` — khi sổ chốt, token trong code và lời user đều không nói về màu, chữ, khoảng cách…
+- `references/checklist.md` — khi soát (chế độ Soát, bước 2)

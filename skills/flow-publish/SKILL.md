@@ -29,19 +29,15 @@ Chỉ quét bản chạy ở máy với dữ liệu mẫu; **không quét chủ 
 
 - **ZAP, mỗi lần phát hành:** bật app local rồi `node ~/.claude/hooks/zap-scan.mjs -t http://localhost:<cổng>`. Giữ mã thoát
   cho bước 2. 1 = lỗi cao (chặn, kể lỗi bằng lời) · 2 = lỗi vừa (cảnh báo) · 3 = thiếu Java/ZAP (đưa đúng lệnh cài in ra;
-  không cài được ⇒ chặn). Báo nhầm: chỉ miễn qua `docs/security-ignore.json` (`rule`, `reason`, `until` YYYY-MM-DD; hết hạn ⇒ chặn lại).
-- **Strix (quét bằng AI), chỉ khi app nhạy cảm** (tiền, sức khoẻ, dữ liệu cá nhân thật) **hoặc user bảo:** nói trước chi phí
-  và thời gian, user gật mới chạy:
-  `node ~/.claude/hooks/strix-scan.mjs -t http://localhost:<cổng> --max-budget <USD> --scan-mode quick|standard|deep`.
-  Thiếu `--max-budget` ⇒ bị từ chối. Không có Docker (exit 3) ⇒ bỏ qua và ghi vào báo cáo: "chưa quét sâu được, lỗi phân
-  quyền/nghiệp vụ có thể còn sót".
+  không cài được ⇒ chặn). Báo nhầm: chỉ miễn theo `references/quet-bao-mat.md`.
+- **Strix (quét bằng AI), chỉ khi app nhạy cảm** (tiền, sức khoẻ, dữ liệu cá nhân thật) **hoặc user bảo:** đọc
+  `references/quet-bao-mat.md`; nói trước chi phí và thời gian, user gật mới chạy.
 
 ## 2. Kiểm trước phát hành — luôn chạy
 
 `node ~/.claude/hooks/release.mjs preflight --zap-exit <mã zap> [--has-data] [--first-release]`
 
-`cf` và `vps --run` tự chạy lại bước này. `cf` build trước rồi mới kiểm nên quét khoá chạy đúng bản sắp tải lên; chạy
-`preflight` riêng mà chưa build sẽ báo "chưa build", cứ chạy `release cf` là được.
+`cf` và `vps --run` tự chạy lại bước này (chi tiết khi chạy riêng `preflight`: `references/preflight-cf.md`).
 
 - **Exit 1 — chặn, gật cũng không qua:** khoá trong bản build → skill `flow-key-leak` · lỗi bảo mật mức cao → sửa. Kể từng mục bằng lời kèm việc làm tiếp.
 - **Exit 4 — thiếu test, soát code, QA, chưa tập quay lại (từ lần thứ 3), sao lưu chưa chọn hoặc chưa đạt:** kể bằng lời thiếu gì và
@@ -54,21 +50,12 @@ Chỉ quét bản chạy ở máy với dữ liệu mẫu; **không quét chủ 
 
 ## 3. Phát hành theo nền
 
-Mở đúng công thức, làm theo; không chép lại ở đây:
-
-| Nền | Công thức |
-|---|---|
-| Cloudflare Workers | `recipes/cloudflare-workers.md` |
-| Cloudflare Pages | `recipes/cloudflare-pages.md` |
-| Supabase (database) | `recipes/supabase.md` |
-| VPS | `recipes/vps.md` |
-| Tiện ích trình duyệt | `recipes/extension.md` |
-| App desktop | `recipes/desktop-update.md` |
+Mở đúng công thức của nền (danh sách ở "Đọc khi cần"), làm theo; không chép lại ở đây.
 
 `release cf` cần Worker trả header `x-flow-version` (công thức Workers nói cách thêm); thiếu thì lệnh dừng, chưa mở bản mới.
 
 Xong: bài thử nhanh (`@smoke`) đã chạy trong lệnh; `release` tự ghi mốc nhắc xem lỗi (1 và 7 ngày) vào `.claude/release.json`,
-nền không do `release` phát hành thì tự ghi `checkAt`. Điền `docs/RUNBOOK.md` từ `templates/RUNBOOK.md`, ghi cách quay lại
+nền không do `release` phát hành thì tự ghi `checkAt`. Điền `docs/RUNBOOK.md` từ `assets/RUNBOOK.md`, ghi cách quay lại
 và bản đang chạy (tên cấu hình, không có giá trị khoá), rồi nói user nơi đọc.
 
 **Thử nhanh trượt:** chỉ báo bằng lời: lỗi gì, người dùng đang thấy gì, bản nào đang chạy. Không tự quay lại. User bảo quay
@@ -76,10 +63,20 @@ và bản đang chạy (tên cấu hình, không có giá trị khoá), rồi n�
 
 ## 4. Xem lỗi
 
-User hỏi "app có lỗi không" hoặc tới mốc nhắc ⇒ `node ~/.claude/hooks/release.mjs logs --since 24h` (hoặc `7d`), kể lại: lỗi gì,
-bao nhiêu lần, từ khi nào, ở luồng nào. Log miễn phí giữ ngắn (Workers 3 ngày, Supabase 1 ngày): lệnh sẽ nói khoảng nào
-không còn log; nhắc lại, đừng kết luận "không lỗi". Exit 3 (thiếu token đọc log) ⇒ đưa đúng việc cần làm; token chỉ-đọc,
-không dán ra chat.
+User hỏi "app có lỗi không" hoặc tới mốc nhắc ⇒ đọc `references/xem-loi.md` rồi làm theo.
+
+## Đọc khi cần
+
+- `references/cloudflare-workers.md` — khi nền là Cloudflare Workers
+- `references/cloudflare-pages.md` — khi nền là Cloudflare Pages
+- `references/supabase.md` — khi nền là Supabase
+- `references/vps.md` — khi nền là VPS
+- `references/extension.md` — khi là tiện ích trình duyệt
+- `references/desktop-update.md` — khi là app desktop
+- `assets/RUNBOOK.md` — khi điền `docs/RUNBOOK.md`
+- `references/quet-bao-mat.md` — khi ZAP báo nhầm cần miễn, hoặc cần quét Strix (bước 1)
+- `references/preflight-cf.md` — khi `preflight` riêng báo "chưa build"
+- `references/xem-loi.md` — khi xem lỗi bản thật (bước 4)
 
 ## Báo user
 

@@ -29,31 +29,14 @@ User không biết thì không gặng: ghi là giả định và đi tiếp.
 
 ## 3. Viết tình huống dùng
 
-Mỗi nhóm người dùng khác cách dùng là một dòng, thường 1-3 dòng. Không viết chân dung nhân vật dài dòng.
-
-| Trường | Ví dụ |
-|---|---|
-| Ai | Shipper giao đơn |
-| Lúc nào, bao lâu một lần | Giữa hai điểm giao, 30 lần một ngày |
-| Ở đâu, máy gì | Ngoài đường, điện thoại, nắng |
-| Đang thế nào | Vội, một tay, mạng chập chờn |
-| Muốn xong việc gì | Đánh dấu đã giao trong dưới 5 giây |
-| Trước và sau đó làm gì | Trước: xem địa chỉ. Sau: đi điểm tiếp |
-| Mức chắc | **Bạn nói**, **Dữ liệu cho thấy**, hoặc **AI đoán** |
+Mỗi nhóm người dùng khác cách dùng là một dòng, thường 1-3 dòng. Không viết chân dung nhân vật dài dòng. Mỗi dòng gồm các
+trường: Ai · Lúc nào, bao lâu một lần · Ở đâu, máy gì · Đang thế nào · Muốn xong việc gì · Trước và sau đó làm gì · Mức chắc
+(**Bạn nói**, **Dữ liệu cho thấy**, hoặc **AI đoán**). Bảng ví dụ điền sẵn: `assets/ux.md`.
 
 ## 4. Suy ra quyết định
 
-Mỗi đặc điểm của tình huống phải đổi được một điều trong app, không đổi được gì thì bỏ.
-
-| Tình huống | Hệ quả |
-|---|---|
-| Một tay, điện thoại | Việc chính ở vùng ngón cái, nút to |
-| Vội, làm lặp lại | Bỏ bước, mở ra đúng việc đó, nhớ lựa chọn lần trước |
-| Mạng yếu | Giữ dữ liệu đã nhập, lưu khi có mạng lại |
-| Hiếm khi dùng | Rõ từng bước, không dựa vào việc đã nhớ |
-| Lần đầu dùng | Màn trống có một câu và một nút bước đầu |
-| Ngoài nắng, ồn | Tương phản cao, không chỉ dựa vào âm thanh |
-| Rảnh, so sánh kỹ | Thêm thông tin trên một màn thay vì nhiều bước |
+Mỗi đặc điểm của tình huống phải đổi được một điều trong app, không đổi được gì thì bỏ. Bảng tình huống → hệ quả thường gặp:
+`references/he-qua-tinh-huong.md`.
 
 ## 5. Vẽ luồng
 
@@ -67,42 +50,13 @@ Tự đi thử trên giấy: đóng vai từng tình huống, đi hết luồng,
 
 ## 5b. Tham khảo app thật (bắt buộc) [9a78] [8yu7]
 
-1. **Hỏi nguồn, không tự bỏ qua:** sổ chốt chưa ghi user có tài khoản tham khảo nào ⇒ hỏi một lần (AskUserQuestion): Mobbin, Pinterest,
-   Dribbble, Behance, khác, hoặc không có. Ghi sổ chốt phạm vi `chung` để lần sau không hỏi lại. Máy chưa thấy Mobbin không có nghĩa
-   user không có.
-2. **Có Mobbin:** chưa có tool `mcp__mobbin__*` ⇒ cài bộ skill chính hãng cho Claude: `claude plugin marketplace add mobbin/skills`
-   rồi `claude plugin install mobbin@mobbin` (Codex: `codex plugin marketplace add mobbin/skills` rồi `codex plugin add mobbin@mobbin`); chưa đăng nhập
-   ⇒ đưa user đúng lệnh `claude mcp login mobbin`. Cần mở phiên mới mới có tool. Có tool ⇒ làm theo skill `mobbin:search` (chọn tìm
-   màn, luồng hay một phần màn; tìm theo việc cần làm, không theo tên hãng).
-3. **Pinterest, Dribbble, Behance…:** điều khoản các trang này cấm máy tự lấy ⇒ nhờ user dán 3-5 link hoặc ảnh họ thích; AI chỉ đọc
-   thứ user đưa.
-4. **Lấy 2-4 app làm mẫu chính cho mỗi màn chính** (đếm theo app, không theo ảnh). Mỗi điều rút ra ghi mức chắc: 2 app trở lên =
-   **tiền lệ**, 1 app = **ví dụ**, không có = **ý kiến**. Không viết "hầu hết app" mà không nêu tên app. Chỉ học cấu trúc (bố cục,
-   thứ tự bước, cách xử lý màn trống/lỗi); không chép màu, chữ, logo, nội dung, dữ liệu mẫu. Tên app và link chỉ ghi trong `UX.md`,
-   không vào code; ảnh để thư mục tạm, không commit.
-5. **Cho user xem trước khi dựng demo:** ảnh các app cạnh nhau trong chat, dưới mỗi ảnh một câu "app này làm thế nào, hợp hay không
-   hợp khách của bạn", hỏi user thích cách nào. Kết quả đi vào mục "Tham khảo" của `UX.md`.
-6. Không lấy được nguồn nào (Mobbin lỗi, user không có tài khoản và không dán link) ⇒ báo user một dòng rồi làm tiếp, ghi "chưa
-   tham khảo app thật" trong `UX.md`. Không tự điền tham khảo từ trí nhớ.
+Cách làm đủ 6 bước (hỏi nguồn, Mobbin, link user dán, chọn 2-4 app và ghi mức chắc, cho user xem ảnh cạnh nhau, khi không lấy được
+nguồn): `references/tham-khao-app-that.md`. Luật cứng: không tự bỏ qua mục này; không tự điền tham khảo từ trí nhớ; chỉ học cấu
+trúc, không chép màu, chữ, logo, nội dung; cho user xem trước khi dựng demo.
 
 ## 6. Ghi và hỏi user
 
-Ghi `docs/specs/<YYYY-MM-DD>-<slug>/UX.md`:
-
-```
-# Luồng: <tính năng>
-## Tình huống dùng
-<bảng mục 3>
-## Luồng việc chính
-Màn A → Màn B → Xong (N lần bấm)
-Nhánh: lần đầu → … · lỗi → … · bỏ giữa chừng → …
-## Các màn
-| Màn | Việc chính | Người dùng so sánh bằng gì (phải nổi nhất) | Vì tình huống nào |
-## Tham khảo
-| Màn | App (link Mobbin/link user dán) | Học gì | Mức chắc (tiền lệ / ví dụ / ý kiến) |
-## Giả định cần kiểm
-- <giả định> → kiểm bằng: <bài người mới / hỏi khách / số liệu>
-```
+Ghi `docs/specs/<YYYY-MM-DD>-<slug>/UX.md` theo mẫu `assets/ux.md`.
 
 Tóm tắt trong chat bằng lời, kể đúng hành trình của người dùng, rồi hỏi "luồng này đúng chưa?" bằng AskUserQuestion. Luồng đã duyệt
 ghi sổ chốt.
@@ -118,3 +72,9 @@ ghi sổ chốt.
 - Không tự nhận đã "nghiên cứu người dùng" khi chỉ suy luận.
 - Không thêm tính năng ngoài yêu cầu với danh nghĩa cải thiện trải nghiệm: có ý hay thì kể user.
 - Không chạy cho thay đổi không đụng luồng.
+
+## Đọc khi cần
+
+- `assets/ux.md` — khi viết bảng tình huống dùng (bước 3) và ghi `UX.md` (bước 6)
+- `references/he-qua-tinh-huong.md` — khi suy quyết định từ tình huống (bước 4)
+- `references/tham-khao-app-that.md` — khi làm mục 5b (nguồn tham khảo, Mobbin, mức chắc, cho user xem)

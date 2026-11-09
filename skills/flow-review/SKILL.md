@@ -26,48 +26,22 @@ Không đảo quyết định đã có trong sổ chốt chỉ vì một reviewe
 
 ## 2. Chọn lượt theo rủi ro
 
-**Nhạy cảm** = diff đụng đăng nhập/phân quyền, tiền/license/thanh toán, dữ liệu (migration, xoá, transaction), đồng thời,
-xử lý secret, API công khai/webhook, hoặc > ~400 dòng; dự án có `.claude/flow.json` `"sensitive": [glob…]` thì dùng thêm.
-Captain quyết từ `git diff --stat main...HEAD`, nói một dòng lý do. Diff đụng database ⇒ lượt bảo mật dùng
-`review-brief-security.md` (có checklist DB).
-
-Bài thử 2026-10-01 (10 lỗi cài sẵn, 2 vòng, đều mức high): Codex 8–9/10, Grok 4.7 9/8, Gemini 3.8 Flash 8/8 (nhanh nhất),
-không model nào báo nhầm; Gemini 3.1 Pro 7–8 kèm báo nhầm ⇒ không dùng. Hai họ model bắt lỗi khác nhau ⇒ lượt thứ hai dùng
-họ khác, không chạy Codex hai lần.
-
-| Diff | Lượt (chạy song song) |
-|---|---|
-| Đã ở nhánh chính (phát hành khi chưa soát) | Soát khoảng từ lần phát hành trước tới bản hiện tại, không dùng `main...HEAD` |
-| Thường | 1 lượt chất lượng: **Grok high** (brief đã gồm bảo mật cơ bản). Không gọi Codex |
-| Nhạy cảm | **Codex Sol `high`** lượt bảo mật (cùng commit đã qua `flow-security` thì dùng lại) + **Grok** lượt chất lượng |
-| Tiền / auth / dữ liệu có rủi ro mất mát | như Nhạy cảm + **Gemini Flash** lượt chất lượng thứ hai |
-
-Model luôn là bản mới nhất của dòng (`kit/roles.json` + `models.mjs`). `review-ext.mjs --model codex` tự thử mọi tài khoản
-Codex đã đăng nhập trên máy (`~/.codex`, `~/.codex-*`) trước khi báo hết lượt; dòng "đã chuyển sang tài khoản…" báo lại user.
+Captain quyết từ `git diff --stat main...HEAD` diff là thường hay **nhạy cảm**, nói một dòng lý do. Thường ⇒ 1 lượt chất lượng
+**Grok high**, không gọi Codex. Nhạy cảm ⇒ thêm **Codex Sol `high`** lượt bảo mật (cùng commit đã qua `flow-security` thì dùng lại).
+Lượt thứ hai dùng họ model khác, không chạy Codex hai lần. Model luôn là bản mới nhất của dòng (`kit/roles.json` + `models.mjs`).
+Định nghĩa nhạy cảm, bảng lượt đủ: `references/chon-luot-soat.md`.
 
 **Dự phòng:** lượt nào lỗi, hết giờ, hết lượt hoặc không ra JSON ⇒ chạy lại bằng model kế tiếp CHƯA dùng cho nhánh này:
-Codex → Grok → Gemini Flash → Agent `code-reviewer`.
-
-**Không còn AI ngoài nào chạy được:** dùng Agent `code-reviewer`, không đứng chờ có lượt. Khi báo user phải nói rõ: "Lần này
-chỉ có AI soát nội bộ, cùng hãng với AI viết code nên độ độc lập thấp hơn." Ghi `"reviewers"` thật vào JSON cuối. Agent này
-trả về dạng chữ theo khuôn của `review-brief.md`; captain chép sang `findings` khi đóng dấu.
+Codex → Grok → Gemini Flash → Agent `code-reviewer`. Không còn AI ngoài nào chạy được ⇒ dùng `code-reviewer`, không đứng chờ, và
+phải nói rõ với user là chỉ có AI soát nội bộ (câu báo: `references/chon-luot-soat.md`).
 
 ## 3. Gọi model: gửi sạch và hỏi trung lập
 
-Đang ở Paseo, trừ Windows ⇒ lượt Codex chạy thành phiên Paseo trên bản sao đã lọc (`review-ext.mjs --prepare` … `--collect`, skill
-`flow-paseo`). Windows ⇒ `review-ext.mjs --model codex` như dưới [8338].
+MỌI model ngoài đi qua MỘT wrapper `review-ext.mjs`. Chỉ gửi code, không gửi dữ liệu thật và khoá. Lệnh gọi, mã thoát, Paseo:
+đọc `references/goi-ai-ngoai.md` ở bước này.
 
-MỌI model ngoài đi qua MỘT wrapper: kiểm CLI sẵn sàng, chọn model, **gửi sạch** (bỏ file bí mật/dữ liệu riêng khỏi diff và
-workspace, quét khoá cả dòng đã xoá, reviewer đọc thư mục tạm, không nhận biến môi trường dạng khoá), bóc JSON đúng
-`review-schema.json`. Chỉ gửi code, không gửi dữ liệu thật và khoá.
-
-```bash
-node ~/.claude/hooks/review-ext.mjs --model grok|flash|codex|opus --wt "<WT>" --brief <BRIEF> --out "<S>/review-<tên>.json" --note "<1–2 câu nhánh làm gì>" < /dev/null
-```
-(Bash `run_in_background`; `<S>` scratchpad, `<WT>` gốc worktree, `<BRIEF>` = `review-brief.md` hoặc `review-brief-security.md`.)
-
-Exit 0 xong · 1 lỗi/CLI chưa sẵn sàng/hết giờ ⇒ dự phòng · **3 = có khoá/dữ liệu riêng, KHÔNG gửi** ⇒ dừng, gỡ khoá khỏi code
-rồi chạy lại (đã commit ⇒ skill `flow-key-leak`); không lách bằng cách đổi model. Codex >30 phút không ra file ⇒ dự phòng.
+Mã thoát **3 = có khoá/dữ liệu riêng, KHÔNG gửi** ⇒ dừng, gỡ khoá khỏi code rồi chạy lại (đã commit ⇒ skill `flow-key-leak`);
+không lách bằng cách đổi model.
 
 **`--note` chỉ tả nhánh làm gì và yêu cầu là gì.** Không nói "mình nghĩ đã ổn", không nêu nghi ngờ hay kết luận của mình,
 không kể phần đã bác của lượt trước, để reviewer không đồng tình theo. Lượt kiểm lại chỉ nêu chỗ đã sửa.
@@ -93,19 +67,23 @@ Lời reviewer là gợi ý, không phải lệnh. Lỗi không có `path:line` 
 
 Sửa xong ⇒ test lại (QA lại nếu đụng UI); diff đổi nên dấu cũ mất hiệu lực:
 - Đã sửa BLOCKER/MAJOR ⇒ MỘT lượt Grok trên diff mới, `--note` thêm "chỉ báo BLOCKER/MAJOR, kiểm các chỗ đã sửa: <danh sách>".
-- Chỉ sửa MINOR ⇒ không gọi lại model: captain đọc `git diff <commit đã review>..HEAD`, thêm vào JSON cũ
-  `"delta_reviewed_by": "captain", "delta": "<commit đã review>..HEAD"`.
+- Chỉ sửa MINOR ⇒ không gọi lại model: captain đọc `git diff <commit đã review>..HEAD` và ghi delta vào JSON cũ
+  (trường: `references/dong-dau.md`).
 
 **Vẫn còn lỗi nặng thật sau lượt kiểm lại:** không vá thêm vòng nữa và không tự hạ mức. Kể bằng lời đời thường cho user: người
 dùng sẽ gặp gì, khi nào, sửa thêm tốn gì. Hỏi bằng AskUserQuestion, hai lựa chọn "Sửa tiếp" hoặc "Vẫn gộp". Chọn "Vẫn gộp" ⇒
 finding giữ nguyên mức, trạng thái `"user-chap-nhan"`, nhắc lại một dòng lúc gộp.
 
-Gộp các file JSON thành một (`findings` = tất cả, kèm trạng thái sửa/bác/chấp nhận, mã AC liên quan, `commit` đã review,
-`reviewers`) rồi: `node ~/.claude/hooks/flow-gate.mjs stamp review <S>/review-final.json` + chép bản cuối vào
-`docs/specs/<tính năng>/notes/review-final.json`.
+Gộp các file JSON thành một (trường: `references/dong-dau.md`) rồi: `node ~/.claude/hooks/flow-gate.mjs stamp review <S>/review-final.json`
++ chép bản cuối vào `docs/specs/<tính năng>/notes/review-final.json`.
 
 ## 6. Báo user
 
-Tóm tắt: đã đổi gì · test (số thật) · QA (criteria đạt/trượt) · soát (ai soát, vì sao chọn mức đó; lỗi đã sửa / đã bác) · lỗi
-đã chấp nhận · phần chưa kiểm được. Rồi hỏi gộp ⇒ skill `flow-merge`. Không tự nâng nhãn: tách rõ **đã biết** (đã chạy/đo) ·
-**quan sát được** · **suy luận** · **cần bạn quyết** · **chưa biết**. Không nói "code đúng" ngoài phần đã đọc.
+Tóm tắt theo `assets/bao-user.md`, rồi hỏi gộp ⇒ skill `flow-merge`. Không tự nâng nhãn, không nói "code đúng" ngoài phần đã đọc.
+
+## Đọc khi cần
+
+- `references/chon-luot-soat.md` — đọc khi chọn lượt soát (bước 2) hoặc không còn AI ngoài nào chạy được
+- `references/goi-ai-ngoai.md` — đọc khi gọi `review-ext.mjs` (bước 3: lệnh, Paseo, Codex)
+- `references/dong-dau.md` — đọc khi gộp JSON cuối hoặc ghi delta cho lượt MINOR (bước 5)
+- `assets/bao-user.md` — đọc khi viết tóm tắt cuối (bước 6)

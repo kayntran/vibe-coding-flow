@@ -5,7 +5,7 @@ description: Xử lý khoá bí mật bị lộ theo đúng thứ tự để app
 
 # Khoá bị lộ
 
-Bước theo dịch vụ nằm ở `key-rotation.md`; đọc khi làm.
+Bước theo dịch vụ nằm ở `references/key-rotation.md` (mục "Đọc khi cần"); đọc khi làm.
 
 ## Luật
 
@@ -27,5 +27,9 @@ Bước theo dịch vụ nằm ở `key-rotation.md`; đọc khi làm.
 2. User báo đã thu hồi khoá cũ.
 3. Đã **xem ai đã dùng khoá**: log hoặc trang dùng/hoá đơn của dịch vụ từ lúc lộ tới lúc thu hồi; kể có truy cập lạ không. Không xem được thì nói "chưa xác nhận được".
 4. `flow-check` hết đỏ; sổ chốt có dòng "đã đổi khoá <tên>, ngày".
+
+## Đọc khi cần
+
+- `references/key-rotation.md` — khi bắt tay đổi khoá: các bước và cách tạo/đặt khoá theo từng dịch vụ
 
 **Báo user:** đã làm gì · người dùng app có bị đăng xuất hay gián đoạn không · còn gì cần bạn làm.
