@@ -1,0 +1,63 @@
+{
+  "_": "Bài đo chất lượng flow-system-design: chạy đề với có/không có skill, chấm theo criteria chung + must/mustNot riêng. Người chấm (người hoặc model khác) đánh từng mục đạt/không, kèm trích dẫn câu trả lời.",
+  "criteria": [
+    "Hỏi yêu cầu hoặc ghi rõ giả định trước khi vẽ kiến trúc",
+    "Có xếp hạng quy mô và mọi thành phần khớp hạng",
+    "Có con số cụ thể (request/giây, dung lượng, phí tháng) kèm nguồn hoặc nhãn giả định",
+    "Mỗi quyết định lớn có đánh đổi: chọn gì, loại gì, vì sao, khi nào xem lại",
+    "Mỗi thành phần trả lời được 'nó chết thì sao'",
+    "Lộ trình gắn ngưỡng đo được, không 'khi cần thì scale'",
+    "Không có từ mơ hồ kiểu 'nhanh', 'scale tốt' thay cho con số"
+  ],
+  "cases": [
+    {
+      "id": "todo-ca-nhan",
+      "say": "Thiết kế hệ thống cho app ghi việc cần làm cá nhân, chỉ mình tôi và vài người bạn dùng.",
+      "must": ["hạng prototype hoặc MVP", "một khối, một cơ sở dữ liệu", "phí gần 0 hoặc gói miễn phí"],
+      "mustNot": ["microservices", "Kafka", "Kubernetes", "Redis không kèm con số bắt buộc"]
+    },
+    {
+      "id": "saas-b2b-50-cong-ty",
+      "say": "Thiết kế SaaS quản lý kho cho khoảng 50 công ty, mỗi công ty 5–30 nhân viên.",
+      "must": ["tách dữ liệu giữa các công ty (tenant ID từ phiên server, RLS hoặc lọc bắt buộc)", "vai trò/phân quyền", "test truy cập chéo công ty", "nhật ký thao tác"],
+      "mustNot": ["mỗi công ty một server riêng khi chưa có yêu cầu"]
+    },
+    {
+      "id": "feed-10-trieu",
+      "say": "Thiết kế feed mạng xã hội cho 10 triệu người dùng hoạt động mỗi ngày.",
+      "must": ["cách phân phối bài lên feed (đẩy khi ghi / kéo khi đọc / lai) và xử lý người nổi tiếng", "cache", "chia nhỏ dữ liệu (shard) hoặc lý do chưa cần", "bộ đếm nóng"],
+      "mustNot": []
+    },
+    {
+      "id": "ghi-chu-offline",
+      "say": "Thiết kế app máy tính ghi chú chạy được khi mất mạng, có đồng bộ giữa máy bàn và laptop.",
+      "must": ["lưu local (SQLite)", "cách giải quyết xung đột khi hai máy cùng sửa", "phiên bản dữ liệu/đồng bộ cho bản app cũ", "tự cập nhật có ký"],
+      "mustNot": ["bỏ qua xung đột"]
+    },
+    {
+      "id": "pipeline-llm",
+      "say": "Thiết kế pipeline tạo bài viết bằng AI, mỗi ngày vài nghìn bài cho khách hàng.",
+      "must": ["model dự phòng khi lỗi hoặc hết lượt", "hàng đợi cho việc chạy lâu", "trần chi phí token theo khách/ngày", "thử lại có trần + idempotency"],
+      "mustNot": []
+    },
+    {
+      "id": "dang-nhap-chong-spam",
+      "say": "Thêm đăng ký, đăng nhập bằng email và mã OTP cho webapp đặt lịch.",
+      "must": ["giới hạn số lần gửi mã theo email/số và theo IP", "thông báo giống nhau khi email chưa có tài khoản (chống dò)", "khoá tạm không để kẻ xấu khoá người khác", "dùng thư viện/dịch vụ đăng nhập có sẵn", "bài kiểm cho lần gửi mã vượt giới hạn"],
+      "mustNot": ["tự viết băm mật khẩu"]
+    },
+    {
+      "id": "bay-lam-thua",
+      "say": "Startup 6 người, khoảng 2.000 đơn hàng mỗi ngày. Sếp muốn tách 4 microservice và dùng Kafka cho chuyên nghiệp. Thiết kế giúp.",
+      "must": ["một khối chia module + một cơ sở dữ liệu", "tín hiệu cụ thể để tách service sau", "nói với sếp bằng đánh đổi, không gạt đi"],
+      "mustNot": ["đồng ý 4 microservice + Kafka ngay"]
+    },
+    {
+      "id": "ngoai-pham-vi",
+      "say": "Đổi màu nút Lưu sang xanh lá.",
+      "expectSkill": "none",
+      "must": ["không chạy quy trình thiết kế hệ thống"],
+      "mustNot": ["tạo DESIGN.md"]
+    }
+  ]
+}

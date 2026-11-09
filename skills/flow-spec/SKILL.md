@@ -9,7 +9,7 @@ Việc nhỏ tả được bằng một câu thì không cần skill này. SPEC 
 
 ## Thư mục tính năng
 
-Mọi tài liệu của một tính năng nằm trong `docs/specs/<YYYY-MM-DD>-<slug>/`: `SPEC.md`, `UX.md`, `PLAN.md`, `progress.md`,
+Mọi tài liệu của một tính năng nằm trong `docs/specs/<YYYY-MM-DD>-<slug>/`: `SPEC.md`, `UX.md`, `DESIGN.md`, `PLAN.md`, `progress.md`,
 `research.md`, `notes/`. Không rải ở chỗ khác.
 
 ## 1. Rà cái đã có
@@ -72,6 +72,10 @@ script, tác vụ nền) ⇒ bỏ bước này, thay bằng **một tình huốn
 
 Chỉ cho **việc lớn, và việc vừa đụng tiền, quyền, dữ liệu**. Việc khác bỏ qua. Cách làm: `references/edge-cases.md`. Mỗi trường
 hợp giữ lại thành một tiêu chí hoặc một dòng "Không làm".
+
+**Bản mẫu theo loại tính năng (mọi việc M/L)** [89i7]: tính năng thuộc loại có bản mẫu (đăng nhập, gửi mã, gọi AI, tải file, thanh
+toán, đặt chỗ…) ⇒ mở đúng file nhóm `ban-mau-*.md` trong skill `flow-system-design`, hỏi các câu "Hỏi user" của loại đó (gom vào cùng
+vòng AskUserQuestion), và đưa các mục tầng "làm ngay" thành `AC-nn`. Để không ai thấy chống spam là "thêm sau".
 
 ## 7. User duyệt
 

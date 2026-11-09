@@ -6,7 +6,8 @@ description: Tạo app mới từ số 0 cho người không code — kiểm má
 # Flow — app mới từ số 0
 
 Kết thúc skill = user mở được app, thấy màn đầu trống (tên app + một câu mời, không dữ liệu giả), `flow check` xanh. Sau đó đi theo `flow-feature`,
-bắt đầu bằng hiểu người dùng (`flow-ux`) rồi 5 bản demo (`flow-ui-demo`) ngay trong app này.
+bắt đầu bằng hiểu người dùng (`flow-ux`) rồi 5 bản demo (`flow-ui-demo`) ngay trong app này. Tính năng đầu tiên có DESIGN.md
+(`flow-system-design`): xếp hạng quy mô, phí tháng ước tính, các chỗ chống spam từ ngày đầu.
 
 ## 1. Hỏi gọn (AskUserQuestion, ≤3 câu, chỉ câu chưa rõ)
 - Loại app: **webapp** (mở bằng trình duyệt, dùng được cả trên điện thoại) · **app máy tính** (cài trên Windows/Mac,

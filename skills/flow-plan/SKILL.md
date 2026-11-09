@@ -19,6 +19,8 @@ Trả lời trong đầu PLAN.md, mỗi câu một dòng:
   `installed` + `ok` ⇒ đọc khi viết plan. `missing` ⇒ hỏi user một câu đời thường rồi chạy lệnh cài nó in (chỉ bản chính hãng trong
   `kit/official.json`; bản cộng đồng: đọc, soát, viết lại thành skill dự án). `needs-login` ⇒ báo đúng việc cần đăng nhập.
   `misconfigured` ⇒ báo một dòng. `unknown` ⇒ thử một lệnh đọc rẻ trước khi dựa vào. Cài xong cần mở lại phiên ⇒ ghi sổ tiến độ trước.
+- **Thiết kế hệ thống:** việc M/L đọc `DESIGN.md` cạnh SPEC (skill `flow-system-design`; chưa có thì chạy skill đó trước). Mỗi mục
+  "làm ngay" của bản mẫu thành task có Verify; mục "chừa chỗ" ghi trong phần kiến trúc của plan.
 - **Kiến trúc:** dự án chưa có `docs/arch.json`, hoặc tính năng thêm module ⇒ `flow-architecture` trước; plan theo `docs/ARCHITECTURE.md`.
 
 ## Viết PLAN.md
@@ -48,7 +50,8 @@ Mỗi task:
 (1) mọi tiêu chí có task phủ? (2) tính năng anh em (`flow-impact`) đã vào plan hoặc ghi "để sau"? (3) `lane-check plan` sạch? (4) quyết định
 khó đảo ngược nào thiếu ADR?
 
-**Cỡ L:** một lượt soát mức high, chỉ tìm lỗi thiết kế khó sửa về sau. Kiểm `node ~/.claude/hooks/cli-check.mjs <tên>` trước, chưa sẵn sàng
+**Cỡ L:** một lượt soát mức high, chỉ tìm lỗi thiết kế khó sửa về sau; gửi kèm DESIGN.md và danh sách soát thiết kế của `flow-system-design`
+trong cùng lượt. Kiểm `node ~/.claude/hooks/cli-check.mjs <tên>` trước, chưa sẵn sàng
 thì sang bậc sau. Bậc model, lệnh chạy và `<ĐỀ>`: `references/soat-plan-model-khac.md`.
 
 Hợp nhất: kiểm từng mục vào SPEC, PLAN, code; sửa plan; ghi đúng/bác kèm lý do cuối PLAN.md.

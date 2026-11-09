@@ -54,7 +54,8 @@ AGENTS.md, `.claude/rules/`) thắng phần này.
 | User nói (đại ý) | Làm |
 |---|---|
 | app mới từ số 0, "làm cho tôi một app…" chưa có thư mục dự án | skill `flow-new-app` (rồi `flow-feature`) |
-| làm tính năng trọn vẹn, thêm chức năng, "tôi muốn app làm được…" | cỡ M/L ⇒ skill `flow-feature`; chỉ một bước ⇒ `flow-spec`, `flow-ux`, `flow-ui-demo`, `flow-ui-design`, `flow-plan`, `flow-build` |
+| làm tính năng trọn vẹn, thêm chức năng, "tôi muốn app làm được…" | cỡ M/L ⇒ skill `flow-feature`; chỉ một bước ⇒ `flow-spec`, `flow-system-design`, `flow-ux`, `flow-ui-demo`, `flow-ui-design`, `flow-plan`, `flow-build` |
+| thiết kế hệ thống, "về sau scale có dễ không", chống spam từ đầu, "thiết kế này ổn chưa" | skill `flow-system-design` (tự chạy trong `flow-feature` cho mọi việc M/L) |
 | "quay về lúc…", "hoàn tác việc vừa rồi", app hỏng sau lần sửa | `node ~/.claude/hooks/luu.mjs tim` → `xem` → đọc lại bằng lời, hỏi gật → `quay`; nói rõ dữ liệu không quay theo |
 | thêm/sửa thứ DÙNG CHUNG: provider, model AI, gói/quyền, cài đặt, tool của AI agent, ngôn ngữ… | skill `flow-impact` (kể cả việc cỡ S) — tìm tính năng anh em, hỏi user, gắn test đối chiếu |
 | có ai làm chưa, tìm repo/thư viện, tham khảo, ý tưởng hay hơn | agent `researcher` |

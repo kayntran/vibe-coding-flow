@@ -54,6 +54,9 @@
     { "say": "thư viện cũ chưa, dọn nợ kỹ thuật", "want": "flow-maintain", "old": "flow-maintain" },
     { "say": "có chịu nổi 500 người cùng lúc không", "want": "flow-scale", "old": "flow-scale" },
     { "say": "app chậm quá khi đông người", "want": "flow-scale", "old": "flow-scale" },
+    { "say": "thiết kế hệ thống cho app đặt lịch này giúp tôi, về sau đông người có scale dễ không", "want": "flow-system-design", "old": "flow-architecture" },
+    { "say": "luồng đăng ký đăng nhập nên thiết kế thế nào để né spam ngay từ đầu, đừng để bị spam rồi mới sửa", "want": "flow-system-design", "old": "flow-security" },
+    { "say": "xem giúp thiết kế hệ thống hiện tại có chỗ nào sập khi đông người không", "want": "flow-system-design", "old": "flow-scale" },
     { "say": "viết hàm cộng hai số trong file này", "want": "none", "old": "none" },
     { "say": "cảm ơn bạn", "want": "none", "old": "none" },
     { "say": "đổi chữ nút Lưu thành Lưu đơn", "want": "none", "old": "none" }

@@ -13,7 +13,7 @@ const FLOWS = ['flow-feature', 'flow-bugfix', 'flow-release', 'flow-health']
 const INTERNAL = ['flow-team', 'flow-sessions', 'flow-devin', 'flow-paseo']
 
 test('đủ bộ skill đã chốt, flow-production đã tách', () => {
-  for (const n of [...FLOWS, 'flow-new-app', 'flow-spec', 'flow-ux', 'flow-ui-demo', 'flow-ui-design', 'flow-plan', 'flow-build', 'flow-fix', 'flow-qa', 'flow-review', 'flow-security', 'flow-merge', 'flow-worktree', 'flow-impact', 'flow-architecture', 'flow-explain', 'flow-status', 'flow-publish', 'flow-rollback', 'flow-backup', 'flow-key-leak', 'flow-maintain', 'flow-scale', ...INTERNAL]) {
+  for (const n of [...FLOWS, 'flow-new-app', 'flow-spec', 'flow-ux', 'flow-ui-demo', 'flow-ui-design', 'flow-system-design', 'flow-plan', 'flow-build', 'flow-fix', 'flow-qa', 'flow-review', 'flow-security', 'flow-merge', 'flow-worktree', 'flow-impact', 'flow-architecture', 'flow-explain', 'flow-status', 'flow-publish', 'flow-rollback', 'flow-backup', 'flow-key-leak', 'flow-maintain', 'flow-scale', ...INTERNAL]) {
     assert.ok(names.includes(n), `thiếu ${n}`)
   }
   assert.ok(!names.includes('flow-production'))
@@ -122,4 +122,23 @@ test('mẫu bàn giao có đủ phần cốt lõi', () => {
 test('bài đo chọn skill chỉ nhắm tới skill có thật', () => {
   const { cases } = JSON.parse(fs.readFileSync(path.join(ROOT, 'kit/evals/skill-routing.json'), 'utf8'))
   for (const c of cases) if (c.want !== 'none') assert.ok(names.includes(c.want), c.want)
+})
+
+test('bài đo thiết kế hệ thống đủ khuôn: ≥ 5 đề có must, có bẫy làm thừa và đề ngoài phạm vi; bản mẫu theo đúng 6 phần', () => {
+  const { criteria, cases } = JSON.parse(fs.readFileSync(path.join(ROOT, 'kit/evals/system-design.json'), 'utf8'))
+  assert.ok(criteria.length >= 5)
+  assert.ok(cases.length >= 5)
+  for (const c of cases) assert.ok(c.id && c.say && Array.isArray(c.must) && c.must.length, c.id)
+  for (const id of ['bay-lam-thua', 'ngoai-pham-vi', 'dang-nhap-chong-spam']) assert.ok(cases.some((c) => c.id === id), id)
+  const refs = path.join(DIR, 'flow-system-design', 'references')
+  for (const f of fs.readdirSync(refs).filter((x) => x.startsWith('ban-mau-'))) {
+    const t = fs.readFileSync(path.join(refs, f), 'utf8')
+    const types = t.split(/^## /m).slice(1).filter((s) => !s.startsWith('Mục lục'))
+    assert.ok(types.length >= 4, `${f}: ít hơn 4 loại`)
+    for (const s of types) {
+      const name = s.split('\n')[0]
+      for (const must of ['Hỏi user', '| Mặt |', 'Làm ngay', 'Chừa chỗ', 'Chưa làm', 'Bài kiểm bắt buộc', 'Nguồn'])
+        assert.ok(s.includes(must), `${f} › ${name}: thiếu "${must}"`)
+    }
+  }
 })
