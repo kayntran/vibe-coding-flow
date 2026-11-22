@@ -42,3 +42,16 @@ Google/Apple/Microsoft) đổi theo thời gian ⇒ tra tài liệu chính hãng
   thứ này.
 - **Dạng link công khai** (link chia sẻ, link trong email) sẽ nằm lại trong tin nhắn của khách ⇒ chốt dạng đường dẫn từ đầu, dùng ID
   khó đoán; đổi dạng sau thì giữ đường chuyển tiếp từ link cũ.
+
+## Webapp có trang công khai (`web-public`)
+
+Đọc thêm mục Webapp ở trên; hai điều dưới đây chặt hơn vì Google, Zalo, Facebook nhớ địa chỉ trang.
+
+- **Tên miền trước khi gắn địa chỉ chuẩn (canonical), sitemap và ảnh chia sẻ (OG).** Ba thứ này ghi cứng tên miền; Google và Zalo/Facebook
+  nhớ địa chỉ đầu tiên chúng thấy. Làm trên địa chỉ tạm rồi đổi ⇒ trang bị tính lại từ đầu trên Google, link khách đã chia sẻ hiện ảnh
+  cũ hoặc chết. Cách: tên miền thật ghi vào `AI_RULES.md` và cấu hình một chỗ duy nhất, canonical/sitemap/OG đọc từ đó. Chưa có tên
+  miền ⇒ ghi vào lộ trình, chưa khai báo sitemap với Google, địa chỉ tạm không cho lên kết quả tìm kiếm. Kiểm: xem nguồn trang thật,
+  canonical, sitemap, OG cùng trỏ một tên miền.
+- **Dạng link công khai của từng trang** (bài, sản phẩm, trang hồ sơ): đường dẫn đọc được từ tiêu đề, chữ thường không dấu, không đổi
+  khi sửa tiêu đề (giữ phần định danh cố định). Link nằm lại trong tin nhắn, bài viết, kết quả Google ⇒ đổi dạng sau phải giữ đường chuyển
+  hướng từ link cũ, nếu không là 404. Trang riêng tư (khu sau đăng nhập) dùng ID khó đoán, không dùng dạng đọc được.

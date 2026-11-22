@@ -22,7 +22,10 @@ const REF_DEV = 'devrefdevrefdevref00'
 const REF_PROD = 'prodrefprodrefprod00'
 const REF_NEW = 'newrefnewrefnewref00'
 
-const LIBS = ['cloudflare', 'supabase', 'shadcn', 'stripe', 'playwright', 'vercel', 'neon', 'sentry', 'go', 'wails']
+const LIBS_OFFICIAL = ['cloudflare', 'supabase', 'shadcn', 'stripe', 'playwright', 'vercel', 'neon', 'sentry', 'go', 'wails', 'sepay']
+// Nguồn ngoài user đã duyệt [wj8n] nằm ở kit/approved-skills.json; loadOfficial() trả cả hai.
+const LIBS_APPROVED = ['payment-integration', 'payos']
+const LIBS = [...LIBS_OFFICIAL, ...LIBS_APPROVED]
 const STATUS = ['installed', 'missing', 'community-only', 'none']
 const USABLE = ['ok', 'needs-login', 'misconfigured', 'unknown']
 
@@ -69,7 +72,7 @@ describe('kit/official.json', () => {
   const libs = Object.keys(off).filter((k) => !k.startsWith('_'))
 
   test('đủ thư viện của brief, mỗi cái có sourceOrg + note', () => {
-    for (const l of LIBS) assert.ok(libs.includes(l), `thiếu ${l}`)
+    for (const l of LIBS_OFFICIAL) assert.ok(libs.includes(l), `thiếu ${l}`)
     for (const l of libs) {
       assert.equal(typeof off[l].sourceOrg, 'string', `${l}.sourceOrg`)
       assert.ok(off[l].sourceOrg.length > 0)
@@ -123,7 +126,7 @@ describe('kit/official.json', () => {
 
   test('loadOfficial() đọc đúng file này, bỏ khoá _doc', () => {
     const l = loadOfficial()
-    assert.deepEqual(Object.keys(l).sort(), libs.sort())
+    assert.deepEqual(Object.keys(l).sort(), [...libs, ...LIBS_APPROVED].sort())
   })
 })
 

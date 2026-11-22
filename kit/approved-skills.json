@@ -1,0 +1,27 @@
+{
+  "_doc": "Registry riêng cho nguồn NGOÀI mà user đã duyệt (sổ chốt [wj8n]) — KHÔNG phải chính hãng, không trộn vào official.json. hooks/lib/skills-check.mjs đọc cả hai và trả source: 'approved' cho mục ở đây ('official' cho mục của official.json); tên thư viện không được trùng giữa hai file. Khuôn mục như official.json (sourceOrg · note · skill {repo, names[], installCmd} · mcp) cộng: skill.commit (GHIM — installCmd phải dùng đúng commit này), license, uses[] (dịch vụ mà skill dùng cho), reviewed {on, result} (đã soát nội dung một lượt lúc đưa vào). Mục skill: null và mcp: null ⇒ status 'none' = kit chưa có skill. Nâng commit = đọc lại nội dung skill (script, URL, lệnh) rồi sửa commit và reviewed cùng lúc. Chỉ TRẢ lệnh cài, không bao giờ chạy; cài mức dự án vào .claude/skills; đặt DISABLE_TELEMETRY=1 khi cài (CLI skills gửi số liệu cài đặt).",
+  "payment-integration": {
+    "sourceOrg": "mrgoonie",
+    "skill": {
+      "repo": "mrgoonie/claudekit-skills",
+      "commit": "80113d86bc4407f105af40a2c4ea58194f7c370a",
+      "names": ["payment-integration"],
+      "installCmd": "npx skills add mrgoonie/claudekit-skills@80113d86bc4407f105af40a2c4ea58194f7c370a --skill payment-integration"
+    },
+    "mcp": null,
+    "license": "MIT khai trong SKILL.md, scripts/package.json và .claude-plugin/marketplace.json; repo KHÔNG có file LICENSE (GitHub không nhận ra giấy phép)",
+    "commitDate": "2026-04-03",
+    "uses": ["polar", "paddle", "stripe", "creem"],
+    "reviewed": {
+      "on": "2026-11-22",
+      "result": "43 file (SKILL.md, references, 4 script Node). Script không gọi mạng, không chạy lệnh con, chỉ đọc biến môi trường để cấu hình và tạo chuỗi curl để in; URL đều là tài liệu/API của SePay, Polar, Paddle, Creem, Stripe; không thấy câu lệnh dụ agent làm việc ngoài ý. Ví dụ tỉ giá trong references gọi api.exchangerate-api.com (chỉ là mẫu code)."
+    },
+    "note": "Nguồn ngoài chính hãng ClaudeKit, user duyệt [wj8n]. Dùng cho Polar, Paddle, Stripe, Creem (khách quốc tế). KHÔNG dùng phần SePay của skill này: khách Việt dùng skill chính hãng 'sepay' ở official.json. Skill chỉ hướng dẫn nhà cung cấp; luật an toàn của kit (số tiền tính ở máy chủ, kiểm báo đã trả thật, chống trừ hai lần) đứng trên skill. Code mẫu trong skill chưa qua bài kiểm của kit."
+  },
+  "payos": {
+    "sourceOrg": "payOSHQ",
+    "skill": null,
+    "mcp": null,
+    "note": "payOS: kit chưa có skill (chưa có skill chính hãng, chưa duyệt nguồn ngoài). Vẫn gợi ý được; tự làm theo tài liệu payos.vn/docs nhưng đủ luật an toàn của kit (chống trừ hai lần, kiểm báo đã trả thật, số tiền tính ở máy chủ) và bài kiểm."
+  }
+}

@@ -24,6 +24,9 @@
 // Đợt 4 (phát hành + chăm sóc, docs/specs/2026-10-13-flow-v7-dot4, AC-30): `stack` có thể là MẢNG (checker chạy một lần khi dự án có một trong các stack đó; `secret-build` phủ cả web lẫn extension);
 //   extension quét bản build MỚI nhất (extensionBuilds: dist/, build/, .output/<trình duyệt>/) thay vì chỉ dist/; `log-secrets` (lib/log-scan.mjs) quét log bài thử (test-results/,
 //   playwright-report/, *.log) tìm bí mật — `exclusive` để chạy SAU axe/ui-rules (hai checker này sinh ra log), không có log nào thì không hiện dòng.
+// Mẫu web-public (React Router trên Cloudflare Workers, lớp phủ ở kit/templates/web-public): `seo-public` (e2e/seo.spec.ts qua Playwright: tắt JS + giả bot Facebook, thẻ SEO, sitemap, robots, 404 thật, header trên
+//   phản hồi thật; chỉ áp dụng khi có react-router.config.*) và `web-headers` không báo đạt giả với trang dựng ở máy chủ (đọc header từ seo-public hoặc báo "chưa kiểm"; xem app-safety.ssrFramework);
+//   PORT_BASE (wt-env) ⇒ PORT cho mọi checker tự bật app (appPort); depcruise bỏ import kiểu ./+types/* của react-router typegen (judgeDepcruise).
 // Lượt 28/10: `tsc-build` không để rác trong dự án — planner `tsc-build` (chạy `tsc -b --noEmit`, TS cũ thì chạy lại `-b` trơn qua run.retry, rồi xoá file đầu ra mới sinh; xem ghi chú ở TSC_OUTPUT_RE).
 //
 // runCommand của lib/clis.mjs không có tuỳ chọn cwd ⇒ execIn() đổi cwd của tiến trình đúng lúc spawn (spawn chạy đồng bộ trong executor
@@ -33,7 +36,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { extensionPermProblems, headerProblems } from './lib/app-safety.mjs'
+import { extensionPermProblems, headerProblems, ssrFramework } from './lib/app-safety.mjs'
 import { DEPCRUISE_PKGS, DEPCRUISE_WHERE, goArchLintRuns, depcruiseArgs, depcruiseConfigFile, loadArch, loadBaseline, newGoArchViolations, nodeEngineMessage, nodeEngineProblem, sizeCheck, syncCheck, usesTypeScript } from './lib/arch.mjs'
 import { runCommand } from './lib/clis.mjs'
 import { scanLogs } from './lib/log-scan.mjs'
@@ -427,11 +430,18 @@ export const INTERNALS = {
   },
 
   // Web: file header bảo mật (CSP, nosniff, Referrer-Policy, chống nhúng) — lib/app-safety.mjs headerProblems. Desktop (Wails) và extension không chạy qua máy chủ web ⇒ không đòi.
+  // App dựng trang ở máy chủ (ssrFramework): file header chỉ áp cho file tĩnh, không chứng minh header của trang ⇒ KHÔNG bao giờ đạt chỉ nhờ file. Đạt khi seo-public (chạy trước, xem
+  // PLANNERS) đã đọc header từ phản hồi thật (ctx.live.headers) và đủ; chưa có bằng chứng đó ⇒ BỎ QUA kèm "chưa kiểm" (không phải đạt).
   'web-headers': async ({ root, checker, ctx }) => {
     if (ctx.stacks?.some((s) => s === 'wails' || s === 'extension')) return { status: 'skip', quiet: true, message: 'app desktop hoặc extension không chạy qua máy chủ web nên không cần file header' }
     const problems = headerProblems(root)
-    if (!problems.length) return { status: 'pass', message: 'đủ header bảo mật (CSP, nosniff, Referrer-Policy, chống nhúng)' }
-    return { status: 'fail', message: `${problems.length} chỗ thiếu hoặc sai header bảo mật cho web`, detail: problems.map((p) => `${p.file}: ${p.msg}`), fix: joinFixes(problems.map((p) => p.fix)) || checker.hint }
+    if (problems.length) return { status: 'fail', message: `${problems.length} chỗ thiếu hoặc sai header bảo mật cho web`, detail: problems.map((p) => `${p.file}: ${p.msg}`), fix: joinFixes(problems.map((p) => p.fix)) || checker.hint }
+    const ssr = ssrFramework(root)
+    if (!ssr) return { status: 'pass', message: 'đủ header bảo mật (CSP, nosniff, Referrer-Policy, chống nhúng)' }
+    const live = ctx.live?.headers
+    if (live === true) return { status: 'pass', message: `đủ header bảo mật trên phản hồi thật của trang dựng ở máy chủ (${ssr}; đọc bởi seo-public) và trong file cho file tĩnh` }
+    if (live === false) return { status: 'fail', message: `phản hồi thật của trang dựng ở máy chủ (${ssr}) THIẾU header bảo mật`, detail: ctx.live.detail ?? [], fix: 'Đặt header (CSP có nonce, nosniff, chống nhúng, Referrer-Policy) trong CODE máy chủ cho mọi phản hồi, không chỉ trong file _headers (file đó chỉ áp cho file tĩnh); chi tiết ở dòng seo-public.' }
+    return { status: 'skip', message: `chưa kiểm header của trang dựng ở máy chủ (${ssr}): file header chỉ áp cho file tĩnh nên không chứng minh được; header chỉ được tính khi đọc từ phản hồi thật (checker seo-public, hoặc test Playwright đọc header của trang)` }
   },
 
   // SPEC đang mở (docs/specs/*/SPEC.md chưa "Trạng thái: xong") ↔ app ↔ test (lib/spec-codes.mjs). Không có SPEC mở ⇒ không hiện dòng nào. SPEC kiểu cũ (chưa có phần "Bạn duyệt") chỉ được nhắc, không chặn.
@@ -628,13 +638,34 @@ function judgeGoArch(dir, r, out, hint) {
 // thì KHÔNG phải "không có vi phạm" ⇒ THIẾU (kèm cách cài đúng chỗ), tuyệt đối không tính ĐẠT.
 const TS_FIX = `Cài dependency-cruiser và typescript NGAY TRONG dự án (không cài global; ${DEPCRUISE_WHERE}): pnpm add -D ${DEPCRUISE_PKGS} (hoặc npm i -D ${DEPCRUISE_PKGS}), rồi chạy lại flow check. (depcruise 18 chỉ đọc được typescript dưới 7: gõ trơn "typescript" sẽ kéo bản 7 mà nó không đọc được.)`
 
-function judgeDepcruise(checker, { ts = false } = {}) {
+// React Router chế độ framework: `react-router typegen` sinh kiểu của từng route vào .react-router/types và tsconfig (rootDirs) cho TypeScript thấy chúng như file nằm cạnh route
+// (`import type { Route } from './+types/home'`). dependency-cruiser KHÔNG đọc rootDirs nên báo các import đó "không tìm thấy". tsc-build đã kiểm chúng (import sai ⇒ tsc đỏ) ⇒ bỏ đúng loại
+// báo cáo này (chỉ khi .react-router/types có thật, tức dự án đã chạy typegen); mọi vi phạm khác giữ nguyên. Dòng báo = `  error not-to-unresolvable: <file> → ./+types/<route>`
+// kèm các dòng lời dặn thụt vào.
+const TYPEGEN_IMPORT = /^\s*(?:error|warn|info) not-to-unresolvable: \S+ → \.\/\+types\/\S+\s*$/
+const VIOLATION_LINE = /^\s{1,3}(?:error|warn|info) \S+: /
+
+function withoutTypegenImports(out) {
+  const lines = out.split('\n')
+  const kept = []
+  let dropped = 0
+  for (let i = 0; i < lines.length; i++) {
+    if (!TYPEGEN_IMPORT.test(lines[i])) { kept.push(lines[i]); continue }
+    dropped++
+    while (i + 1 < lines.length && /^\s{4,}\S/.test(lines[i + 1])) i++ // lời dặn của luật (thụt sâu hơn dòng báo)
+  }
+  return { rest: kept.join('\n'), dropped, remaining: kept.filter((l) => VIOLATION_LINE.test(l)).length }
+}
+
+function judgeDepcruise(checker, { ts = false, typegen = false } = {}) {
   return (r, out) => {
     const engine = r.code === 0 ? null : nodeEngineProblem(out)
     if (engine) return { status: 'missing', message: nodeEngineMessage(engine.version), fix: 'Cài Node 22, Node 24 LTS (tải ở nodejs.org, hoặc dùng fnm/nvm) hoặc Node 26 trở lên, mở lại cửa sổ dòng lệnh rồi chạy lại flow check.' }
     if (r.code === 0 && ts && (/\(0 modules\b/.test(out) || /missing-typescript-transpiler/i.test(out))) return { status: 'missing', message: 'dependency-cruiser không đọc được file TypeScript của dự án (không thấy typescript đi kèm), nên chưa kiểm được ranh giới module', fix: TS_FIX }
     if (r.code === 0) return { status: 'pass', message: '' }
-    return { status: 'fail', message: `depcruise báo lỗi (mã thoát ${r.code})`, fix: checker.hint, detail: tail(out) }
+    const typed = typegen ? withoutTypegenImports(out) : null
+    if (typed?.dropped && !typed.remaining) return { status: 'pass', message: '', detail: [`bỏ ${typed.dropped} import kiểu ./+types/* do react-router typegen sinh (dependency-cruiser không đọc rootDirs; tsc-build đã kiểm chúng)`] }
+    return { status: 'fail', message: `depcruise báo lỗi (mã thoát ${r.code})`, fix: checker.hint, detail: tail(typed?.dropped ? typed.rest : out) }
   }
 }
 
@@ -720,8 +751,72 @@ function untrackedFiles(ctx, root) {
   return r.code === 0 ? new Set(String(r.stdout).split('\0').filter(Boolean)) : null
 }
 
+// --- cổng của app mà checker tự bật (axe, ui-rules, seo-public) ----------------------------------------------------------------------------
+
+// Chromium từ chối mở các cổng này (ERR_UNSAFE_PORT): trang không mở được dù server đã lên. wt-env.mjs có thể cấp PORT_BASE đúng 6000 (X11) hay 5060 (SIP).
+const UNSAFE_PORTS = new Set([1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080])
+const PORT_WINDOW = 20 // wt-env.mjs cấp mỗi worktree một cửa sổ 20 cổng bắt đầu từ PORT_BASE
+
+// Cổng để bật app: PORT nếu đã đặt; không thì cổng đầu tiên mở được bằng trình duyệt trong cửa sổ PORT_BASE (wt-env.mjs alloc); không có gì ⇒ null (app dùng cổng mặc định của nó).
+export function appPort(env = {}) {
+  const valid = (v) => { const n = Number(v); return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : null }
+  const given = valid(env.PORT)
+  if (given) return given
+  const base = valid(env.PORT_BASE)
+  if (!base) return null
+  for (let p = base; p < base + PORT_WINDOW && p <= 65535; p++) if (!UNSAFE_PORTS.has(p)) return p
+  return null
+}
+
+// --- seo-public: SEO + header của trang công khai (mẫu web-public) ---------------------------------------------------------------------------
+// `playwright test --grep=seo --reporter=json` chạy e2e/seo.spec.ts của app: tắt JavaScript, giả bot Facebook, đọc thẻ title/mô tả/canonical/og:*, sitemap.xml, robots.txt,
+// đường dẫn lạ phải 404, header (CSP có nonce, nosniff, chống nhúng) trên phản hồi thật; bật app trên cổng appPort(). Báo cáo JSON ⇒ từng ca đạt/không đạt; ca có chữ "header" ở tên
+// cho biết header trên phản hồi thật đạt hay không ⇒ ctx.live.headers (web-headers đọc, chạy sau).
+const SEO_NONE = 'Không có ca thử seo nào chạy (Playwright không tìm thấy test có chữ "seo" trong tên)'
+
+// Báo cáo JSON của Playwright nằm cuối stdout; trước nó có thể có dòng log khác (kể cả log dạng JSON) ⇒ thử từng dấu "{" đứng đầu dòng,
+// lấy khối đầu tiên parse được và có `suites`. Không tìm được ⇒ null (judge báo không đạt, không bao giờ đạt giả).
+export function playwrightReport(text) {
+  const s = String(text ?? '')
+  const b = s.lastIndexOf('}')
+  if (b < 0) return null
+  for (let a = s.indexOf('{'); a >= 0 && a < b; a = s.indexOf('{', a + 1)) {
+    if (a > 0 && s[a - 1] !== '\n') continue
+    try {
+      const j = JSON.parse(s.slice(a, b + 1))
+      if (j && Array.isArray(j.suites)) return j
+    } catch { /* thử dấu "{" đầu dòng kế tiếp */ }
+  }
+  return null
+}
+
+const specsOf = (suites) => (suites ?? []).flatMap((s) => [...(s.specs ?? []), ...specsOf(s.suites)])
+const firstError = (spec) => {
+  const res = (spec.tests ?? []).flatMap((t) => t.results ?? []).find((x) => x.error || x.errors?.length)
+  return clean(res?.error?.message ?? res?.errors?.[0]?.message ?? '').split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 2).join(' · ')
+}
+
+function judgeSeoPublic(checker, ctx) {
+  return (r, out) => {
+    const report = playwrightReport(r.stdout)
+    if (!report) {
+      // Playwright không in được báo cáo (app không lên, cấu hình hỏng…): theo mã thoát, không bao giờ đạt giả.
+      return r.code === 0 ? { status: 'fail', message: 'Playwright thoát 0 nhưng không có báo cáo đọc được nên không biết ca nào đạt', fix: checker.hint } : { status: 'fail', message: `Playwright báo lỗi (mã thoát ${r.code}) trước khi có kết quả ca thử (thường: app không lên được ở bản build)`, detail: tail(out), fix: checker.hint }
+    }
+    const specs = specsOf(report.suites)
+    const bad = specs.filter((s) => !s.ok)
+    const header = specs.filter((s) => /header/i.test(s.title))
+    if (header.length) ctx.live = { ...ctx.live, headers: header.every((s) => s.ok), detail: header.filter((s) => !s.ok).map((s) => `${s.title}: ${firstError(s)}`) }
+    if (!specs.length) return { status: 'fail', message: SEO_NONE, fix: checker.hint }
+    if (!bad.length) return { status: 'pass', message: `${specs.length} ca seo đạt (tắt JS, giả bot Facebook): thẻ title/mô tả/canonical/og, sitemap.xml, robots.txt, 404 thật, header` }
+    return { status: 'fail', message: `${bad.length}/${specs.length} ca seo không đạt`, detail: bad.map((s) => `${s.title}: ${firstError(s)}`), fix: checker.hint }
+  }
+}
+
 export const PLANNERS = {
   'ui-check': ({ checker }) => ({ runs: [{ args: checker.args ?? [], judge: judgeUiCheck(checker) }] }),
+
+  'seo-public': ({ checker, ctx }) => ({ runs: [{ args: checker.args ?? [], judge: judgeSeoPublic(checker, ctx) }] }),
 
   'tsc-build': ({ root, checker, ctx }) => {
     const args = checker.args ?? []
@@ -784,7 +879,8 @@ export const PLANNERS = {
     const cfg = depcruiseConfigFile(dir)
     if (!isFile(path.join(dir, cfg))) return { fail: { message: `Chưa có ${cfg} (cấu hình sinh từ docs/arch.json)`, fix: GEN_FIX } }
     const rt = roots(dir)
-    return { runs: [{ args: plan.args, cwd: plan.cwd, judge: judgeDepcruise(checker, { ts: usesTypeScript(dir) }) }], toolDirs: [...new Set([rt.web, rt.extension].filter(Boolean))], install: `npm i -D ${DEPCRUISE_PKGS} (${DEPCRUISE_WHERE})` }
+    const typegen = fs.existsSync(path.join(dir, '.react-router', 'types'))
+    return { runs: [{ args: plan.args, cwd: plan.cwd, judge: judgeDepcruise(checker, { ts: usesTypeScript(dir), typegen }) }], toolDirs: [...new Set([rt.web, rt.extension].filter(Boolean))], install: `npm i -D ${DEPCRUISE_PKGS} (${DEPCRUISE_WHERE})` }
   },
 
   // go-arch-lint check --json cho từng phần Go; vi phạm cũ trong docs/arch-baseline.json không tính.
@@ -999,10 +1095,13 @@ export async function runChecks({ dir, checkers, env, platform, which, exec, int
   const rt = roots(abs)
   const gitFn = git ?? defaultGit
   const memo = {}
+  // Checker tự bật app (axe, ui-rules, seo-public) dùng biến PORT. Chưa đặt PORT mà có PORT_BASE (wt-env.mjs alloc, cửa sổ 20 cổng của worktree) ⇒ bật app trên cổng đó, không dùng cổng mặc định.
+  const baseEnv = env ?? { ...process.env, NO_COLOR: '1' }
+  const port = baseEnv.PORT ? null : appPort(baseEnv)
   const ctx = {
     dir: abs,
     stacks,
-    env: env ?? { ...process.env, NO_COLOR: '1' },
+    env: port ? { ...baseEnv, PORT: String(port) } : baseEnv,
     platform: platform ?? process.platform,
     which: which ?? ((name, o) => findTool(name, o)),
     exec: exec ?? execIn,

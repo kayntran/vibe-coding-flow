@@ -13,10 +13,17 @@ việc chính mỗi màn.
 ## 1. Lấy thứ đã có
 
 - Sổ chốt, SPEC, `docs/IDEAS.md`.
+- `docs/BUSINESS.md` (mục 0, rồi chương khách, vấn đề, ngữ cảnh dùng) và `docs/STACK.md` (loại app, khung): đọc trước khi hỏi bất cứ gì.
 - App đang có: mở các màn hiện tại, đọc luồng thật. Có log hay số liệu sử dụng thì xem.
 - App thật cùng loại giải luồng này thế nào: **bắt buộc** với app mới, màn mới, đổi luồng — làm mục 5b.
 
 ## 2. Hỏi user trước
+
+**Có `docs/BUSINESS.md` ⇒ bỏ bước này, không hỏi câu nào về khách, ngữ cảnh dùng, việc chính hay lý do bỏ cuộc** (đã nằm trong bản: KH1,
+KH6, VD1–VD3, VD6, GT1). Lấy làm tình huống dùng, mức chắc theo mục: `[Bạn nói]` và `[Dữ liệu cho thấy]` giữ nguyên, `[AI đoán]` và
+`[Mặc định]` thành **AI đoán**. Điều bản chưa nói ⇒ tự suy theo "Ranh giới tự suy" của `flow-business`, ghi **AI đoán** kèm `(AI suy từ
+B-xx)`. Chỉ còn câu "luồng này đúng chưa?" ở bước 6. Chưa có bản ⇒ chạy `flow-business` trước (bước 0 của `flow-feature`); chỉ khi user bỏ
+qua mới hỏi như dưới.
 
 Dùng AskUserQuestion, tối đa 4 câu một vòng, chỉ hỏi cái làm thay đổi luồng. User thường biết khách của mình hơn AI:
 

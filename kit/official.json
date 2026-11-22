@@ -1,5 +1,5 @@
 {
-  "_doc": "Danh sách skill/MCP CHÍNH HÃNG của kit (đã kiểm org/tên miền ở docs/specs/2026-10-11-flow-v7-nocode/notes/research-architecture.md mục 4). Quy tắc nhận chính hãng: tên miền MCP khớp domain hãng, hoặc repo thuộc org chính hãng và docs hãng trỏ tới repo đó. Bản cộng đồng KHÔNG cài (AC-32). hooks/lib/skills-check.mjs đọc file này; mọi khoá cấp trên (không bắt đầu bằng '_') là một thư viện. Trường: sourceOrg · note · skill {repo, names[] (tên thư mục skill dùng để nhận ra bản chính hãng), installCmd} · mcp {hosts[] (tên miền gốc, khớp cả tên miền con), packages[] (gói npm chính hãng), needArg (chỉ nhận gói khi có đối số này), guard ('supabase'|'stripe': kiểm thêm read_only/dev/khoá live), installCmd {claude, codex}}. Không có cả skill lẫn mcp (null) ⇒ status 'none' (hãng không có bản chính hãng). Chỉ TRẢ lệnh cài, không bao giờ chạy. Skill cài mức dự án vào .claude/skills hoặc .agents/skills (nơi skills-check tìm); skill đi kèm plugin (/plugin marketplace add) nằm chỗ khác nên chưa được nhận.",
+  "_doc": "Danh sách skill/MCP CHÍNH HÃNG của kit (đã kiểm org/tên miền ở docs/specs/2026-10-11-flow-v7-nocode/notes/research-architecture.md mục 4). Quy tắc nhận chính hãng: tên miền MCP khớp domain hãng, hoặc repo thuộc org chính hãng và docs hãng trỏ tới repo đó. Bản cộng đồng KHÔNG cài (AC-32). hooks/lib/skills-check.mjs đọc file này; mọi khoá cấp trên (không bắt đầu bằng '_') là một thư viện. Trường: sourceOrg · note · skill {repo, names[] (tên thư mục skill dùng để nhận ra bản chính hãng), installCmd} · mcp {hosts[] (tên miền gốc, khớp cả tên miền con), packages[] (gói npm chính hãng), needArg (chỉ nhận gói khi có đối số này), guard ('supabase'|'stripe': kiểm thêm read_only/dev/khoá live), installCmd {claude, codex}}. Không có cả skill lẫn mcp (null) ⇒ status 'none' (hãng không có bản chính hãng). Chỉ TRẢ lệnh cài, không bao giờ chạy. Nguồn ngoài do user duyệt KHÔNG nằm ở đây mà ở kit/approved-skills.json (lib/skills-check.mjs đọc cả hai, trả source: official|approved). Skill cài mức dự án vào .claude/skills hoặc .agents/skills (nơi skills-check tìm); skill đi kèm plugin (/plugin marketplace add) nằm chỗ khác nên chưa được nhận.",
   "cloudflare": {
     "sourceOrg": "cloudflare",
     "skill": {
@@ -68,6 +68,16 @@
       }
     },
     "note": "MIT. Chỉ dùng khoá test hoặc restricted key; không đưa khoá live cho agent và không gõ khoá thẳng vào cấu hình."
+  },
+  "sepay": {
+    "sourceOrg": "sepayvn",
+    "skill": {
+      "repo": "sepayvn/sepay-skills",
+      "names": ["sepay"],
+      "installCmd": "npx skills add sepayvn/sepay-skills --skill sepay"
+    },
+    "mcp": null,
+    "note": "MIT. Skill chính hãng của SePay cho khách Việt (chuyển khoản/VietQR, webhook, đối soát, hoàn tiền); docs developer.sepay.vn/vi/agents/skills trỏ tới repo này, repo chỉ gồm file Markdown. Cài mức dự án (mặc định của skills CLI) vào .claude/skills. SePay có MCP và CLI riêng nhưng kit chưa đăng ký MCP."
   },
   "playwright": {
     "sourceOrg": "microsoft",

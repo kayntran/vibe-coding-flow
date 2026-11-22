@@ -11,14 +11,15 @@ spam. Skill là quy trình bắt buộc + luật cấm, không phải giáo trì
 **Ra gì:** `docs/specs/<YYYY-MM-DD>-<slug>/DESIGN.md` theo `assets/design-doc.md`. Cỡ M: chỉ các mục đánh dấu bắt buộc trong mẫu
 (thường dưới 60 dòng). Cỡ L, app mới: đủ mục. Đổi thứ toàn app (module, ranh giới) ⇒ cập nhật `docs/ARCHITECTURE.md` theo `flow-architecture`.
 
-**Ai quyết:** lựa chọn kỹ thuật AI tự quyết và ghi lý do bằng tác động lên người dùng (nhanh hơn, rẻ hơn, an toàn hơn). Chỉ hỏi user về
-hành vi app, con số kinh doanh và tiền: số người dùng, ngân sách tháng, app ngừng một giờ thì sao, dữ liệu mất thì sao.
+**Ai quyết:** lựa chọn kỹ thuật AI tự quyết và ghi lý do bằng tác động lên người dùng (nhanh hơn, rẻ hơn, an toàn hơn). Đọc
+`docs/BUSINESS.md`, `docs/STACK.md` trước (người dùng, ngân sách, công nghệ đã chốt), không hỏi lại business. Chỉ hỏi hành vi app mà
+hai bản chưa nói (app ngừng một giờ, dữ liệu mất thì sao).
 
 ## Quy trình — đi đủ 10 bước, không nhảy cóc
 
 1. **Yêu cầu.** Lấy từ SPEC và sổ chốt. Thiếu số phi chức năng ⇒ hỏi tối đa 4 câu một vòng (AskUserQuestion), câu đời thường
-   có đáp án khuyên dùng. Không hỏi được ⇒ ghi **giả định** có đánh dấu, để soát và user thấy. Danh sách câu: `references/yeu-cau.md`.
-2. **Xếp hạng quy mô** — prototype · MVP · đang tăng · quy mô lớn (ngưỡng và kiến trúc mặc định mỗi hạng: `references/uoc-luong.md`).
+   có đáp án khuyên dùng. Không hỏi được ⇒ ghi **giả định** có đánh dấu, để soát và user thấy. Câu hỏi: `references/yeu-cau.md`.
+2. **Xếp hạng quy mô** — prototype · MVP · đang tăng · quy mô lớn (ngưỡng mỗi hạng: `references/uoc-luong.md`).
    Ghi hạng ở đầu DESIGN.md. Mọi thành phần phía sau phải khớp hạng; thành phần của hạng cao hơn ⇒ đưa vào lộ trình, không làm ngay.
 3. **Ước lượng bằng con số:** người dùng/ngày → request/giây trung bình và cao điểm, tỉ lệ đọc/ghi, dung lượng một năm, băng thông,
    **chi phí tháng** (AI, SMS, email là khoản hay đội nhất). Công thức + số tham chiếu: `references/uoc-luong.md`.
@@ -45,7 +46,7 @@ hành vi app, con số kinh doanh và tiền: số người dùng, ngân sách t
   công khai): giới hạn tần suất, giới hạn chi phí, không để lộ thông tin dò được. Đây là tầng "làm ngay", không phải tối ưu.
 - **Không "MVP tạm rồi tính" cho phần khó sửa sau:** mô hình dữ liệu, khoá định danh, cách tách dữ liệu giữa khách hàng, hợp đồng API
   công khai, định dạng file người dùng lưu.
-- **Sơ đồ và chữ phải khớp** từng hộp, sửa trước khi đưa ra.
+- **Sơ đồ và chữ phải khớp** từng hộp.
 - **Giá, giới hạn gói, phiên bản thư viện:** tra trang chính thức (kho `kho.mjs tim` trước), ghi ngày tra; không đoán theo trí nhớ.
 - **Tách rõ đã biết và giả định.** Mỗi con số ghi nguồn (SPEC, user nói, đo, tra ngày …, giả định).
 
@@ -71,10 +72,10 @@ hành vi app, con số kinh doanh và tiền: số người dùng, ngân sách t
 |---|---|
 | `references/yeu-cau.md` | bước 1, câu hỏi yêu cầu |
 | `references/uoc-luong.md` | bước 2–3, hạng quy mô, công thức |
-| `references/so-lieu.md` | cần giá, giới hạn gói: tra trang chính thức, skill không ghi số |
+| `references/so-lieu.md` | cần giá, giới hạn gói (tra trang chính thức) |
 | `references/kien-truc.md` | bước 5, kiểu kiến trúc |
 | `references/du-lieu.md` · `references/api.md` | bước 6 |
-| `references/noi-luu-supabase.md` · `references/noi-luu-cloudflare-d1.md` · `references/noi-luu-postgres-vps.md` | chọn nơi lưu (bước 6, app mới), rồi áp công thức đã chọn |
+| `references/noi-luu-supabase.md` · `references/noi-luu-cloudflare-d1.md` · `references/noi-luu-postgres-vps.md` · `references/noi-luu-postgres-workers.md` (Chắc) | chọn nơi lưu (bước 6, app mới), rồi áp công thức đã chọn |
 | `references/cache.md` | đọc nhiều hoặc chậm |
 | `references/bat-dong-bo.md` | việc nền, queue, gửi hàng loạt |
 | `references/tin-cay.md` | bước 8, sự cố, sao lưu, khôi phục |

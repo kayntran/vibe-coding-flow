@@ -2,6 +2,8 @@
 
 Dùng ở bước 4 của `flow-system-design` (bản mẫu theo loại tính năng), câu hỏi hành vi đem hỏi lúc `flow-spec`.
 
+**Câu business trong "Hỏi user" không hỏi user**: câu nào `docs/BUSINESS.md` đã trả lời (khách, nước, giá, gói, hạn mức, ngân sách, giờ, giọng) thì lấy từ bản; chưa có hoặc bản chưa nói thì tự suy theo "Ranh giới tự suy" của `flow-business`, ghi `(AI suy từ B-xx)`. Chỉ hỏi chi tiết riêng của tính năng.
+
 ## Mục lục
 - Gọi AI trả lời văn bản
 - Trả lời hiện dần (streaming) và huỷ giữa chừng
@@ -17,9 +19,9 @@ Mục "Hạn mức, credit" dùng chung cho mọi thứ tốn tiền mỗi lần
 Nhận ra khi: "dùng AI để…", "chatbot", "tóm tắt", "viết giúp", "phân loại bằng AI", "gọi GPT/Claude/Gemini".
 
 Hỏi user (lúc viết SPEC):
-- Mỗi người miễn phí được bao nhiêu lượt/ngày? → khuyên: một con số nhỏ (vd 20 lượt/ngày), trả phí để thêm; không bao giờ "không giới hạn".
-- AI trả lời sai thì người dùng thấy gì? → khuyên: ghi rõ "AI có thể sai", có nút báo sai; việc quan trọng (tiền, sức khoẻ, pháp lý) phải có người xác nhận.
-- Nội dung người dùng gõ có được gửi cho nhà cung cấp AI không? → khuyên: có, nói rõ trong chính sách; dữ liệu nhạy cảm thì chọn gói nhà cung cấp cam kết không dùng để huấn luyện.
+- Mỗi người miễn phí được bao nhiêu lượt/ngày? (lấy từ BUSINESS.md B-TG14, B-TG4; chưa có thì tự suy) → khuyên: một con số nhỏ (vd 20 lượt/ngày), trả phí để thêm; không bao giờ "không giới hạn".
+- AI trả lời sai thì người dùng thấy gì? (lấy từ BUSINESS.md B-PV11; chưa có thì tự suy) → khuyên: ghi rõ "AI có thể sai", có nút báo sai; việc quan trọng (tiền, sức khoẻ, pháp lý) phải có người xác nhận.
+- Nội dung người dùng gõ có được gửi cho nhà cung cấp AI không? (lấy từ BUSINESS.md B-PL5; chưa có thì tự suy) → khuyên: có, nói rõ trong chính sách; dữ liệu nhạy cảm thì chọn gói nhà cung cấp cam kết không dùng để huấn luyện.
 
 | Mặt | Làm ngay | Chừa chỗ | Chưa làm (cần khi…) |
 |---|---|---|---|
@@ -66,7 +68,7 @@ Nhận ra khi: "mỗi người X lượt", "credit", "token", "tính tiền theo
 
 Hỏi user (lúc viết SPEC):
 - Hết lượt thì người dùng thấy gì? → khuyên: hiện rõ còn bao nhiêu, khi nào hồi, nút mua thêm; không chặn mà không nói gì.
-- Lượt miễn phí hồi theo ngày hay tháng, lượt mua có hết hạn không? → khuyên: miễn phí hồi theo ngày; lượt mua giữ 12 tháng.
+- Lượt miễn phí hồi theo ngày hay tháng, lượt mua có hết hạn không? (lấy từ BUSINESS.md B-TG5; chưa có thì tự suy) → khuyên: miễn phí hồi theo ngày; lượt mua giữ 12 tháng.
 - Đang làm dở mà hết lượt thì sao? → khuyên: cho xong việc đang dở rồi mới chặn (âm tối đa một lần).
 
 | Mặt | Làm ngay | Chừa chỗ | Chưa làm (cần khi…) |
@@ -114,7 +116,7 @@ Hay sai:
 Nhận ra khi: "AI tự làm", "agent", "AI gửi email/đặt lịch/sửa dữ liệu thay tôi", "tool use", "AI bấm nút giúp".
 
 Hỏi user (lúc viết SPEC):
-- AI được tự làm những việc nào mà không hỏi lại? → khuyên: chỉ đọc và soạn nháp; gửi đi, xoá, trả tiền phải bấm xác nhận.
+- AI được tự làm những việc nào mà không hỏi lại? (lấy từ BUSINESS.md B-UT8; chưa có thì tự suy) → khuyên: chỉ đọc và soạn nháp; gửi đi, xoá, trả tiền phải bấm xác nhận.
 - AI làm sai thì hoàn tác được không? → khuyên: việc AI tự làm phải hoàn tác được; việc không hoàn tác được thì luôn hỏi trước.
 
 | Mặt | Làm ngay | Chừa chỗ | Chưa làm (cần khi…) |

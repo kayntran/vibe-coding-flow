@@ -1,0 +1,5 @@
+# Chép file này thành .dev.vars rồi điền. .dev.vars KHÔNG đưa lên git (bí mật chạy thử trên máy).
+# Bí mật của bản thật đặt bằng `wrangler secret put <TÊN>` hoặc kho khoá của kit, không viết vào code hay wrangler.jsonc.
+# SITE_URL (địa chỉ web) KHÔNG phải bí mật: đặt ở wrangler.jsonc, mục vars.
+# Ví dụ khi đã chọn nền dữ liệu:
+# DATABASE_URL=

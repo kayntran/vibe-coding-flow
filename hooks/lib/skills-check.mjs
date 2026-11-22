@@ -1,5 +1,6 @@
 // skills-check: dự án này đã có skill/MCP CHÍNH HÃNG của từng thư viện chưa, và dùng được không (AC-32).
-// Danh sách chính hãng nằm ở kit/official.json. Đọc cấu hình TRỰC TIẾP (không gọi `claude mcp list`, chậm); không gọi mạng; không cài gì —
+// Danh sách chính hãng nằm ở kit/official.json; nguồn ngoài user đã duyệt nằm ở kit/approved-skills.json (hàng trả về có source: 'official' | 'approved').
+// Đọc cấu hình TRỰC TIẾP (không gọi `claude mcp list`, chậm); không gọi mạng; không cài gì —
 // chỉ trả lệnh cài để captain hỏi user. Spec: docs/specs/2026-10-11-flow-v7-nocode (PLAN.md, dòng skills-check).
 //
 // Nguồn đọc theo app:
@@ -8,7 +9,7 @@
 //   devin   MCP như claude (Devin đọc ~/.claude.json)                                           · skill: cả bốn thư mục trên
 // "Dự án" = thư mục được hỏi và các thư mục cha tới gốc repo (có .git), như cách Claude/Codex tìm skill.
 //
-// check(projectDir, host, opts?) → [{ lib, status, usable, scope, problems[], warnings[], installCmd, installAlt, sourceOrg, note, parts, found }]
+// check(projectDir, host, opts?) → [{ lib, status, usable, scope, problems[], warnings[], installCmd, installAlt, source, sourceOrg, note, parts, found }]
 //   status  installed (có skill HOẶC MCP chính hãng) · missing · community-only (chỉ có thứ trông giống nhưng không khớp danh sách chính hãng) ·
 //           none (hãng không có bản chính hãng: Go, Wails)
 //   usable  ok · needs-login · misconfigured · unknown (chưa cài ⇒ unknown). Mỗi MCP server được xét:
@@ -38,6 +39,8 @@ import { fileURLToPath } from 'node:url'
 import { scanText } from './secrets.mjs'
 
 export const OFFICIAL_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'kit', 'official.json')
+// Registry riêng cho nguồn ngoài user đã duyệt, nằm cạnh official.json (không trộn hai file). Mục ở đây ra source: 'approved'.
+export const APPROVED_FILE = path.join(path.dirname(OFFICIAL_FILE), 'approved-skills.json')
 
 export const HOSTS = {
   claude: { mcp: 'claude', skillDirs: ['.claude'] },
@@ -45,9 +48,23 @@ export const HOSTS = {
   devin: { mcp: 'claude', skillDirs: ['.claude', '.agents'] },
 }
 
-export function loadOfficial(file = OFFICIAL_FILE) {
-  const all = JSON.parse(fs.readFileSync(file, 'utf8'))
-  return Object.fromEntries(Object.entries(all).filter(([k]) => !k.startsWith('_')))
+const readRegistry = (file, source) =>
+  Object.fromEntries(Object.entries(JSON.parse(fs.readFileSync(file, 'utf8'))).filter(([k]) => !k.startsWith('_')).map(([k, v]) => [k, { ...v, source }]))
+
+// Danh sách thư viện của kit: official.json (source 'official') + approved-skills.json cạnh nó (source 'approved'; không có file ⇒ chỉ official).
+// Mặc định đọc approved-skills.json của kit khi đọc official.json của kit; truyền `file` khác ⇒ chỉ đọc đúng file đó, trừ khi truyền thêm approvedFile.
+export function loadOfficial(file = OFFICIAL_FILE, approvedFile = file === OFFICIAL_FILE ? APPROVED_FILE : null) {
+  const official = readRegistry(file, 'official')
+  if (!approvedFile) return official
+  let approved
+  try {
+    approved = readRegistry(approvedFile, 'approved')
+  } catch (e) {
+    if (e.code === 'ENOENT') return official
+    throw e
+  }
+  for (const k of Object.keys(approved)) if (Object.hasOwn(official, k)) throw new Error(`thư viện "${k}" có ở cả official.json và approved-skills.json`)
+  return { ...official, ...approved }
 }
 
 // ---------------------------------------------------------------- TOML tối thiểu
@@ -621,7 +638,7 @@ export function check(projectDir, host, opts = {}) {
     const off = official[lib]
     const row = {
       lib, status: 'none', usable: 'unknown', scope: { env: 'unknown' }, problems: [], warnings: [], installCmd: null, installAlt: null,
-      sourceOrg: off.sourceOrg, note: off.note ?? '', parts: {}, found: { skills: [], servers: [] },
+      source: off.source ?? 'official', sourceOrg: off.sourceOrg, note: off.note ?? '', parts: {}, found: { skills: [], servers: [] },
     }
     if (!off.skill && !off.mcp) return row
 

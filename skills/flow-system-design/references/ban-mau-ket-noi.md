@@ -2,6 +2,8 @@
 
 Dùng ở bước 4 của `flow-system-design`.
 
+**Câu business trong "Hỏi user" không hỏi user**: câu nào `docs/BUSINESS.md` đã trả lời (khách, nước, giá, gói, hạn mức, ngân sách, giờ, giọng) thì lấy từ bản; chưa có hoặc bản chưa nói thì tự suy theo "Ranh giới tự suy" của `flow-business`, ghi `(AI suy từ B-xx)`. Chỉ hỏi chi tiết riêng của tính năng.
+
 ## Mục lục
 
 - API cho bên ngoài gọi
@@ -22,7 +24,7 @@ trúc của plan ⇒ "Chưa làm" vào lộ trình theo ngưỡng. Giá và gi�
 Nhận ra khi: "cho đối tác gọi", "API công khai", "tích hợp Zapier/Make", "khách tự lấy dữ liệu bằng code", "cấp API key".
 
 Hỏi user (lúc viết SPEC):
-- Ai được dùng API? → khuyên: chỉ gói trả phí hoặc đối tác được duyệt.
+- Ai được dùng API? (lấy từ BUSINESS.md B-MR5, B-TG5; chưa có thì tự suy) → khuyên: chỉ gói trả phí hoặc đối tác được duyệt.
 - Mỗi khách gọi tối đa bao nhiêu? → khuyên: 60 lần/phút và 10.000 lần/ngày; quá thì báo rõ, không âm thầm chặn.
 - Khoá API bị lộ thì khách làm gì? → khuyên: tự bấm thu hồi và tạo khoá mới trong trang cài đặt.
 
@@ -46,7 +48,7 @@ Hay sai:
 
 ## Nhận webhook
 
-Nhận ra khi: "Stripe/Lemon Squeezy báo về", "thanh toán xong thì…", "webhook", "dịch vụ kia gọi lại", "callback".
+Nhận ra khi: "cổng thanh toán (Stripe, SePay, Polar…) báo về", "thanh toán xong thì…", "webhook", "dịch vụ kia gọi lại", "callback".
 
 Hỏi user (lúc viết SPEC):
 - Thông báo từ bên kia tới trễ vài phút thì người dùng thấy gì? → khuyên: màn "Đang xác nhận thanh toán…", tự cập nhật khi tới.
@@ -58,7 +60,7 @@ Hỏi user (lúc viết SPEC):
 | Chi phí | Chỉ đăng ký loại sự kiện cần dùng | — | — |
 | Chịu tải | Trả 2xx NHANH ngay sau khi kiểm chữ ký và lưu sự kiện; xử lý trong Queue (đầu tháng gia hạn hàng loạt sẽ dồn); khử trùng bằng bảng `su_kien_da_nhan(id unique)`; không tin thứ tự tới — cần trạng thái mới nhất thì gọi API bên kia lấy lại | Bảng lưu sự kiện thô để chạy lại khi sửa lỗi xử lý | — |
 | Dữ liệu (riêng tư, xoá, sao lưu) | Không log nguyên thân nếu có dữ liệu cá nhân; không log secret | — | — |
-| Theo dõi sự cố | Job đối soát: Lemon Squeezy chỉ thử lại vài phút, Stripe thử lại nhiều ngày — bên nào cũng cần đối soát; cảnh báo khi lỗi chữ ký tăng hoặc có đơn mà 24 giờ không nhận sự kiện nào | — | — |
+| Theo dõi sự cố | Job đối soát: mỗi bên gửi lại tin theo lịch riêng (Stripe nhiều ngày, SePay khoảng nửa giờ — tra tài liệu bên đã chọn) — bên nào cũng cần đối soát; cảnh báo khi lỗi chữ ký tăng hoặc có đơn mà 24 giờ không nhận sự kiện nào | — | — |
 
 Bài kiểm bắt buộc:
 - Webhook bị sửa 1 byte thân ⇒ 400, không xử lý.

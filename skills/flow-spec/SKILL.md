@@ -17,19 +17,25 @@ Mọi tài liệu của một tính năng nằm trong `docs/specs/<YYYY-MM-DD>-<
 - Đọc `docs/IDEAS.md` (nếu có), tìm ý tưởng trùng. Chỉ coi là một khi khớp chắc chắn; mơ hồ thì hỏi. Làm ý tưởng nào thì ghi
   dòng trỏ về mã đó: `node ~/.claude/hooks/lib/so-chot.mjs y-tuong <projectRoot> '{"ma":"y-xxxxxx","lam":"<YYYY-MM-DD>-<slug>"}'`.
 - Tra sổ chốt theo phạm vi việc (`mcp__so-chot__tim_chot`). Đã chốt thì không hỏi lại.
+- Đọc `docs/BUSINESS.md` (mục 0, rồi chương liên quan) và `docs/STACK.md` (mục 0) **trước khi hỏi**. **Không hỏi câu business** (khách,
+  giá, thu tiền, pháp lý, giọng nói, quy mô, ngân sách) và không đổi công nghệ đã chốt. Điều bản chưa nói ⇒ tự suy theo "Ranh giới tự
+  suy" của `flow-business`, ghi `(AI suy từ B-xx)` trong SPEC, kể ở tóm tắt cuối việc. Vẫn hỏi: việc user chọn ở B-UT8 và các cổng gật
+  sẵn (tiêu tiền thật, gửi ra ngoài, xoá, gộp). App chưa có bản ⇒ chạy `flow-business` rồi `flow-stack` trước (bước 0 của `flow-feature`).
 
 ## 2. Hỏi cho rõ
 
 Ý tưởng còn mơ hồ thì **hỏi không giới hạn số vòng, nhưng gom câu vào AskUserQuestion** (tối đa 4 câu một vòng; tool từ chối
-câu thứ 5), không hỏi lẻ từng câu trong chat. Mỗi câu đứng độc lập, có đáp án khuyên dùng đứng đầu và lý do. Dừng khi đã trả
-lời được hợp đồng dưới đây. Đoán được từ code, sổ chốt hay cách làm phổ biến thì không hỏi.
+câu thứ 5), không hỏi lẻ từng câu trong chat. Mỗi câu đứng độc lập, có đáp án khuyên dùng đứng đầu và lý do, **câu nào cũng có
+"Chưa biết"** (lấy mặc định, ghi giả định). Hộp hỏi nhận 2–4 đáp án: chọn một thì tối đa 3 đáp án thật + "Chưa biết"; chọn nhiều
+thì tối đa 4, không cần "Chưa biết". Dừng khi đã trả lời được hợp đồng dưới đây. Đoán được từ code, sổ chốt, `docs/BUSINESS.md`, `docs/STACK.md` hay cách làm phổ biến thì không hỏi;
+chỉ hỏi về chính tính năng này (hành vi, màn, ca hiếm).
 
 **Hợp đồng 4 trường** (ghi đầu SPEC, chỉ dòng ngắn):
 
 | Trường | Trả lời |
 |---|---|
 | Kết quả | Xong thì người dùng làm được gì mà giờ chưa làm được |
-| Ràng buộc | Tiền, thời gian, thứ phải giữ nguyên |
+| Ràng buộc | Tiền, thời gian (lấy từ `BUSINESS.md`, không hỏi), thứ phải giữ nguyên |
 | Không làm | Việc dễ bị hiểu là có nhưng lần này không có |
 | Thế nào là đạt | Tiêu chí kiểm được |
 
@@ -63,8 +69,9 @@ script, tác vụ nền) ⇒ bỏ bước này, thay bằng **một tình huốn
 - Trong "Làm được gì" và phần kỹ thuật: mỗi tiêu chí có mã `AC-nn`, dạng `KHI <tình huống> THÌ HỆ THỐNG PHẢI <hành vi>`, mỗi dòng dịch thẳng thành test.
 - Yêu cầu phi chức năng (hiệu năng, offline, i18n…) chỉ khi có thật.
 - Chỗ chưa rõ đánh `[CẦN LÀM RÕ]`; còn dấu này thì chưa xong.
-- App có tài khoản/dữ liệu mà chưa chốt chỗ để ⇒ hỏi nhu cầu (máy chủ/dịch vụ đã có, cần trang xem dữ liệu không, chi bao nhiêu
-  mỗi tháng), không hỏi tên dịch vụ, không mặc định [nyfb]; AI chọn theo công thức `noi-luu-*.md` của `flow-system-design` và nói lý do.
+- Chỗ để dữ liệu, đăng nhập, nơi chạy, thu tiền đã chốt ở `docs/STACK.md` ⇒ dùng đúng thứ đó, không hỏi lại, không thêm hay đổi khung,
+  cơ sở dữ liệu, dịch vụ ngoài. Tính năng cần thứ STACK.md chưa có ⇒ dùng thứ có sẵn, hoặc nhờ `flow-stack` thêm một mảng (một câu hỏi kèm
+  5 ý và phí). Công thức `noi-luu-*.md` của `flow-system-design` nói cách làm trên thứ đã chọn.
 - Mỗi `P-nn` sẽ thành test ở lớp chặn quyền thật (skill `flow-qa`).
 - Chạm thứ dùng chung (provider, model, gói, cài đặt, tool AI agent…) ⇒ chạy `flow-impact`; kết quả ghi vào SPEC.
 
@@ -75,7 +82,9 @@ hợp giữ lại thành một tiêu chí hoặc một dòng "Không làm".
 
 **Bản mẫu theo loại tính năng (mọi việc M/L)** [89i7]: tính năng thuộc loại có bản mẫu (đăng nhập, gửi mã, gọi AI, tải file, thanh
 toán, đặt chỗ…) ⇒ mở đúng file nhóm `ban-mau-*.md` trong skill `flow-system-design`, hỏi các câu "Hỏi user" của loại đó (gom vào cùng
-vòng AskUserQuestion), và đưa các mục tầng "làm ngay" thành `AC-nn`. Để không ai thấy chống spam là "thêm sau".
+vòng AskUserQuestion). **Câu business trong mục "Hỏi user"** (khách ở nước nào, có cần SMS, trần chi, giờ nhắc, giá, gói miễn phí,
+hoàn tiền, ân hạn, đăng ký, hạn mức…) **không hỏi**: lấy từ `BUSINESS.md`; bản chưa nói ⇒ tự suy, ghi `(AI suy từ B-xx)`. Chỉ hỏi
+chi tiết riêng của tính năng. Đưa các mục tầng "làm ngay" thành `AC-nn`. Để không ai thấy chống spam là "thêm sau".
 
 ## 7. User duyệt
 

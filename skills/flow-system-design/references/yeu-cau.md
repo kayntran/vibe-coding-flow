@@ -4,6 +4,7 @@ Dùng ở bước 1 của `flow-system-design`.
 
 ## Mục lục
 - Cách hỏi theo vòng
+- Lấy từ BUSINESS.md trước
 - Yêu cầu chức năng
 - Yêu cầu phi chức năng
 - Câu trả lời → ảnh hưởng thiết kế
@@ -11,7 +12,7 @@ Dùng ở bước 1 của `flow-system-design`.
 
 ## Cách hỏi theo vòng
 
-- **Tra trước, hỏi sau.** Lấy từ SPEC, sổ chốt, code, cấu hình triển khai. Câu nào tự tra được (stack, nơi chạy, số đã đo) ⇒ không hỏi.
+- **Tra trước, hỏi sau.** Lấy từ SPEC, sổ chốt, `docs/BUSINESS.md`, `docs/STACK.md`, code, cấu hình triển khai. Câu nào tự tra được (stack, nơi chạy, số đã đo) ⇒ không hỏi.
 - **Tối đa 4 câu một vòng**, gộp trong một lần AskUserQuestion, đánh số 1–4 để user trả lời gộp ("1 ừ, 2 khoảng 500, 3 ừ, 4 không").
 - **Mỗi câu có sẵn đáp án khuyên dùng**, viết sao cho user chỉ cần "ừ" là chốt. Đáp án khuyên dùng đi kèm lý do bằng tác động lên người dùng hoặc tiền.
 - **Hỏi hết câu đã đủ điều kiện hỏi** trong vòng đó, không nhỏ giọt từng câu. Xong vòng ⇒ xem câu nào vừa mở ra
@@ -22,6 +23,32 @@ Dùng ở bước 1 của `flow-system-design`.
 - **User nói "không biết"** ⇒ không ép, lấy mặc định, đánh dấu (giả định) để user thấy trong tóm tắt và sửa được sau.
 - **Chốt lại:** cuối vòng chót nhắc 3–5 con số đã chốt trong một câu, xin gật. Chưa gật ⇒ chưa sang bước 2.
 - **Cấm hỏi kỹ thuật thuần** ("dùng Redis không?", "queue hay cron?"). AI tự quyết, ghi lý do.
+
+## Lấy từ BUSINESS.md trước
+
+App có `docs/BUSINESS.md` ⇒ các câu trong bảng dưới **không hỏi user**, không vào vòng nào: lấy câu trả lời từ mục của bản, ghi nguồn
+`(BUSINESS B-xx)`; mục `[Bạn nói]` tính là (user nói), mục `[AI đoán]` hoặc `[Mặc định]` tính là (giả định). Bản chưa nói tới ⇒ tự suy
+theo "Ranh giới tự suy" của `flow-business`, ghi `(AI suy từ B-xx)`. Cả vòng 1 và 2 có thể trống: không mở vòng chỉ để xác nhận lại.
+Chỉ app chưa có bản (user đã bỏ qua `flow-business`) mới hỏi theo bảng ở hai mục sau.
+
+| Câu | Mục của BUSINESS.md |
+|---|---|
+| C1 ai dùng, C3 ai xem/sửa của ai | KH3 |
+| C4 tiền, email/SMS, AI, tải file | PV9 |
+| C5 mất mạng | PV8 |
+| C6 lần này không làm | PV3 |
+| N1 số người, N2 dịp bùng | TD5 |
+| N4 ngừng giữa giờ làm | VH3 |
+| N5 mất dữ liệu, N6 khôi phục | VH4 |
+| N7 ngân sách | CP1 |
+| N8 ai xử lý lúc lỗi | VH2 |
+| N9 ngày phải có bản | PV4 |
+| N10 dữ liệu nhạy cảm | PL1, PL2 |
+| N11 nước của người dùng | KH4, PL8 |
+| N12 xoá tài khoản | VH8 |
+
+C2 lấy từ SPEC. N3 không phải câu business: AI tự quyết theo cột Khuyên, ghi (giả định), không hỏi. Nơi chạy, cơ sở dữ liệu, khung
+đọc ở `docs/STACK.md`.
 
 ## Yêu cầu chức năng
 
@@ -84,6 +111,6 @@ Mỗi mặc định là **giả định** — ghi vào mục "Giả định" c�
 
 ## Ghi vào DESIGN.md
 
-- Mục 3 (phi chức năng): mỗi dòng một con số + nguồn trong ngoặc: (user nói) · (SPEC) · (giả định).
+- Mục 3 (phi chức năng): mỗi dòng một con số + nguồn trong ngoặc: (user nói) · (SPEC) · (BUSINESS B-xx) · (giả định).
 - Câu user trả lời làm đổi quyết định sản phẩm ⇒ ghi vào sổ chốt, không ghi vào progress.md.
 - Giả định nào làm đổi hạng quy mô nếu sai (N1, N2) ⇒ đưa vào "Rủi ro và câu hỏi mở".

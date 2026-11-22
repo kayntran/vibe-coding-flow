@@ -1,0 +1,5 @@
+# File .ignore (cú pháp như .gitignore) mà ast-grep và ripgrep đọc. Thành phần giao diện do shadcn sinh ra (src/components/ui) viết theo thiết kế
+# riêng của shadcn (vd text-[0.8rem]) nên không soát bằng luật "giá trị giao diện gõ cứng" (ui-token): cùng lý do eslint.config.js tắt luật
+# shadcn cho src/components/**. Code của app (src/features, src/routes, src/shared) vẫn được soát đủ.
+# Tìm trong thư mục này bằng ripgrep: thêm -uu (vd rg -uu <từ> src/components/ui).
+src/components/ui/

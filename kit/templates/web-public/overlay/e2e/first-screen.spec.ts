@@ -1,0 +1,26 @@
+import AxeBuilder from '@axe-core/playwright'
+import { expect, test } from '@playwright/test'
+
+// @smoke = bài thử nhanh sau phát hành (chạy vào bản đã đưa lên, xem playwright.config.ts): CHỈ ĐỌC (mở màn, nhìn), không bấm/nhập/ghi gì vào dữ liệu.
+test('S-01: màn đầu hiện tên app và lời mời làm màn đầu tiên', { tag: '@smoke' }, async ({ page }) => {
+  await page.goto('/')
+  const screen = page.locator('[data-s="S-01"]')
+  await expect(screen).toBeVisible()
+  await expect(screen.getByRole('heading', { level: 1 })).toHaveText('{{APP_NAME}}')
+  await expect(screen).toContainText('Chưa có màn nào')
+})
+
+// Tên có chữ "a11y": máy kiểm (flow-check) chạy riêng các test trợ năng bằng playwright test --grep=a11y.
+test('S-01: a11y — không có lỗi truy cập (axe)', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.locator('[data-s="S-01"]')).toBeVisible()
+  const result = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
+  expect(result.violations).toEqual([])
+})
+
+// Trang không có thật: trả mã 404 THẬT (không phải "không tìm thấy" kèm mã 200) và nói đúng trạng thái S-404.
+test('S-404: trang không có thật hiện thông báo và trả mã 404', async ({ page }) => {
+  const res = await page.goto('/trang-khong-co-that')
+  expect(res?.status()).toBe(404)
+  await expect(page.locator('[data-s="S-404"]')).toBeVisible()
+})

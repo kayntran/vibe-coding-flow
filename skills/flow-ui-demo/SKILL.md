@@ -9,6 +9,9 @@ Luồng đã duyệt (`UX.md`), **tham khảo app thật đã cho user xem** (m�
 hoặc thiếu tham khảo mà đây là màn mới thì chạy `flow-ux` trước. Mỗi bản ghi app tham khảo nó dựa vào; chỉ học cấu trúc, màu và chữ
 lấy từ token của app.
 Mọi bản theo luật `~/.claude/rules/ui-style.md` (đọc trước nếu chưa nạp).
+Đọc `docs/BUSINESS.md` và `docs/STACK.md` trước: giọng, cách xưng hô, từ dùng và từ cấm (`_Tránh_`) của mọi chữ trong demo lấy từ mục
+"Từ điển và giọng nói", không tự đặt; khung và thư viện giao diện theo `STACK.md`, không đổi hay thêm khi user chưa bảo. **Không hỏi
+câu business** (khách, giá, giọng): điều bản chưa nói ⇒ tự suy theo "Ranh giới tự suy" của `flow-business`, ghi `(AI suy từ B-xx)`.
 
 ## Số bản
 

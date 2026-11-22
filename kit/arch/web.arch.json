@@ -1,5 +1,5 @@
 {
-  "$comment": "Mẫu kiến trúc cho dự án web (modular monolith, hexagonal nhẹ). Mỗi tính năng là một module riêng: thêm vào modules một dòng { name: \"features/<tên>\", path: \"src/features/<tên>\", mayDependOn: [\"shared\"] } rồi thêm một dòng vào Codemap của docs/ARCHITECTURE.md. Tính năng KHÔNG import tính năng khác. Mỗi forbidden bắt buộc có reason + fix. Sửa xong chạy: node ~/.claude/hooks/arch.mjs gen",
+  "$comment": "Mẫu kiến trúc cho dự án web (modular monolith, hexagonal nhẹ). Mỗi tính năng là một module riêng: thêm vào modules một dòng { name: \"features/<tên>\", path: \"src/features/<tên>\", mayDependOn: [\"shared\"] } rồi thêm một dòng vào Codemap của docs/ARCHITECTURE.md. Tính năng KHÔNG import tính năng khác. Mẫu web-public (React Router trên Cloudflare Workers) thêm thư mục src/routes (module \"routes\": file route mỏng, được import features/* và shared; arch init tự coi routes là lớp ráp), nên có luật tính năng và shared không được import routes. Mỗi forbidden bắt buộc có reason + fix. Sửa xong chạy: node ~/.claude/hooks/arch.mjs gen",
   "version": 1,
   "parts": [
     {
@@ -34,6 +34,12 @@
           "to": "src/features/**",
           "reason": "shared không được biết tính năng nào, nếu không các tính năng sẽ dính nhau qua shared.",
           "fix": "Chuyển đoạn code đó vào đúng tính năng, hoặc để tính năng truyền dữ liệu vào shared qua tham số."
+        },
+        {
+          "from": "src/{features,shared}/**",
+          "to": "src/routes/**",
+          "reason": "Route chỉ ráp tính năng; tính năng và shared không được biết route nào, nếu không route và tính năng dính vào nhau.",
+          "fix": "Để route import tính năng (không làm ngược lại); cần dùng chung thì chuyển phần đó xuống shared."
         }
       ]
     }

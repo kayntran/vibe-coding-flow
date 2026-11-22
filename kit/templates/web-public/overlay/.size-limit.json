@@ -1,0 +1,5 @@
+[
+  { "name": "mã chạy ở trình duyệt (JS, nén gzip)", "path": "build/client/assets/*.js", "gzip": true, "limit": "150 kB" },
+  { "name": "kiểu dáng (CSS, nén gzip)", "path": "build/client/assets/*.css", "gzip": true, "limit": "20 kB" },
+  { "name": "Worker (mã máy chủ, nén gzip)", "path": "build/server/**/*.js", "gzip": true, "limit": "1 MB" }
+]

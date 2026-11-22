@@ -2,7 +2,10 @@
 
 Dùng ở bước 4 của `flow-system-design` (bản mẫu theo loại tính năng), câu hỏi hành vi đem hỏi lúc `flow-spec`.
 
+**Câu business trong "Hỏi user" không hỏi user**: câu nào `docs/BUSINESS.md` đã trả lời (khách, nước, giá, gói, hạn mức, ngân sách, giờ, giọng) thì lấy từ bản; chưa có hoặc bản chưa nói thì tự suy theo "Ranh giới tự suy" của `flow-business`, ghi `(AI suy từ B-xx)`. Chỉ hỏi chi tiết riêng của tính năng.
+
 ## Mục lục
+- Chọn cổng thu tiền: khách Việt Nam và khách quốc tế (cài skill có sẵn)
 - Thanh toán một lần
 - Gói định kỳ
 - Dùng thử, nâng/hạ gói, huỷ, hoàn tiền, tranh chấp
@@ -14,13 +17,46 @@ Dùng ở bước 4 của `flow-system-design` (bản mẫu theo loại tính n�
 Số mặc định trong bảng (14 ngày, 3 máy…) là kinh nghiệm, không phải số đo — chỉnh theo app. Phí cổng thanh toán: tra trang giá chính thức lúc thiết kế.
 Luật chung cả nhóm: **cổng thanh toán là nguồn sự thật**, app chỉ mở quyền theo webhook đã kiểm chữ ký + đối soát; không bao giờ theo trang "thanh toán thành công" hay dữ liệu từ trình duyệt.
 
+## Chọn cổng thu tiền: khách Việt Nam và khách quốc tế (cài skill có sẵn)
+Nhận ra khi: "thu tiền", "khách trả bằng chuyển khoản/QR/thẻ", "bán sang nước ngoài", "dùng cổng nào", "SePay", "payOS", "Polar", "Paddle", "Stripe".
+
+Kit không giữ công thức từng cổng: cài skill có sẵn vào đúng app (mức dự án, bước gom chuẩn bị của `flow-feature`), rồi để luật an toàn của kit đứng trên skill đó.
+Đã có `docs/BUSINESS.md` thì đọc trước (khách ở đâu, thu một lần hay định kỳ, đã có hộ kinh doanh hay công ty chưa), không hỏi lại. Kiểm và cài:
+`node ~/.claude/hooks/skills-check.mjs --lib sepay` (khách Việt, skill chính hãng của SePay) · `--lib payment-integration` (Polar, Paddle, Stripe, Creem; nguồn
+ngoài user đã duyệt, ghim commit) · `--lib payos` ⇒ `none`, "kit chưa có skill": tự làm theo tài liệu payOS nhưng vẫn đủ luật dưới đây. Báo `missing` ⇒ máy kiểm in lệnh
+cài, user gật rồi mới chạy. Cài xong, `skills-check` phải báo `installed` trước khi viết code thu tiền.
+
+Hỏi user (lúc viết SPEC, chỉ phần BUSINESS.md chưa trả lời):
+- Khách chủ yếu trả bằng gì: chuyển khoản/QR, thẻ trong nước hay thẻ quốc tế? (lấy từ BUSINESS.md B-TG7, B-KH4; chưa có thì tự suy) → khuyên: khách Việt chuyển khoản/QR qua SePay (tiền về thẳng tài khoản ngân hàng của bạn); khách nước ngoài qua bên "bán hộ" lo thuế còn hoạt động (Polar, Paddle, Dodo Payments…), nhà nào cũng tra điều kiện người bán ở Việt Nam trước khi chốt.
+- Bán gói theo tháng cho khách Việt thì sao? → khuyên: nói thẳng trên trang mua là mỗi kỳ khách quét mã lại (chuyển khoản không tự trừ định kỳ), nhắc trước hạn 3 ngày; muốn tự trừ mỗi kỳ thì dùng cổng thẻ quốc tế.
+- Hoá đơn điện tử và thuế trên tiền thu được? (lấy từ BUSINESS.md B-TG11; chưa có thì tự suy) → khuyên: hỏi kế toán trước khi mở bán; kit không tư vấn pháp lý và không nói "đúng luật".
+
+| Mặt | Làm ngay | Chừa chỗ | Chưa làm (cần khi…) |
+|---|---|---|---|
+| Lạm dụng/spam | **Giá tính ở máy chủ** theo mã sản phẩm, không nhận giá từ trình duyệt. **Chỉ coi là đã trả khi cổng báo thật**: webhook đã kiểm chữ ký hoặc khoá trên thân thô, hoặc gọi lại API cổng hỏi trạng thái; không tin trang "thành công". **Chống trừ hai lần**: khoá duy nhất theo mã giao dịch của cổng, lưu id sự kiện, trùng thì bỏ qua. SePay: khớp đơn theo mã thanh toán hoặc tài khoản ảo, không theo số tiền + giờ; số tiền nhận phải khớp số tiền đơn, lệch ⇒ đánh dấu "cần xem", không tự mở quyền | Hàm bọc `payments` (tạo thanh toán, kiểm báo về, hỏi trạng thái) để đổi cổng chỉ sửa một chỗ; cột `provider`, `provider_payment_id` trên `orders` | Hai cổng chạy cùng lúc (Việt và quốc tế) — chỉ khi có cả hai nhóm khách; làm một bên trước |
+| Chi phí | Phí cổng và phí bán hộ vào ước lượng bước 3 (tra trang giá lúc hỏi, ghi ngày tra); gói miễn phí của cổng có trần số giao dịch ⇒ ghi mốc lên gói trả phí | — | — |
+| Chịu tải | Webhook trả 2xx nhanh, việc nặng qua hàng đợi | — | — |
+| Dữ liệu (riêng tư, xoá, sao lưu) | Khoá cổng chỉ ở biến bí mật của máy chủ; không lưu số thẻ; thư mục skill cài vào app nằm trong git và không chứa khoá | — | — |
+| Theo dõi sự cố | Đối soát định kỳ với cổng (kéo giao dịch mới theo mốc, đơn nào cổng đã nhận mà app chưa mở thì xử lý như webhook bị lỡ); cảnh báo webhook sai chữ ký | — | — |
+
+Bài kiểm bắt buộc:
+- Gửi cùng một thông báo thanh toán hai lần ⇒ giao hàng một lần.
+- Thông báo sai chữ ký/khoá hoặc thiếu ⇒ bị từ chối, đơn không đổi.
+- Số tiền báo về lệch số tiền đơn ⇒ không mở quyền, đơn ở trạng thái "cần xem".
+- Gửi giá khác từ trình duyệt lúc tạo đơn ⇒ bị bỏ qua, đơn theo giá ở máy chủ.
+
+Hay sai:
+- Chọn cổng theo trí nhớ: dịch vụ có thể đã đóng đăng ký hoặc không nhận người bán ở Việt Nam ⇒ tra trang chính thức lúc chọn.
+- Chép code mẫu của skill rồi bỏ kiểm số tiền hay khử trùng "cho chạy trước".
+- Khớp đơn bằng số tiền + giờ chuyển khoản ⇒ giao nhầm cho người khác.
+
 ## Thanh toán một lần
 Nhận ra khi: "mua", "thanh toán", "checkout", "trả tiền một lần", "bán khoá học/ebook/template".
 
 Hỏi user (lúc viết SPEC):
 - Khách trả tiền xong mà đóng tab trước khi về trang cảm ơn thì vẫn có hàng chứ? → khuyên: có — giao hàng theo xác nhận từ cổng thanh toán, không theo trang cảm ơn.
-- Ai lo thuế/hoá đơn cho khách nước ngoài? → khuyên: bán toàn cầu một mình thì dùng cổng kiểu "bán hộ" (merchant of record, vd Lemon Squeezy) để cổng lo thuế; xác nhận lại với kế toán.
-- Hoàn tiền trong bao lâu? → khuyên: 14 ngày, ghi rõ trên trang mua.
+- Ai lo thuế/hoá đơn cho khách nước ngoài? (lấy từ BUSINESS.md B-TG12; chưa có thì tự suy) → khuyên: bán toàn cầu một mình thì dùng cổng kiểu "bán hộ" (merchant of record, vd Polar, Paddle, Dodo Payments — tra điều kiện người bán ở Việt Nam) để cổng lo thuế; xác nhận lại với kế toán.
+- Hoàn tiền trong bao lâu? (lấy từ BUSINESS.md B-TG9; chưa có thì tự suy) → khuyên: 14 ngày, ghi rõ trên trang mua.
 
 | Mặt | Làm ngay | Chừa chỗ | Chưa làm (cần khi…) |
 |---|---|---|---|
@@ -28,7 +64,7 @@ Hỏi user (lúc viết SPEC):
 | Chi phí | Phí cổng mỗi giao dịch vào ước lượng bước 3 | — | — |
 | Chịu tải | Webhook trả 2xx ngay, việc nặng (gửi thư, mở quyền) qua hàng đợi | — | — |
 | Dữ liệu (riêng tư, xoá, sao lưu) | Giao hàng idempotent (làm lại không ra kết quả đôi): lưu event ID đã xử lý, bỏ qua trùng; khoá chống trùng khi tạo phiên thanh toán; bảng `orders` có trạng thái rõ (chờ, đã trả, đã hoàn, tranh chấp); không lưu số thẻ — để cổng giữ | Cột `provider_payment_id`, `refunded_at` | — |
-| Theo dõi sự cố | Việc đối soát định kỳ: kéo giao dịch từ cổng so với `orders` (Lemon Squeezy chỉ gửi lại webhook trong vài phút, Stripe tới 3 ngày ⇒ lỡ là mất nếu không đối soát); cảnh báo webhook sai chữ ký hoặc lỗi liên tục | — | — |
+| Theo dõi sự cố | Việc đối soát định kỳ: kéo giao dịch từ cổng so với `orders` (Stripe gửi lại webhook tới 3 ngày, SePay khoảng nửa giờ ⇒ lỡ là mất nếu không đối soát); cảnh báo webhook sai chữ ký hoặc lỗi liên tục | — | — |
 
 Bài kiểm bắt buộc:
 - Gửi cùng một webhook hai lần ⇒ giao hàng một lần.
@@ -43,8 +79,8 @@ Hay sai:
 Nhận ra khi: "gói tháng", "subscription", "bản Pro", "trả theo năm", "gia hạn tự động".
 
 Hỏi user (lúc viết SPEC):
-- Thẻ bị từ chối lúc gia hạn thì người dùng còn dùng được bao lâu? → khuyên: 7 ngày ân hạn kèm nhắc đổi thẻ, sau đó về gói miễn phí, không xoá dữ liệu.
-- Gói khác nhau ở những giới hạn nào (số dự án, số thành viên, lượt AI)? → khuyên: 1–2 con số rõ ràng, ghi trong một bảng cấu hình.
+- Thẻ bị từ chối lúc gia hạn thì người dùng còn dùng được bao lâu? (lấy từ BUSINESS.md B-TG10; chưa có thì tự suy) → khuyên: 7 ngày ân hạn kèm nhắc đổi thẻ, sau đó về gói miễn phí, không xoá dữ liệu.
+- Gói khác nhau ở những giới hạn nào (số dự án, số thành viên, lượt AI)? (lấy từ BUSINESS.md B-TG5; chưa có thì tự suy) → khuyên: 1–2 con số rõ ràng, ghi trong một bảng cấu hình.
 
 | Mặt | Làm ngay | Chừa chỗ | Chưa làm (cần khi…) |
 |---|---|---|---|
@@ -66,7 +102,7 @@ Hay sai:
 Nhận ra khi: "dùng thử 7 ngày", "nâng cấp", "hạ gói", "huỷ gói", "hoàn tiền", "chargeback", "khách khiếu nại với ngân hàng".
 
 Hỏi user (lúc viết SPEC):
-- Dùng thử có phải nhập thẻ không? → khuyên: muốn nhiều người thử thì không cần thẻ; muốn ít người mà nghiêm túc thì cần thẻ.
+- Dùng thử có phải nhập thẻ không? (lấy từ BUSINESS.md B-TG4; chưa có thì tự suy) → khuyên: muốn nhiều người thử thì không cần thẻ; muốn ít người mà nghiêm túc thì cần thẻ.
 - Hạ gói giữa kỳ có hiệu lực ngay hay cuối kỳ? → khuyên: hạ gói vào cuối kỳ (khỏi hoàn tiền lẻ); nâng gói có hiệu lực ngay, trả phần chênh.
 - Huỷ gói mà dữ liệu vượt giới hạn gói miễn phí thì sao? → khuyên: giữ nguyên dữ liệu, chỉ khoá tạo thêm (chỉ xem).
 

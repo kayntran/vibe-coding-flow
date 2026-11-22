@@ -2,6 +2,8 @@
 
 Dùng ở bước 4 của `flow-system-design` (bản mẫu theo loại tính năng), câu hỏi hành vi đem hỏi lúc `flow-spec`.
 
+**Câu business trong "Hỏi user" không hỏi user**: câu nào `docs/BUSINESS.md` đã trả lời (khách, nước, giá, gói, hạn mức, ngân sách, giờ, giọng) thì lấy từ bản; chưa có hoặc bản chưa nói thì tự suy theo "Ranh giới tự suy" của `flow-business`, ghi `(AI suy từ B-xx)`. Chỉ hỏi chi tiết riêng của tính năng.
+
 ## Mục lục
 - Email giao dịch
 - Email marketing, bản tin và huỷ đăng ký
@@ -18,7 +20,7 @@ Nhận ra khi: "gửi email xác nhận", "email hoá đơn", "báo qua email", 
 
 Hỏi user (lúc viết SPEC):
 - Thư tới chậm 5 phút có sao không? → khuyên: không sao với hầu hết thư (riêng mã đăng nhập cần dưới 1 phút) ⇒ gửi qua hàng đợi.
-- Ngày đông nhất app gửi khoảng bao nhiêu thư? → khuyên: cộng số đăng ký + đơn hàng + nhắc việc/ngày rồi đem so trần ngày của nhà cung cấp email; sát trần thì lên gói trước ngày ra mắt.
+- Ngày đông nhất app gửi khoảng bao nhiêu thư? (lấy từ BUSINESS.md B-TD5; chưa có thì tự suy) → khuyên: cộng số đăng ký + đơn hàng + nhắc việc/ngày rồi đem so trần ngày của nhà cung cấp email; sát trần thì lên gói trước ngày ra mắt.
 - Thư gửi đi không tới (địa chỉ sai, bị trả về) thì ai cần biết? → khuyên: app tự ngừng gửi vào địa chỉ đó và hiện "email không nhận được, hãy kiểm lại" ở trang tài khoản.
 
 | Mặt | Làm ngay | Chừa chỗ | Chưa làm (cần khi…) |
@@ -41,7 +43,7 @@ Hay sai:
 Nhận ra khi: "gửi bản tin", "newsletter", "email khuyến mãi", "gửi hàng loạt cho khách", "chiến dịch email".
 
 Hỏi user (lúc viết SPEC):
-- Người dùng đồng ý nhận thư quảng cáo lúc nào? → khuyên: ô đồng ý riêng, không tick sẵn; thư giao dịch (hoá đơn, mật khẩu) vẫn gửi dù đã huỷ bản tin.
+- Người dùng đồng ý nhận thư quảng cáo lúc nào? (lấy từ BUSINESS.md B-PL6; chưa có thì tự suy) → khuyên: ô đồng ý riêng, không tick sẵn; thư giao dịch (hoá đơn, mật khẩu) vẫn gửi dù đã huỷ bản tin.
 - Bấm "huỷ đăng ký" có phải đăng nhập không? → khuyên: không — một cú bấm từ thư là xong.
 - Mỗi đợt gửi bao nhiêu người? → khuyên: vài nghìn trở xuống ⇒ dùng tính năng chiến dịch của nhà cung cấp email, đừng tự dựng.
 
@@ -65,9 +67,9 @@ Hay sai:
 Nhận ra khi: "gửi mã qua SMS", "OTP", "xác minh số điện thoại", "đăng nhập bằng số điện thoại".
 
 Hỏi user (lúc viết SPEC):
-- Khách ở những nước nào? → khuyên: chỉ bật đúng nước bạn phục vụ (vd chỉ Việt Nam), còn lại chặn.
-- Có thật cần SMS, hay mã qua email/app Authenticator được? → khuyên: email hoặc app trước; SMS chỉ khi khách không có email.
-- Mỗi tháng chi tối đa bao nhiêu cho SMS? → khuyên: đặt một con số trần; chạm trần thì ngừng gửi và báo bạn ngay.
+- Khách ở những nước nào? (lấy từ BUSINESS.md B-KH4; chưa có thì tự suy) → khuyên: chỉ bật đúng nước bạn phục vụ (vd chỉ Việt Nam), còn lại chặn.
+- Có thật cần SMS, hay mã qua email/app Authenticator được? (lấy từ BUSINESS.md B-PV9 và STACK.md; chưa có thì tự suy) → khuyên: email hoặc app trước; SMS chỉ khi khách không có email.
+- Mỗi tháng chi tối đa bao nhiêu cho SMS? (lấy từ BUSINESS.md B-CP1, B-TG14; chưa có thì tự suy) → khuyên: đặt một con số trần; chạm trần thì ngừng gửi và báo bạn ngay.
 
 | Mặt | Làm ngay | Chừa chỗ | Chưa làm (cần khi…) |
 |---|---|---|---|

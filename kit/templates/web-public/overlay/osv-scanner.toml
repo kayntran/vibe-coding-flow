@@ -1,0 +1,6 @@
+# osv-scanner (quét lỗ hổng thư viện). Mẫu này chưa miễn lỗ hổng nào: gói có lỗ hổng thì nâng lên bản đã vá (pnpm-workspace.yaml, mục overrides, cho gói đi kèm công cụ).
+# Chỉ miễn MỘT lỗ hổng khi CHƯA CÓ bản vá nào, kèm hạn và lý do, theo mẫu (hết hạn thì máy kiểm báo lại):
+# [[IgnoredVulns]]
+# id = "GHSA-xxxx-xxxx-xxxx"
+# ignoreUntil = 2027-01-31
+# reason = "gói <tên> chưa có bản vá; chỉ nằm trong công cụ dev, không vào bản build"

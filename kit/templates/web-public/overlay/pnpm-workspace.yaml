@@ -1,0 +1,10 @@
+# Cho phép bước cài phụ của hai gói mà create-cloudflare cài: `workerd` tải file chạy Worker theo hệ điều hành, `esbuild` tải/dựng phần gốc.
+# Thiếu hai dòng này pnpm 11 trở lên dừng cài với ERR_PNPM_IGNORED_BUILDS.
+allowBuilds:
+  esbuild: true
+  workerd: true
+
+# minimatch <= 10.2.6 có lỗ hổng DoS (GHSA-g3hv-75wg-m249, công bố 2026-10-30, vá ở 11.0.1); nó đi theo shadcn (ts-morph) và typescript-eslint,
+# chỉ là công cụ lúc dev. Ép dùng bản vá (đã thử: ESLint, knip, tsc, shadcn chạy bình thường). Khi các gói đó tự nâng minimatch thì bỏ khối này.
+overrides:
+  minimatch@<11: ^11.0.1

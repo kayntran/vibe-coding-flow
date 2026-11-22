@@ -13,7 +13,7 @@ const FLOWS = ['flow-feature', 'flow-bugfix', 'flow-release', 'flow-health']
 const INTERNAL = ['flow-team', 'flow-sessions', 'flow-devin', 'flow-paseo']
 
 test('đủ bộ skill đã chốt, flow-production đã tách', () => {
-  for (const n of [...FLOWS, 'flow-new-app', 'flow-spec', 'flow-ux', 'flow-ui-demo', 'flow-ui-design', 'flow-system-design', 'flow-plan', 'flow-build', 'flow-fix', 'flow-qa', 'flow-review', 'flow-security', 'flow-merge', 'flow-worktree', 'flow-impact', 'flow-architecture', 'flow-explain', 'flow-status', 'flow-publish', 'flow-rollback', 'flow-backup', 'flow-key-leak', 'flow-maintain', 'flow-scale', ...INTERNAL]) {
+  for (const n of [...FLOWS, 'flow-new-app', 'flow-spec', 'flow-ux', 'flow-ui-demo', 'flow-ui-design', 'flow-system-design', 'flow-plan', 'flow-build', 'flow-fix', 'flow-qa', 'flow-review', 'flow-security', 'flow-merge', 'flow-worktree', 'flow-impact', 'flow-architecture', 'flow-explain', 'flow-status', 'flow-publish', 'flow-rollback', 'flow-backup', 'flow-key-leak', 'flow-maintain', 'flow-scale', 'flow-business', 'flow-stack', ...INTERNAL]) {
     assert.ok(names.includes(n), `thiếu ${n}`)
   }
   assert.ok(!names.includes('flow-production'))

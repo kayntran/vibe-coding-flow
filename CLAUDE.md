@@ -12,7 +12,9 @@ Nói như đang mô tả cho **người dùng app/webapp**, không như lập tr
   thường, vd "worktree (bản sao riêng của dự án để sửa mà không đụng bản đang chạy)".
 - **Hỏi về hành vi app, không hỏi lựa chọn kỹ thuật thuần:** "Bấm Lưu lúc mất mạng thì nên báo gì?" thay vì "dùng
   retry hay queue?". Lựa chọn kỹ thuật tự quyết, nói lý do bằng tác động lên người dùng (nhanh hơn, ít lỗi hơn, tốn
-  phí hơn, an toàn hơn).
+  phí hơn, an toàn hơn). **Ngoại lệ [p125]:** nền công nghệ đầu dự án (`flow-stack`: gói nền, loại app, cơ sở dữ liệu, đăng
+  nhập, nơi chạy…) phải hỏi user, kèm lý do và phí bằng lời đời thường, ưu tiên mở rộng lâu dài vì khó đổi sau; chốt xong
+  thì mọi chỗ khác lại tự quyết và không đổi.
 - **Báo kết quả theo khuôn:** làm được gì · người dùng sẽ thấy gì khác · còn gì cần bạn làm. Số liệu kỹ thuật quy ra ý
   nghĩa ("đã tự kiểm 100 tình huống, đều đạt"). Không dán log, code, đường dẫn dài trừ khi user hỏi; cần user chạy
   lệnh thì đưa đúng lệnh để chép.
@@ -54,6 +56,7 @@ AGENTS.md, `.claude/rules/`) thắng phần này.
 | User nói (đại ý) | Làm |
 |---|---|
 | app mới từ số 0, "làm cho tôi một app…" chưa có thư mục dự án | skill `flow-new-app` (rồi `flow-feature`) |
+| app mới hoặc app chưa có `docs/BUSINESS.md` · "hỏi tôi về business" · "đổi giá", "đổi khách" · "chọn công nghệ", "đổi cơ sở dữ liệu" | skill `flow-business` rồi `flow-stack` (`flow-new-app` và `flow-feature` bước 0 tự gọi); có bản đã duyệt thì skill khác không hỏi lại business, không đổi công nghệ đã chốt |
 | làm tính năng trọn vẹn, thêm chức năng, "tôi muốn app làm được…" | cỡ M/L ⇒ skill `flow-feature`; chỉ một bước ⇒ `flow-spec`, `flow-system-design`, `flow-ux`, `flow-ui-demo`, `flow-ui-design`, `flow-plan`, `flow-build` |
 | thiết kế hệ thống, "về sau scale có dễ không", chống spam từ đầu, "thiết kế này ổn chưa" | skill `flow-system-design` (tự chạy trong `flow-feature` cho mọi việc M/L) |
 | "quay về lúc…", "hoàn tác việc vừa rồi", app hỏng sau lần sửa | `node ~/.claude/hooks/luu.mjs tim` → `xem` → đọc lại bằng lời, hỏi gật → `quay`; nói rõ dữ liệu không quay theo |

@@ -2,6 +2,8 @@
 
 Dùng ở bước 4 của `flow-system-design`.
 
+**Câu business trong "Hỏi user" không hỏi user**: câu nào `docs/BUSINESS.md` đã trả lời (khách, nước, giá, gói, hạn mức, ngân sách, giờ, giọng) thì lấy từ bản; chưa có hoặc bản chưa nói thì tự suy theo "Ranh giới tự suy" của `flow-business`, ghi `(AI suy từ B-xx)`. Chỉ hỏi chi tiết riêng của tính năng.
+
 ## Mục lục
 
 - Danh sách dài/phân trang
@@ -106,8 +108,8 @@ Nhận ra khi: "thống kê", "dashboard", "biểu đồ doanh thu", "báo cáo 
 
 Hỏi user (lúc viết SPEC):
 - Số liệu cần mới tới phút hay mỗi giờ là đủ? → khuyên: mỗi giờ; chỉ 1–2 con số quan trọng (đơn hôm nay) mới cần ngay lập tức.
-- "Một ngày" tính theo giờ nào? → khuyên: giờ doanh nghiệp (Asia/Ho_Chi_Minh), ghi rõ trên màn.
-- Ai được xem? → khuyên: chủ tài khoản/admin; nhân viên chỉ xem phần của mình.
+- "Một ngày" tính theo giờ nào? (lấy từ BUSINESS.md B-TH8; chưa có thì tự suy) → khuyên: giờ doanh nghiệp (Asia/Ho_Chi_Minh), ghi rõ trên màn.
+- Ai được xem? (lấy từ BUSINESS.md B-VH5, B-KH3; chưa có thì tự suy) → khuyên: chủ tài khoản/admin; nhân viên chỉ xem phần của mình.
 
 | Mặt | Làm ngay | Chừa chỗ | Chưa làm (cần khi…) |
 |---|---|---|---|
@@ -134,7 +136,7 @@ Nhận ra khi: "gửi nhắc trước 1 ngày", "mỗi sáng tự…", "chạy l
 Hỏi user (lúc viết SPEC):
 - Trễ bao nhiêu thì chấp nhận được? → khuyên: nhắc việc trễ tới 5 phút là ổn.
 - Lỡ giờ (máy chủ lỗi) thì chạy bù hay bỏ? → khuyên: chạy bù nếu trễ dưới 1 giờ; quá thì bỏ và ghi lại.
-- Nhắc theo giờ của ai? → khuyên: giờ của người nhận (múi giờ trong cài đặt của họ).
+- Nhắc theo giờ của ai? (lấy từ BUSINESS.md B-TH8; chưa có thì tự suy) → khuyên: giờ của người nhận (múi giờ trong cài đặt của họ).
 
 | Mặt | Làm ngay | Chừa chỗ | Chưa làm (cần khi…) |
 |---|---|---|---|
@@ -187,7 +189,7 @@ Nhận ra khi: "thùng rác", "lỡ xoá", "khôi phục", "hoàn tác", "xem b�
 
 Hỏi user (lúc viết SPEC):
 - Xoá rồi lấy lại được trong bao lâu? → khuyên: 30 ngày trong thùng rác, sau đó xoá hẳn.
-- Người dùng xoá tài khoản hoặc yêu cầu xoá dữ liệu thì thùng rác thế nào? → khuyên: xoá hẳn ngay, không chờ 30 ngày (trừ thứ luật bắt giữ như hoá đơn).
+- Người dùng xoá tài khoản hoặc yêu cầu xoá dữ liệu thì thùng rác thế nào? (lấy từ BUSINESS.md B-VH8, B-PL7; chưa có thì tự suy) → khuyên: xoá hẳn ngay, không chờ 30 ngày (trừ thứ luật bắt giữ như hoá đơn).
 - Cần xem/khôi phục bản sửa trước không? → khuyên: chỉ cho tài liệu quan trọng, giữ 20 bản gần nhất.
 
 | Mặt | Làm ngay | Chừa chỗ | Chưa làm (cần khi…) |
@@ -216,7 +218,7 @@ Hỏi user (lúc viết SPEC):
 - Giữ chỗ bao lâu trong lúc người dùng thanh toán? → khuyên: 10 phút, hết thì tự nhả.
 - Hết chỗ thì người dùng thấy gì? → khuyên: báo "Hết chỗ"; nút "Báo tôi khi có chỗ" để sau.
 - Có cho đặt quá số chỗ (overbooking) không? → khuyên: không.
-- Huỷ trước bao lâu thì được hoàn? → khuyên: theo chính sách của bạn; mặc định trước 24 giờ.
+- Huỷ trước bao lâu thì được hoàn? (lấy từ BUSINESS.md B-TG9; chưa có thì tự suy) → khuyên: theo chính sách của bạn; mặc định trước 24 giờ.
 
 | Mặt | Làm ngay | Chừa chỗ | Chưa làm (cần khi…) |
 |---|---|---|---|

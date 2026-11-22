@@ -1,0 +1,20 @@
+/**
+ * Cấu hình Worker (một Worker: trang công khai dựng ở máy chủ + khu sau đăng nhập).
+ * Tài liệu: https://developers.cloudflare.com/workers/wrangler/configuration/
+ * File tĩnh (JS, CSS, ảnh) do plugin Cloudflare của Vite tự khai khi build; không khai "assets" ở đây.
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "{{APP_NAME}}",
+  "compatibility_date": "2026-11-19",
+  "main": "./workers/app.ts",
+  "vars": {
+    // Địa chỉ gốc của web (canonical, og:image, sitemap lấy từ đây; KHÔNG lấy từ tiêu đề Host của yêu cầu).
+    // Địa chỉ mẫu bên dưới PHẢI đổi thành tên miền thật trước khi phát hành.
+    "SITE_URL": "https://{{APP_NAME}}.example.com"
+  },
+  "observability": { "enabled": true },
+  // Worker đặt header x-flow-version = mã bản đang chạy (skill flow-publish dùng để xác nhận bản mới đã lên).
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
+  "upload_source_maps": true
+}

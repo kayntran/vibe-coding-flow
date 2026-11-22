@@ -1,5 +1,5 @@
 {
-  "$comment": "Danh sách checker của hooks/flow-check.mjs (AC-11/43). stack: web | extension | go | wails | all, hoặc mảng các stack đó (chạy một lần khi dự án có một trong số đó). cmd = tên công cụ (mảng = ứng viên theo thứ tự; tìm trong node_modules/.bin rồi PATH) hoặc internal = checker viết sẵn trong flow-check.mjs. args: {kit} = thư mục kit/, {hooks} = thư mục hooks/ (script kèm kit, vd ui-check.mjs). detect = khi nào áp dụng (xem hooks/lib/stack.mjs; không khớp ⇒ BỎ QUA). requires = gói npm phải có trong package.json. passOn = {exit:[mã đạt], match: regex phải thấy trong output}. install = lệnh cài chính thức (chuỗi hoặc {win32, posix}); thiếu công cụ ⇒ THIẾU, không cài ngầm. hint = lời dặn sửa khi không đạt. plan = tên hàm trong PLANNERS của flow-check.mjs quyết định lần này chạy gì (đối số tính từ docs/arch.json, git, docs/arch-baseline.json). quietSkip = không áp dụng thì không hiện dòng BỎ QUA. exclusive = checker tự bật app trên cổng cố định (axe qua webServer của Playwright, ui-rules bật dev server): chạy NỐI TIẾP từng cái sau nhóm song song, kẻo hai cái tranh cùng cổng và tắt server của nhau; log-secrets cũng exclusive vì phải quét log mà axe/ui-rules vừa sinh ra (đặt SAU hai cái đó); tsc-build exclusive vì nó ghi rồi xoá file trong cây dự án (linter chạy song song không được thấy .js/.d.ts đang ghi dở, và việc dọn không được xoá nhầm file của checker khác). tsc-build: plan tsc-build chạy `tsc -b --noEmit`, TS cũ từ chối (TS5094) thì chạy lại `tsc -b`, xong xoá file đầu ra (.js .d.ts .map .tsbuildinfo…) mới sinh ra mà git chưa từng thấy; không hỏi được git thì không xoá gì. Test đối chiếu: hooks/flow-check.test.mjs (thiếu checker bắt buộc ⇒ đỏ).",
+  "$comment": "Danh sách checker của hooks/flow-check.mjs (AC-11/43). stack: web | extension | go | wails | all, hoặc mảng các stack đó (chạy một lần khi dự án có một trong số đó). cmd = tên công cụ (mảng = ứng viên theo thứ tự; tìm trong node_modules/.bin rồi PATH) hoặc internal = checker viết sẵn trong flow-check.mjs. args: {kit} = thư mục kit/, {hooks} = thư mục hooks/ (script kèm kit, vd ui-check.mjs). detect = khi nào áp dụng (xem hooks/lib/stack.mjs; không khớp ⇒ BỎ QUA). requires = gói npm phải có trong package.json. passOn = {exit:[mã đạt], match: regex phải thấy trong output}. install = lệnh cài chính thức (chuỗi hoặc {win32, posix}); thiếu công cụ ⇒ THIẾU, không cài ngầm. hint = lời dặn sửa khi không đạt. plan = tên hàm trong PLANNERS của flow-check.mjs quyết định lần này chạy gì (đối số tính từ docs/arch.json, git, docs/arch-baseline.json). quietSkip = không áp dụng thì không hiện dòng BỎ QUA. exclusive = checker tự bật app trên cổng cố định (axe qua webServer của Playwright, ui-rules bật dev server): chạy NỐI TIẾP từng cái sau nhóm song song, kẻo hai cái tranh cùng cổng và tắt server của nhau; log-secrets cũng exclusive vì phải quét log mà axe/ui-rules vừa sinh ra (đặt SAU hai cái đó); seo-public (mẫu web-public: playwright test --grep=seo --reporter=json, chỉ khi có react-router.config.*) bật app như axe nên exclusive, plan seo-public đọc báo cáo JSON và ghi ctx.live.headers; web-headers exclusive và đứng SAU seo-public để đọc header từ phản hồi thật của app dựng trang ở máy chủ (file _headers chỉ áp cho file tĩnh, không đủ làm bằng chứng); tsc-build exclusive vì nó ghi rồi xoá file trong cây dự án (linter chạy song song không được thấy .js/.d.ts đang ghi dở, và việc dọn không được xoá nhầm file của checker khác). tsc-build: plan tsc-build chạy `tsc -b --noEmit`, TS cũ từ chối (TS5094) thì chạy lại `tsc -b`, xong xoá file đầu ra (.js .d.ts .map .tsbuildinfo…) mới sinh ra mà git chưa từng thấy; không hỏi được git thì không xoá gì. Test đối chiếu: hooks/flow-check.test.mjs (thiếu checker bắt buộc ⇒ đỏ).",
   "version": 1,
   "checkers": [
     {
@@ -133,6 +133,24 @@
       "hint": "Sửa lỗi trợ năng mà test a11y báo (thiếu nhãn, tương phản, thiếu alt); nếu báo không tìm thấy test thì thêm một test có chữ a11y dùng AxeBuilder của @axe-core/playwright."
     },
     {
+      "id": "seo-public",
+      "stack": "web",
+      "title": "SEO trang công khai (tắt JS, giả bot Facebook)",
+      "cmd": "playwright",
+      "args": ["test", "--grep=seo", "--reporter=json"],
+      "plan": "seo-public",
+      "exclusive": true,
+      "detect": { "files": ["react-router.config.ts", "react-router.config.js", "react-router.config.mjs", "react-router.config.mts"] },
+      "skipWhy": "không phải webapp có trang công khai dựng ở máy chủ (không có react-router.config.*)",
+      "quietSkip": true,
+      "requires": { "pkgs": ["@playwright/test"], "install": "npm i -D @playwright/test" },
+      "required": true,
+      "timeoutMs": 600000,
+      "install": "npm i -D @playwright/test",
+      "docs": "https://playwright.dev/docs/test-webserver",
+      "hint": "Trang công khai phải có sẵn trong HTML máy chủ trả về (bot Google, Zalo, Facebook không chạy JavaScript): title, mô tả, canonical, og:title, og:image (địa chỉ tuyệt đối), đúng một h1; sitemap.xml và robots.txt có thật; đường dẫn lạ trả mã 404 thật; header CSP có nonce, nosniff, chống nhúng có trên MỌI phản hồi của Worker (không chỉ file _headers). Sửa theo dòng ca thử không đạt ở trên; mọi route công khai khai meta bằng seoMeta (src/shared/seo) và có đường dẫn trong PAGES của e2e/seo.spec.ts; đừng xoá hay nới test seo để lách."
+    },
+    {
       "id": "osv-scanner",
       "stack": "web",
       "title": "Lỗ hổng thư viện (osv-scanner)",
@@ -157,10 +175,11 @@
       "stack": "web",
       "title": "Header bảo mật của web (CSP, nosniff, chống nhúng)",
       "internal": "web-headers",
+      "exclusive": true,
       "detect": { "any": [{ "files": ["index.html"] }, { "deps": ["vite"] }] },
       "quietSkip": true,
       "required": true,
-      "hint": "Web phải có file cấu hình header (public/_headers, vercel.json, netlify.toml hoặc cấu hình nginx/Caddy) gồm Content-Security-Policy (không 'unsafe-eval', không script-src *), X-Content-Type-Options: nosniff, Referrer-Policy và chống nhúng (frame-ancestors hoặc X-Frame-Options). Thẻ meta CSP trong index.html không thay được."
+      "hint": "Web phải có file cấu hình header (public/_headers, vercel.json, netlify.toml hoặc cấu hình nginx/Caddy) gồm Content-Security-Policy (không 'unsafe-eval', không script-src *), X-Content-Type-Options: nosniff, Referrer-Policy và chống nhúng (frame-ancestors hoặc X-Frame-Options). Thẻ meta CSP trong index.html không thay được. App dựng trang ở máy chủ (React Router framework, Next…): file chỉ áp cho file tĩnh, header của trang phải đặt trong code máy chủ và chỉ tính khi đọc được từ phản hồi thật (checker seo-public); chưa đọc được ⇒ báo 'chưa kiểm'."
     },
     {
       "id": "ui-rules",

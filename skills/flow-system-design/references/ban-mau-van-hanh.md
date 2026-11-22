@@ -2,6 +2,8 @@
 
 Dùng ở bước 4 của `flow-system-design`.
 
+**Câu business trong "Hỏi user" không hỏi user**: câu nào `docs/BUSINESS.md` đã trả lời (khách, nước, giá, gói, hạn mức, ngân sách, giờ, giọng) thì lấy từ bản; chưa có hoặc bản chưa nói thì tự suy theo "Ranh giới tự suy" của `flow-business`, ghi `(AI suy từ B-xx)`. Chỉ hỏi chi tiết riêng của tính năng.
+
 ## Mục lục
 
 - Trang quản trị
@@ -19,8 +21,8 @@ trúc của plan ⇒ "Chưa làm" vào lộ trình theo ngưỡng. Giá và gi�
 Nhận ra khi: "trang admin", "quản trị", "xem tất cả người dùng", "khoá tài khoản", "hoàn tiền bằng tay", "trang cho nhân viên hỗ trợ".
 
 Hỏi user (lúc viết SPEC):
-- Ai được vào trang quản trị? → khuyên: lúc đầu chỉ bạn; nhân viên về sau có quyền riêng từng việc, không dùng chung tài khoản.
-- Admin có được xem nội dung riêng của người dùng? → khuyên: không mặc định; khi hỗ trợ phải bấm "Xem như người dùng", có ghi nhật ký.
+- Ai được vào trang quản trị? (lấy từ BUSINESS.md B-VH5; chưa có thì tự suy) → khuyên: lúc đầu chỉ bạn; nhân viên về sau có quyền riêng từng việc, không dùng chung tài khoản.
+- Admin có được xem nội dung riêng của người dùng? (lấy từ BUSINESS.md B-VH5; chưa có thì tự suy) → khuyên: không mặc định; khi hỗ trợ phải bấm "Xem như người dùng", có ghi nhật ký.
 - Thao tác nào cần xác nhận lại? → khuyên: xoá, hoàn tiền, đổi quyền — nhập lại mã 2 lớp, có chữ rõ nêu tên đối tượng.
 
 | Mặt | Làm ngay | Chừa chỗ | Chưa làm (cần khi…) |
@@ -72,9 +74,9 @@ Hay sai:
 Nhận ra khi: "tiếng Anh", "đa ngôn ngữ", "khách nước ngoài", "giờ địa phương", "hiện giá USD", "bán sang nước khác".
 
 Hỏi user (lúc viết SPEC):
-- Lúc ra mắt có mấy ngôn ngữ? → khuyên: một (tiếng Việt), nhưng chữ giao diện để trong tệp dịch ngay từ đầu.
-- Giờ hiện theo máy người xem hay theo doanh nghiệp? → khuyên: theo máy người xem; báo cáo doanh thu theo giờ doanh nghiệp.
-- Bán bằng mấy loại tiền? → khuyên: một loại; giá loại khác (nếu hiện) chỉ để tham khảo.
+- Lúc ra mắt có mấy ngôn ngữ? (lấy từ BUSINESS.md B-TH7; chưa có thì tự suy) → khuyên: một (tiếng Việt), nhưng chữ giao diện để trong tệp dịch ngay từ đầu.
+- Giờ hiện theo máy người xem hay theo doanh nghiệp? (lấy từ BUSINESS.md B-TH8; chưa có thì tự suy) → khuyên: theo máy người xem; báo cáo doanh thu theo giờ doanh nghiệp.
+- Bán bằng mấy loại tiền? (lấy từ BUSINESS.md B-TH8; chưa có thì tự suy) → khuyên: một loại; giá loại khác (nếu hiện) chỉ để tham khảo.
 
 | Mặt | Làm ngay | Chừa chỗ | Chưa làm (cần khi…) |
 |---|---|---|---|
@@ -152,7 +154,7 @@ Hay sai:
 Nhận ra khi: "banner cookie", "Google Analytics", "đo lượt truy cập", "điều khoản sử dụng", "chính sách riêng tư", "người dùng phải đồng ý".
 
 Hỏi user (lúc viết SPEC):
-- Có khách ở châu Âu không? → khuyên: nếu có, công cụ đo chỉ chạy sau khi người dùng bấm đồng ý; nếu không, dùng công cụ đo không cookie và vẫn có trang chính sách riêng tư.
+- Có khách ở châu Âu không? (lấy từ BUSINESS.md B-KH4, B-PL8; chưa có thì tự suy) → khuyên: nếu có, công cụ đo chỉ chạy sau khi người dùng bấm đồng ý; nếu không, dùng công cụ đo không cookie và vẫn có trang chính sách riêng tư.
 - Điều khoản đổi thì người dùng cũ phải đồng ý lại? → khuyên: đổi lớn (giá, cách dùng dữ liệu) thì hiện hộp đồng ý khi đăng nhập; đổi nhỏ thì báo.
 - Cần biết ai đồng ý phiên bản nào, lúc nào (khi tranh chấp)? → khuyên: có.
 

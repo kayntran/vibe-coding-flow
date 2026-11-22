@@ -65,7 +65,7 @@ Mạng chập chờn ⇒ người dùng bấm lại / client tự thử lại �
 - Máy chủ lưu (khoá, người dùng, băm tham số, kết quả). Gặp lại khoá ⇒ trả **kết quả lần đầu**, kể cả khi lần đầu lỗi.
 - Cùng khoá nhưng tham số khác ⇒ báo lỗi, không làm.
 - Dọn khoá sau ≥ 24 giờ. Không đưa dữ liệu nhạy cảm vào khoá. Chỉ cần cho POST (GET, PUT, DELETE vốn đã lặp an toàn nếu viết đúng).
-- Webhook nhận vào (Stripe, Lemon Squeezy) cũng có thể đến trùng ⇒ lưu ID sự kiện đã xử lý, bỏ qua lần sau.
+- Webhook nhận vào (cổng thanh toán như Stripe, SePay, Polar) cũng có thể đến trùng ⇒ lưu ID sự kiện đã xử lý, bỏ qua lần sau.
 - Chưa cần khi: thao tác đọc, hoặc ghi mà làm hai lần cho cùng kết quả (đặt tên, bật/tắt cài đặt).
 
 ## Giới hạn tần suất

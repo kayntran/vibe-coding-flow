@@ -15,11 +15,14 @@ chỉ thật và biết đang chạy đúng bản nào. Chưa thử được th�
 
 App chỉ dùng trên máy ⇒ không đề nghị lên mạng, dừng ở đây.
 
-- **Đã có nơi chạy** (sổ chốt, `.claude/release.json`, file cấu hình như `wrangler.jsonc`) ⇒ giữ nguyên, không đề nghị đổi
-  trừ khi user bảo. Các nguồn mâu thuẫn nhau ⇒ hỏi một câu, không tự đoán tài khoản hay môi trường.
-- **Lần đầu:** kể bằng lời đời thường: **ai mở được · dữ liệu nằm ở đâu · tốn gì mỗi tháng · cần tài khoản nào**. Rồi hỏi nơi
-  chạy riêng cho app này, kèm đề xuất và lý do một câu (hợp nền dữ liệu đang dùng, miễn phí, ít việc nhất). Giá và giới
-  hạn phải tra nguồn chính thức lúc hỏi, không nói theo trí nhớ. Chốt xong ghi sổ chốt.
+- **Đã có nơi chạy** (`docs/STACK.md` mảng nơi chạy, sổ chốt, `.claude/release.json`, file cấu hình như `wrangler.jsonc`) ⇒ giữ nguyên, không
+  đề nghị đổi trừ khi user bảo. Các nguồn mâu thuẫn nhau ⇒ hỏi một câu, không tự đoán tài khoản hay môi trường.
+- **STACK.md đã chốt nơi chạy ⇒ không hỏi lại nơi chạy.** Kể bằng lời đời thường **ai mở được · dữ liệu nằm ở đâu · tốn gì mỗi tháng ·
+  cần tài khoản nào** theo STACK.md (giá theo ngày tra; quá 30 ngày thì tra lại trước khi nói), rồi chỉ xin gật việc đưa bản lên.
+  Không hỏi câu business (khách, giá, trang pháp lý cần có): lấy từ `BUSINESS.md`, bản chưa nói ⇒ tự suy `(AI suy từ B-xx)`.
+- **Lần đầu, chưa có STACK.md:** chạy `flow-stack` (buổi hỏi công nghệ có mảng nơi chạy), không tự chọn nơi chạy. User bảo bỏ qua ⇒
+  kể bằng lời như trên, hỏi nơi chạy riêng cho app này kèm đề xuất và lý do một câu (hợp nền dữ liệu đang dùng, miễn phí, ít việc nhất).
+  Giá và giới hạn phải tra nguồn chính thức lúc hỏi, không nói theo trí nhớ. Chốt xong ghi sổ chốt.
 - **Luôn hỏi user một câu trước khi đưa bản lên**, kể cả ngay sau khi gộp. Người dùng hỏi về một nền nào đó không có nghĩa
   là đã bảo phát hành.
 

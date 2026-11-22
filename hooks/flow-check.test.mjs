@@ -10,7 +10,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { INTERNALS, KIT_DIR, OPENAPI_FILES, PLANNERS, changedFiles, exitCode, findTool, formatReport, loadCheckers, main, mv3Problems, resolveBase, runChecks, validateCheckers } from './flow-check.mjs'
+import { INTERNALS, KIT_DIR, OPENAPI_FILES, PLANNERS, appPort, changedFiles, exitCode, findTool, formatReport, loadCheckers, main, mv3Problems, playwrightReport, resolveBase, runChecks, validateCheckers } from './flow-check.mjs'
+import { ssrFramework } from './lib/app-safety.mjs'
 import { gen, init, newGoArchViolations } from './lib/arch.mjs'
 import { STACKS, detect, matches, roots } from './lib/stack.mjs'
 
@@ -1929,7 +1930,7 @@ test('checkers.json thật: axe (playwright test tự bật webServer) và ui-ru
   const get = (id) => REAL.checkers.find((c) => c.id === id)
   assert.equal(get('axe').exclusive, true)
   assert.equal(get('ui-rules').exclusive, true)
-  assert.deepEqual(REAL.checkers.filter((c) => c.exclusive).map((c) => c.id), ['tsc-build', 'axe', 'ui-rules', 'log-secrets'], 'log-secrets đứng SAU axe và ui-rules (quét log hai checker đó vừa sinh ra); tsc-build exclusive vì ghi/xoá file trong cây dự án')
+  assert.deepEqual(REAL.checkers.filter((c) => c.exclusive).map((c) => c.id), ['tsc-build', 'axe', 'seo-public', 'web-headers', 'ui-rules', 'log-secrets'], 'log-secrets đứng SAU axe, seo-public và ui-rules (quét log mấy checker đó vừa sinh ra); tsc-build exclusive vì ghi/xoá file trong cây dự án; seo-public bật app như axe; web-headers đứng SAU seo-public để đọc header từ phản hồi thật của nó')
   const dir = project({ 'package.json': { devDependencies: { '@playwright/test': '1', '@axe-core/playwright': '4', typescript: '5' } }, 'tsconfig.json': '{}', '.claude/ui.json': '{}' })
   let appUp = 0
   let overlap = 0
@@ -2328,4 +2329,165 @@ test('tsc-build là exclusive: chạy SAU nhóm song song (ESLint/knip/jscpd kh�
   const rep = await check(d, ['tsc-build', 'eslint'], { exec })
   assert.deepEqual(rep.results.map((r) => [r.id, r.status]), [['tsc-build', 'pass'], ['eslint', 'pass']], 'thứ tự bảng theo checkers.json')
   assert.ok(events.indexOf('end .') < events.indexOf('start tsc-build'), `eslint xong rồi tsc mới chạy: ${events.join(', ')}`)
+})
+
+// --- mẫu web-public (làn D): seo-public, web-headers không báo đạt giả với trang dựng ở máy chủ, PORT_BASE, import ./+types/* ------------------------------------------------
+
+const HEADERS_FULL = "/*\n  Content-Security-Policy: default-src 'self'; script-src 'self'; frame-ancestors 'none'\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: strict-origin-when-cross-origin\n"
+// Dự án kiểu web-public: React Router chế độ framework (react-router.config.ts), Playwright, file header cho file tĩnh.
+const rrApp = (extra = {}) => ({
+  'package.json': { devDependencies: { '@react-router/dev': '8.5.2', '@playwright/test': '1.64.0', vite: '8.3.4' } },
+  'react-router.config.ts': 'export default { ssr: true }\n',
+  'public/_headers': HEADERS_FULL,
+  ...extra,
+})
+// Báo cáo JSON của `playwright test --reporter=json` (rút gọn đúng phần flow-check đọc): suites[].suites[].specs[] { title, ok, tests[].results[].error }
+const spec = (title, ok = true, message = '') => ({ title, ok, tests: [{ results: [{ status: ok ? 'passed' : 'failed', ...(ok ? {} : { error: { message } }) }] }] })
+const pwReport = (...specs) => JSON.stringify({ config: {}, suites: [{ title: 'seo.spec.ts', specs: [], suites: [{ title: 'seo', specs }] }], stats: { expected: specs.filter((s) => s.ok).length, unexpected: specs.filter((s) => !s.ok).length } })
+const HEADER_SPEC = 'seo: header bảo mật có trên phản hồi thật của Worker (CSP có nonce, nosniff, chống nhúng)'
+const pwExec = (stdout, code = 0, seen = []) => async (file, args, o) => { seen.push({ file, args, cwd: o.cwd, env: o.env }); return { ...OK, code, stdout } }
+
+test('checkers.json thật: seo-public là checker bắt buộc, exclusive (bật app như axe), im lặng khi không áp dụng, đứng SAU axe và TRƯỚC web-headers; web-headers exclusive để đọc kết quả của nó', () => {
+  const get = (id) => REAL.checkers.find((c) => c.id === id)
+  const seo = get('seo-public')
+  assert.deepEqual([seo.stack, seo.cmd, seo.plan, seo.exclusive, seo.quietSkip, seo.required], ['web', 'playwright', 'seo-public', true, true, true])
+  assert.deepEqual(seo.args, ['test', '--grep=seo', '--reporter=json'])
+  assert.deepEqual(seo.requires.pkgs, ['@playwright/test'])
+  assert.ok(seo.detect.files.includes('react-router.config.ts'), 'chỉ áp dụng khi có react-router.config.*')
+  assert.equal(typeof PLANNERS['seo-public'], 'function')
+  assert.equal(get('web-headers').exclusive, true)
+  const ids = REAL.checkers.map((c) => c.id)
+  assert.ok(ids.indexOf('seo-public') > ids.indexOf('axe') && ids.indexOf('seo-public') < ids.indexOf('web-headers') && ids.indexOf('web-headers') < ids.indexOf('log-secrets'))
+})
+
+test('seo-public: chỉ áp dụng cho dự án web-public (có react-router.config.*): web SPA, extension, thư viện ⇒ không hiện dòng nào', async () => {
+  const spa = project({ 'package.json': { devDependencies: { '@playwright/test': '1', vite: '8' } }, 'index.html': '<div id="root"></div>' })
+  assert.deepEqual((await check(spa, ['seo-public'])).results, [])
+  assert.deepEqual((await check(project({ 'package.json': '{"name":"thu-vien"}' }), ['seo-public'])).results, [])
+  const rr = await first(project(rrApp()), 'seo-public', { exec: pwExec(pwReport(spec('seo: / có title'))) })
+  assert.equal(rr.status, 'pass')
+})
+
+test('seo-public: chạy `playwright test --grep=seo --reporter=json` ở gốc dự án; mọi ca đạt ⇒ ĐẠT và nói số ca', async () => {
+  const seen = []
+  const d = project(rrApp())
+  const r = await first(d, 'seo-public', { exec: pwExec(pwReport(spec('seo: / có title'), spec('seo: sitemap.xml'), spec(HEADER_SPEC)), 0, seen) })
+  assert.equal(r.status, 'pass', JSON.stringify(r))
+  assert.match(r.message, /3 ca seo đạt/)
+  assert.deepEqual(seen[0].args, ['test', '--grep=seo', '--reporter=json'])
+  assert.equal(path.resolve(seen[0].cwd), path.resolve(d))
+})
+
+test('seo-public: ca không đạt ⇒ KHÔNG ĐẠT nêu tên ca + lý do; không có ca seo nào ⇒ KHÔNG ĐẠT; không có báo cáo đọc được ⇒ KHÔNG ĐẠT kể cả mã thoát 0 (không đạt giả)', async () => {
+  const d = project(rrApp())
+  const bad = await first(d, 'seo-public', { exec: pwExec(pwReport(spec('seo: / có title'), spec('seo: / bot Facebook', false, 'Expected: truthy\nReceived: undefined')), 1) })
+  assert.equal(bad.status, 'fail')
+  assert.match(bad.message, /1\/2 ca seo không đạt/)
+  assert.match(bad.detail.join('\n'), /seo: \/ bot Facebook: Expected: truthy · Received: undefined/)
+  assert.match(bad.fix, /seoMeta/)
+  const none = await first(d, 'seo-public', { exec: pwExec(JSON.stringify({ suites: [], stats: { expected: 0, unexpected: 0 } }), 1) })
+  assert.equal(none.status, 'fail')
+  assert.match(none.message, /Không có ca thử seo nào/)
+  const noReport = await first(d, 'seo-public', { exec: pwExec('Error: app không lên\n', 1) })
+  assert.equal(noReport.status, 'fail')
+  assert.match(noReport.message, /trước khi có kết quả ca thử/)
+  const exit0 = await first(d, 'seo-public', { exec: pwExec('', 0) })
+  assert.equal(exit0.status, 'fail', 'thoát 0 mà không có báo cáo vẫn không được đạt')
+})
+
+test('seo-public: thiếu @playwright/test ⇒ THIẾU (bắt buộc, kèm lệnh cài), không chạy gì', async () => {
+  const seen = []
+  const d = project(rrApp({ 'package.json': { devDependencies: { '@react-router/dev': '8.5.2' } } }))
+  const r = await first(d, 'seo-public', { exec: pwExec(pwReport(spec('seo: x')), 0, seen) })
+  assert.equal(r.status, 'missing')
+  assert.match(r.fix, /npm i -D @playwright\/test/)
+  assert.equal(seen.length, 0)
+})
+
+test('web-headers: app dựng trang ở máy chủ có file _headers đủ 4 header mà CHƯA đọc được header từ phản hồi thật ⇒ BỎ QUA "chưa kiểm", KHÔNG ĐẠT giả', async () => {
+  const d = project(rrApp())
+  const r = await first(d, 'web-headers')
+  assert.equal(r.status, 'skip')
+  assert.match(r.message, /chưa kiểm header của trang dựng ở máy chủ \(React Router/)
+  assert.match(r.message, /seo-public/)
+  const rep = await check(d, ['web-headers'])
+  assert.equal(rep.summary.pass, 0, 'không có dòng ĐẠT nào cho header')
+})
+
+test('web-headers: app dựng trang ở máy chủ ⇒ ĐẠT chỉ khi seo-public đã đọc header từ phản hồi thật; ca header không đạt ⇒ KHÔNG ĐẠT kèm lý do; thiếu file header ⇒ vẫn KHÔNG ĐẠT như cũ', async () => {
+  const d = project(rrApp())
+  const ok = await check(d, ['seo-public', 'web-headers'], { exec: pwExec(pwReport(spec('seo: / có title'), spec(HEADER_SPEC))) })
+  assert.deepEqual(ok.results.map((x) => [x.id, x.status]), [['seo-public', 'pass'], ['web-headers', 'pass']])
+  assert.match(ok.results[1].message, /phản hồi thật của trang dựng ở máy chủ/)
+
+  const bad = await check(d, ['seo-public', 'web-headers'], { exec: pwExec(pwReport(spec('seo: / có title'), spec(HEADER_SPEC, false, 'script-src phải có nonce')), 1) })
+  assert.deepEqual(bad.results.map((x) => [x.id, x.status]), [['seo-public', 'fail'], ['web-headers', 'fail']])
+  assert.match(bad.results[1].message, /THIẾU header bảo mật/)
+  assert.match(bad.results[1].detail.join('\n'), /script-src phải có nonce/)
+  assert.match(bad.results[1].fix, /CODE máy chủ/)
+
+  const noFile = project(rrApp({ 'public/_headers': '' }))
+  const lacking = await check(noFile, ['seo-public', 'web-headers'], { exec: pwExec(pwReport(spec(HEADER_SPEC))) })
+  assert.equal(lacking.results[1].status, 'fail', 'file header thiếu header vẫn báo như trước, dù phản hồi thật đạt')
+
+  const spa = project({ 'package.json': { devDependencies: { vite: '8' } }, 'index.html': '<div/>', 'public/_headers': HEADERS_FULL })
+  assert.equal((await first(spa, 'web-headers')).status, 'pass', 'web tĩnh (SPA) không đổi: file header đủ ⇒ ĐẠT')
+})
+
+test('ssrFramework: nhận React Router chế độ framework (trừ ssr: false), Next, Nuxt, SvelteKit, Remix, TanStack Start; SPA / thư viện / package.json hỏng ⇒ null', () => {
+  const dep = (name) => project({ 'package.json': { dependencies: { [name]: '1' } } })
+  assert.equal(ssrFramework(project(rrApp())), 'React Router (chế độ framework)')
+  assert.equal(ssrFramework(project(rrApp({ 'react-router.config.ts': 'export default { ssr: false }\n' }))), null, 'ssr: false = chế độ SPA')
+  assert.equal(ssrFramework(project({ 'package.json': { dependencies: { '@react-router/dev': '8' } } })), 'React Router (chế độ framework)', 'chưa có file cấu hình ⇒ mặc định ssr: true')
+  for (const [name, label] of [['next', 'Next.js'], ['nuxt', 'Nuxt'], ['@sveltejs/kit', 'SvelteKit'], ['@remix-run/react', 'Remix'], ['@tanstack/react-start', 'TanStack Start']]) assert.equal(ssrFramework(dep(name)), label, name)
+  assert.equal(ssrFramework(dep('react')), null)
+  assert.equal(ssrFramework(project({ 'package.json': { devDependencies: { vite: '8' } }, 'index.html': '<div/>' })), null)
+  assert.equal(ssrFramework(project({ 'package.json': '{ hỏng' })), null)
+  assert.equal(ssrFramework(project({})), null)
+})
+
+test('appPort: PORT thắng; không có thì cổng đầu tiên MỞ ĐƯỢC BẰNG TRÌNH DUYỆT trong cửa sổ PORT_BASE (bỏ 6000 X11, 5060/5061 SIP…); không có gì ⇒ null', () => {
+  assert.equal(appPort({ PORT: '7001', PORT_BASE: '6000' }), 7001)
+  assert.equal(appPort({ PORT_BASE: '6000' }), 6001, '6000 bị Chromium chặn (ERR_UNSAFE_PORT)')
+  assert.equal(appPort({ PORT_BASE: '5060' }), 5062, '5060 và 5061 bị chặn')
+  assert.equal(appPort({ PORT_BASE: '4100' }), 4100)
+  assert.equal(appPort({ PORT_BASE: '6660' }), 6660, '6660-6664 mở được; 6665-6669 mới bị chặn')
+  assert.equal(appPort({ PORT_BASE: '6665' }), 6670)
+  for (const env of [{}, { PORT_BASE: 'abc' }, { PORT_BASE: '0' }, { PORT_BASE: '70000' }, { PORT: 'x' }]) assert.equal(appPort(env), null, JSON.stringify(env))
+})
+
+test('PORT_BASE (wt-env) ⇒ mọi checker tự bật app chạy với PORT đó; đã có PORT thì giữ nguyên; không có cả hai thì không thêm PORT', async () => {
+  const d = project(rrApp())
+  const run = async (env) => { const seen = []; await first(d, 'seo-public', { env, exec: pwExec(pwReport(spec('seo: x')), 0, seen) }); return seen[0].env.PORT }
+  assert.equal(await run({ PORT_BASE: '6000' }), '6001')
+  assert.equal(await run({ PORT: '7100', PORT_BASE: '6000' }), '7100')
+  assert.equal(await run({}), undefined)
+})
+
+const DEPCRUISE_APP = (extra = {}) => webProject({ '.dependency-cruiser.mjs': 'export default {}\n', ...extra })
+const TYPEGEN_REPORT = (...files) => `${files.map((f) => `  error not-to-unresolvable: src/routes/${f}.tsx → ./+types/${f}\n    Import một file hoặc gói không tìm thấy. Cách sửa: sửa lại đường dẫn\n    import, hoặc cài gói còn thiếu bằng npm i.\n`).join('\n')}\nx ${files.length} dependency violations (${files.length} errors, 0 warnings). 29 modules, 30 dependencies cruised.\n`
+
+test('depcruise: dự án đã chạy react-router typegen (.react-router/types) ⇒ import ./+types/* "không tìm thấy" được bỏ (tsc-build kiểm chúng), nói rõ đã bỏ bao nhiêu; vi phạm khác vẫn KHÔNG ĐẠT, không lẫn dòng typegen', async () => {
+  const d = project(DEPCRUISE_APP({ '.react-router/types/src/routes/+types/home.d.ts': 'export {}\n' }))
+  const only3 = await first(d, 'depcruise', { exec: async () => ({ ...OK, code: 3, stdout: TYPEGEN_REPORT('home', 'about', 'root') }) })
+  assert.equal(only3.status, 'pass', JSON.stringify(only3))
+  assert.match(only3.detail.join('\n'), /bỏ 3 import kiểu \.\/\+types\/\*/)
+
+  const mixed = `${TYPEGEN_REPORT('home')}  error arch-web-features-a: src/features/a/x.ts → src/features/b/y.ts\n    Module "features/a" không được import "features/b".\n`
+  const bad = await first(d, 'depcruise', { exec: async () => ({ ...OK, code: 2, stdout: mixed }) })
+  assert.equal(bad.status, 'fail')
+  assert.ok(bad.detail.some((l) => l.includes('src/features/b/y.ts')))
+  assert.ok(!bad.detail.some((l) => l.includes('+types')), 'dòng typegen không lẫn vào báo cáo')
+
+  const noTypegen = project(DEPCRUISE_APP())
+  const raw = await first(noTypegen, 'depcruise', { exec: async () => ({ ...OK, code: 3, stdout: TYPEGEN_REPORT('home') }) })
+  assert.equal(raw.status, 'fail', 'chưa chạy typegen (không có .react-router/types) ⇒ import ./+types/* thật sự không thấy ⇒ vẫn báo')
+})
+
+test('seo-public: đọc được báo cáo Playwright dù trước nó có dòng log dạng JSON; không có báo cáo ⇒ null (không đạt giả)', () => {
+  const report = JSON.stringify({ config: {}, suites: [{ title: 'seo', specs: [] }] }, null, 2)
+  assert.ok(playwrightReport(report)?.suites)
+  assert.ok(playwrightReport('{"level":"info","msg":"server lên"}\nRunning 3 tests\n' + report)?.suites)
+  assert.equal(playwrightReport('{"level":"info"}\nkhông có báo cáo'), null)
+  assert.equal(playwrightReport(''), null)
 })

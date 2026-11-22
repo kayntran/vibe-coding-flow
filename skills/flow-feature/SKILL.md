@@ -12,6 +12,7 @@ giữa chừng. Dừng thì báo: đã xong gì · kẹt gì · khuyên chọn g
 
 | Bước | Skill | Khi nào | Qua bước khi | Hỏng thì |
 |---|---|---|---|---|
+| 0 | `flow-business` rồi `flow-stack` | App chưa có `docs/BUSINESS.md` (hoặc thiếu `docs/STACK.md`): đọc app, tự điền phần đã rõ, chỉ hỏi phần thiếu | Cả hai bản đã duyệt hoặc user bỏ qua (ghi `progress.md` kèm hậu quả); từ đây không ai hỏi lại business, không đổi công nghệ đã chốt | Hỏi tiếp từ chỗ dừng, không đoán |
 | 1 | `flow-spec` | Luôn; app mới, màn mới, đổi luồng thì gọi `flow-ux` trước khi viết phần màn hình | User duyệt SPEC, không còn `[CẦN LÀM RÕ]`; luồng đã duyệt thì không hỏi lại | Hỏi tiếp, không đoán |
 | 2 | `flow-system-design` | Luôn [89i7] | Có DESIGN.md: hạng quy mô, con số, bản mẫu đã áp, đánh đổi | Thiếu con số thì ghi giả định, không đứng chờ |
 | 3 | `flow-impact` | Đụng thứ dùng chung | Mỗi tính năng anh em có quyết định | Hỏi user làm luôn hay để sau (gom vào lần hỏi SPEC nếu kịp) |
@@ -37,8 +38,6 @@ AI kiểm lại bằng gì. Lựa chọn đổi lại được thì tự đặt 
 xử lý phía sau, test) trong worktree riêng theo `flow-build`. Chúng chỉ dựa vào luồng màn đã duyệt nên bản nào được chọn cũng không phải
 làm lại. Task giao diện (ghi `(chờ demo)` trong PLAN) chỉ làm sau khi user chọn bản. Không có màn mới thì bỏ bước 6, làm thẳng bước 7.
 
-**Trước khi sửa file:** `flow-worktree`. Thêm module mới: `flow-architecture` trước khi lập plan (sau `flow-system-design`).
-
-**Sau khi nén ngữ cảnh:** đọc sổ tiến độ, xác định bước đang dở. Sổ ghi `Đang chờ user gật` thì tóm tắt lại điều cần gật rồi hỏi lại, không coi là đã gật.
-
-**Bỏ bước:** chỉ khi cột "Khi nào" không khớp, hoặc user bảo. Bỏ theo lời user thì ghi "chưa kiểm" và nhắc lại lúc gộp.
+- **Trước khi sửa file:** `flow-worktree`. Thêm module mới: `flow-architecture` trước khi lập plan (sau `flow-system-design`).
+- **Sau khi nén ngữ cảnh:** đọc sổ tiến độ, xác định bước đang dở. Sổ ghi `Đang chờ user gật` thì tóm tắt lại điều cần gật rồi hỏi lại, không coi là đã gật.
+- **Bỏ bước:** chỉ khi cột "Khi nào" không khớp, hoặc user bảo. Bỏ theo lời user thì ghi "chưa kiểm" và nhắc lại lúc gộp.

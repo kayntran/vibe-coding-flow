@@ -2,6 +2,8 @@
 
 Dùng ở bước 4 của `flow-system-design` (bản mẫu theo loại tính năng), câu hỏi hành vi đem hỏi lúc `flow-spec`.
 
+**Câu business trong "Hỏi user" không hỏi user**: câu nào `docs/BUSINESS.md` đã trả lời (khách, nước, giá, gói, hạn mức, ngân sách, giờ, giọng) thì lấy từ bản; chưa có hoặc bản chưa nói thì tự suy theo "Ranh giới tự suy" của `flow-business`, ghi `(AI suy từ B-xx)`. Chỉ hỏi chi tiết riêng của tính năng.
+
 ## Mục lục
 - Đăng ký và đăng nhập bằng mật khẩu
 - Quên và đổi mật khẩu
@@ -22,7 +24,7 @@ Số mặc định trong bảng (5 lần, 15 phút, 90 ngày…) là kinh nghi�
 Nhận ra khi: "đăng ký", "đăng nhập", "tạo tài khoản", "login", "mỗi người một tài khoản".
 
 Hỏi user (lúc viết SPEC):
-- Ai cũng tự đăng ký được, hay chỉ người bạn mời? → khuyên: app cho công chúng thì tự đăng ký; app nội bộ thì chỉ người được mời (bớt hẳn spam đăng ký).
+- Ai cũng tự đăng ký được, hay chỉ người bạn mời? (lấy từ BUSINESS.md B-KH8; chưa có thì tự suy) → khuyên: app cho công chúng thì tự đăng ký; app nội bộ thì chỉ người được mời (bớt hẳn spam đăng ký).
 - Người mới phải bấm link xác nhận email rồi mới dùng, hay dùng ngay? → khuyên: xem và thử ngay, nhưng việc tốn tiền (gọi AI, gửi SMS, tải file lớn) chỉ mở sau khi xác nhận email.
 - Đăng nhập sai nhiều lần thì app nên làm gì? → khuyên: chậm dần rồi bắt chờ vài phút, gửi email báo chủ tài khoản; không khoá cứng tới khi admin mở.
 
@@ -118,7 +120,7 @@ Nhận ra khi: "đăng nhập bằng Google", "Sign in with Apple/GitHub", "SSO"
 
 Hỏi user (lúc viết SPEC):
 - Ai đó đã có tài khoản email + mật khẩu, sau bấm "Đăng nhập Google" cùng email thì gộp hay tách? → khuyên: gộp chỉ khi email tài khoản cũ đã xác nhận; chưa xác nhận thì bắt đăng nhập kiểu cũ trước rồi mới liên kết.
-- Ai cũng vào được hay chỉ nhân viên một công ty? → khuyên: app công khai ⇒ ai cũng được; app nội bộ ⇒ chỉ đúng tổ chức Google Workspace của bạn.
+- Ai cũng vào được hay chỉ nhân viên một công ty? (lấy từ BUSINESS.md B-TQ2, B-KH3; chưa có thì tự suy) → khuyên: app công khai ⇒ ai cũng được; app nội bộ ⇒ chỉ đúng tổ chức Google Workspace của bạn.
 
 | Mặt | Làm ngay | Chừa chỗ | Chưa làm (cần khi…) |
 |---|---|---|---|
@@ -187,7 +189,7 @@ Hay sai:
 Nhận ra khi: "admin", "quản lý", "nhân viên chỉ được xem", "phân quyền", "vai trò".
 
 Hỏi user (lúc viết SPEC):
-- Có mấy loại người dùng, mỗi loại được làm gì? → khuyên: bắt đầu 2–3 vai cố định (chủ, thành viên, chỉ xem); vai tự định nghĩa để sau.
+- Có mấy loại người dùng, mỗi loại được làm gì? (lấy từ BUSINESS.md B-KH3; chưa có thì tự suy) → khuyên: bắt đầu 2–3 vai cố định (chủ, thành viên, chỉ xem); vai tự định nghĩa để sau.
 - Một người có thể là chủ ở nhóm này, thành viên ở nhóm khác không? → khuyên: có nếu app có nhóm — vai gắn với cặp (người, nhóm), không gắn với người.
 
 | Mặt | Làm ngay | Chừa chỗ | Chưa làm (cần khi…) |
@@ -211,7 +213,7 @@ Hay sai:
 Nhận ra khi: "nhiều công ty cùng dùng", "mỗi khách một không gian riêng", "workspace", "tổ chức", "SaaS cho doanh nghiệp".
 
 Hỏi user (lúc viết SPEC):
-- Một người có thể thuộc nhiều công ty không? → khuyên: có (kế toán dịch vụ, người tư vấn) — làm từ đầu rẻ hơn sửa sau nhiều lần.
+- Một người có thể thuộc nhiều công ty không? (lấy từ BUSINESS.md B-MR2, B-KH3; chưa có thì tự suy) → khuyên: có (kế toán dịch vụ, người tư vấn) — làm từ đầu rẻ hơn sửa sau nhiều lần.
 - Khách lớn có đòi dữ liệu nằm riêng (DB riêng, vùng riêng) không? → khuyên: chưa; dùng chung một DB có cột công ty, đưa "DB riêng" vào lộ trình.
 
 | Mặt | Làm ngay | Chừa chỗ | Chưa làm (cần khi…) |
@@ -259,9 +261,9 @@ Hay sai:
 Nhận ra khi: "xoá tài khoản", "tải dữ liệu của tôi", "GDPR", "quyền riêng tư".
 
 Hỏi user (lúc viết SPEC):
-- Bấm xoá tài khoản thì xoá ngay hay chờ? → khuyên: chờ 14–30 ngày (đăng nhập lại là huỷ xoá) rồi xoá hẳn; ghi rõ ngày trên màn xác nhận.
+- Bấm xoá tài khoản thì xoá ngay hay chờ? (lấy từ BUSINESS.md B-VH8, B-PL7; chưa có thì tự suy) → khuyên: chờ 14–30 ngày (đăng nhập lại là huỷ xoá) rồi xoá hẳn; ghi rõ ngày trên màn xác nhận.
 - Thứ người đó đã góp vào nhóm (bình luận, tài liệu chung) thì sao? → khuyên: dữ liệu chung ở lại với tên "Người dùng đã xoá"; dữ liệu riêng xoá hẳn.
-- Có hoá đơn/giao dịch phải giữ theo luật kế toán không? → khuyên: có thì giữ bản tối thiểu, tách khỏi thông tin cá nhân khác; hỏi kế toán (đây không phải tư vấn pháp lý).
+- Có hoá đơn/giao dịch phải giữ theo luật kế toán không? (lấy từ BUSINESS.md B-PL7, B-TG11; chưa có thì tự suy) → khuyên: có thì giữ bản tối thiểu, tách khỏi thông tin cá nhân khác; hỏi kế toán (đây không phải tư vấn pháp lý).
 
 | Mặt | Làm ngay | Chừa chỗ | Chưa làm (cần khi…) |
 |---|---|---|---|

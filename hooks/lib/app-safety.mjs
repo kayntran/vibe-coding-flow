@@ -8,6 +8,8 @@
 //       Chỗ đã biết: public/_headers, _headers, static/_headers (Cloudflare/Netlify) · vercel.json · netlify.toml · *.conf nginx · Caddyfile.
 //       _headers / vercel.json / netlify.toml chỉ tính phần áp cho cả site (/*); nginx/Caddy tính mọi add_header / header.
 //       _headers luôn bị xét; vercel.json / netlify.toml / *.conf / Caddyfile chỉ khi có khai header đang theo dõi (netlify.toml chỉ [build] không tính là một nền).
+//   ssrFramework(dir) → tên khung | null               web: app dựng trang ở máy chủ (React Router chế độ framework, Next, Nuxt, SvelteKit, Remix, TanStack Start). Có ⇒ file header
+//       không chứng minh header của trang (chỉ áp cho file tĩnh): web-headers đòi header đọc từ phản hồi thật, không thì báo "chưa kiểm" (không báo đạt giả).
 //   extensionPermProblems(dir) → [{ file, msg, fix }]  extension: host_permissions rộng (mọi trang) ⇒ báo, kèm dặn chuyển sang optional_host_permissions.
 //       Đọc mọi manifest.json ở chỗ đã biết VÀ luôn đọc host_permissions trong wxt.config.* (WXT sinh manifest lúc build; manifest cũ không che cấu hình mới).
 import fs from 'node:fs'
@@ -180,6 +182,32 @@ export function headerProblems(dir) {
   // File đa năng không khai header nào (netlify.toml chỉ có [build], redis.conf…) không phải "một nền thiếu header"; không file nào khai thì xét file đầu để báo thiếu đủ 4.
   const judged = sources.filter((s) => s.pure || s.headers.length)
   return (judged.length ? judged : [sources[0]]).flatMap(fileProblems)
+}
+
+// --- web: trang dựng ở máy chủ (SSR) ------------------------------------------------------------------------------------------------
+
+// Khung web dựng trang ở máy chủ → tên khung, hoặc null (web tĩnh / SPA). Với app như vậy, file header (public/_headers, vercel.json…) chỉ áp cho file tĩnh
+// (Cloudflare không áp `_headers` cho phản hồi do mã Worker tạo ra), nên "có file header đủ 4 thứ" KHÔNG chứng minh trang dựng ở máy chủ có header:
+// checker web-headers chỉ tính đạt khi đọc được header từ phản hồi thật (seo-public), không thì báo "chưa kiểm".
+const DEP_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']
+const RR_CONFIGS = ['react-router.config.ts', 'react-router.config.js', 'react-router.config.mjs', 'react-router.config.mts']
+const SSR_DEPS = [
+  [['next'], 'Next.js'],
+  [['nuxt'], 'Nuxt'],
+  [['@sveltejs/kit'], 'SvelteKit'],
+  [['@remix-run/dev', '@remix-run/react'], 'Remix'],
+  [['@tanstack/react-start', '@tanstack/start'], 'TanStack Start'],
+]
+
+export function ssrFramework(dir) {
+  let pkg = null
+  try { pkg = JSON.parse(readText(at(dir, 'package.json')) ?? 'null') } catch { /* package.json hỏng thì coi như không biết */ }
+  const has = (names) => Boolean(pkg) && DEP_FIELDS.some((f) => pkg[f] && typeof pkg[f] === 'object' && names.some((n) => Object.hasOwn(pkg[f], n)))
+  if (has(['@react-router/dev'])) {
+    const cfg = RR_CONFIGS.map((f) => readText(at(dir, f))).find((t) => t !== null)
+    if (!(cfg && /\bssr\s*:\s*false\b/.test(cfg))) return 'React Router (chế độ framework)' // ssr: false = chế độ SPA, không dựng trang ở máy chủ
+  }
+  return SSR_DEPS.find(([names]) => has(names))?.[1] ?? null
 }
 
 // --- extension: quyền host rộng -----------------------------------------------------------------------------------------------------

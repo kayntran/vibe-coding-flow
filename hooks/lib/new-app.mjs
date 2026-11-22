@@ -1,19 +1,23 @@
 // new-app: tạo app mới từ số 0 bằng LỆNH TẠO CHÍNH HÃNG (ghim bản) + lớp phủ của kit. Spec: docs/specs/2026-10-12-flow-v7-dot3 (AC-15, AC-29, PLAN mục 6).
 // CLI: hooks/new-app.mjs (doctor, create). Lời nói với user nằm ở CLI; thư viện trả dữ liệu hoặc ném NewAppError (exit 1 lỗi/từ chối · 2 dùng sai · 3 thiếu phần mềm).
 //
-//   TYPES                              ['web','desktop','extension']
+//   TYPES                              ['web','desktop','extension','web-public']   web-public = webapp có trang công khai (React Router trên Cloudflare Workers, SEO)
 //   validateName(name)                 → null | lời báo       tên chỉ gồm a-z, 0-9, gạch ngang (đặt tên thư mục và tên gói)
 //   loadVersions(kit?) · loadTemplate(type, kit?)             kit/templates/versions.json · kit/templates/<type>/template.json (kiểm dạng, chặn đường dẫn lạ)
+//                                       versions.json: node.min (cả 3 loại cũ) + node.byType[<loại>] (Node tối thiểu riêng của loại đó, vd web-public); reactRouter không được dưới 8.5.1.
 //   doctor({ type, io, cwd? })         → { ok, missing:[{tool, why, install:{win, mac}}], blocked:[{tool, why}], found:{…}, pm }   KHÔNG cài gì
 //                                       missing = chưa có / cũ quá (ENOENT); blocked = có nhưng không chạy được (spawn EPERM/EACCES: bị chặn quyền hoặc sandbox).
 //                                       Kiểm cả công cụ máy kiểm flow-check coi là BẮT BUỘC cho loại app (requiredTools: đọc kit/checkers.json, tìm bằng findTool của flow-check từ cwd).
 //   requiredTools(template, kit?)      → [{ id, title, names, identify, install:{win, mac} }]   công cụ MÁY phải có (không tính thứ app tự cài bằng `npm i -D`)
-//   generatorCommand(template, { name, pm, versions })        → { cmd, args }   lệnh tạo chính hãng (đã ghim bản)
+//   generatorCommand(template, { name, pm, versions })        → { cmd, args }   lệnh tạo chính hãng (đã ghim bản; generate.version = khoá bản ghim khi khác tên gói, vd create-cloudflare ↔ createCloudflare)
+//   stepCommand(step, { name, pm, versions })                 → { cmd, args }   một "lệnh sau khi tạo" (template.after): pm-exec (chạy gói đã ghim bản), pm-run (script trong package.json) hoặc pm-bin (lệnh đã cài trong app)
 //   classifyFailure(r)                 → { kind, say, detail }   phân loại lỗi một lệnh ngoài: mạng · quyền · ổ đĩa · diệt virus/khoá file · đổi cờ · thiếu phần mềm · quá giờ
 //                                       (EACCES/EPERM kèm địa chỉ:cổng / syscall connect / dial tcp = kết nối mạng bị chặn ⇒ mạng; chỉ lỗi trên đường dẫn file mới là quyền ghi)
-//   applyOverlay({ template, overlayDir, appDir, tokens }) → { added, replaced, kept, removed, moved }   phủ kit/templates/<type>/overlay/**
+//   applyOverlay({ template, overlayDir, appDir, tokens }) → { added, replaced, kept, removed, moved, scripts, scriptsSet, patched }   phủ kit/templates/<type>/overlay/** (file ảnh/phông: sao chép nguyên byte,
+//                                       không điền {{TOKEN}}; template.scripts chỉ thêm script chưa có, template.scriptsSet đặt/đè script của lệnh tạo)
 //   create({ type, name, parent, pm, io }) → { dir, pm, steps, overlay, luu, notes, next }
-//                                       các bước: kiểm máy → tạo → điểm lưu → lớp phủ → cài thư viện → công cụ kiểm (devDeps) → trình duyệt → bản đồ kiến trúc (arch init + gen) → dựng thử (build) → lưu
+//                                       các bước: kiểm máy → tạo → điểm lưu → lớp phủ → lệnh sau khi tạo (template.after) → cài thư viện → thư viện chạy ghim bản (deps) → công cụ kiểm (devDeps)
+//                                       → trình duyệt → bản đồ kiến trúc (arch init + gen) → dựng thử (build) → lưu
 //                                       ⇒ app mới chạy `flow-check` được ngay (template.json: devDeps, build; còn lại nằm trong overlay).
 //   installLines(install, platform)   → dòng lệnh cài của hệ điều hành đang chạy (doctor/create chỉ in Windows trên Windows, Mac trên Mac)
 //
@@ -34,12 +38,14 @@ import { findTool, validateCheckers } from '../flow-check.mjs'
 import { gen as archGen, init as archInit } from './arch.mjs'
 import { bat as luuBat, tao as luuTao } from './luu.mjs'
 
-export const TYPES = ['web', 'desktop', 'extension']
+export const TYPES = ['web', 'desktop', 'extension', 'web-public']
 // Mọi {{TOKEN}} mà overlay được phép dùng (create điền hết; test quét overlay để token gõ sai không lọt).
 export const TOKEN_NAMES = ['APP_NAME', 'PORT', 'GO_MODULE', 'PM', 'PM_RUN', 'PM_DEV', 'PM_EXEC', 'PM_DLX', 'V_SHADCN', 'V_WXT', 'V_PLAYWRIGHT', 'V_AXE', 'V_WAILS']
 export const KIT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'kit')
 // Bản ghim bắt buộc có trong kit/templates/versions.json (công cụ tạo + kiểm thử + công cụ của máy kiểm flow-check).
-const PINNED = ['shadcn', 'wxt', 'playwright', 'axe', 'shadcnLint', 'knip', 'jscpd', 'sizeLimit', 'depcruise', 'eslint', 'eslintJs', 'tsEslint', 'reactHooks', 'globals', 'vite', 'pluginReact', 'typescript', 'typesNode']
+const PINNED = ['shadcn', 'wxt', 'playwright', 'axe', 'shadcnLint', 'knip', 'jscpd', 'sizeLimit', 'depcruise', 'eslint', 'eslintJs', 'tsEslint', 'reactHooks', 'globals', 'vite', 'pluginReact', 'typescript', 'typesNode', 'createCloudflare', 'reactRouter']
+// Bản ghim KHÔNG được thấp hơn: React Router có 7 lỗ hổng công bố 2026-11-18, vá từ 8.5.1 (gồm @react-router/dev, cùng số bản).
+const MIN_PINS = { reactRouter: '8.5.1' }
 const NAME_RE = /^[a-z][a-z0-9-]{1,38}[a-z0-9]$/
 const SAFE_ARG = /^[\w.:=/@+-]+$/
 const GENERATE_TIMEOUT_MS = 10 * 60_000
@@ -95,8 +101,17 @@ export function loadVersions(kit = KIT_DIR) {
   const v = readJsonFile(path.join(kit, 'templates', 'versions.json'), 'bảng phiên bản kit/templates/versions.json')
   for (const k of ['node', 'git', 'go', 'wails']) if (!v?.[k]?.min || !versionOf(v[k].min)) throw new NewAppError(`kit/templates/versions.json thiếu "${k}.min".`)
   for (const k of PINNED) if (!versionOf(v[k] ?? '')) throw new NewAppError(`kit/templates/versions.json thiếu bản ghim "${k}".`)
+  for (const [k, min] of Object.entries(MIN_PINS)) {
+    if (cmpVer(versionOf(v[k]), versionOf(min)) < 0) throw new NewAppError(`kit/templates/versions.json ghim "${k}" ${v[k]}, thấp hơn ${min} (bản cũ hơn có lỗ hổng đã công bố). Nâng lên ${min} trở lên.`)
+  }
+  for (const [type, min] of Object.entries(v.node.byType ?? {})) {
+    if (!TYPES.includes(type) || !versionOf(min)) throw new NewAppError(`kit/templates/versions.json: node.byType "${type}" phải là một loại app có mẫu với số bản dạng 22.22.0.`)
+  }
   return v
 }
+
+// Node tối thiểu của một loại app: node.byType[loại] nếu có, không thì node.min (ba loại cũ không bị nâng).
+const nodeMinOf = (v, type) => v.node.byType?.[type] ?? v.node.min
 
 const safeRel = (p) => typeof p === 'string' && p !== '' && !path.isAbsolute(p) && !/^[a-zA-Z]:/.test(p) && !slash(p).split('/').includes('..') && !/[\u0000-\u001f]/.test(p)
 
@@ -109,7 +124,15 @@ export function loadTemplate(type, kit = KIT_DIR) {
   const g = t.generate
   if (!g || !Array.isArray(g.args) || g.args.some((a) => typeof a !== 'string')) throw bad('thiếu generate.args')
   if (g.runner === 'bin' ? typeof g.bin !== 'string' : g.runner !== 'pm-exec' || typeof g.package !== 'string') throw bad('generate.runner phải là "bin" (kèm bin) hoặc "pm-exec" (kèm package)')
-  for (const key of ['replace', 'gitignore', 'gitignoreRemove', 'markers']) if (t[key] !== undefined && (!Array.isArray(t[key]) || t[key].some((x) => typeof x !== 'string'))) throw bad(`"${key}" phải là danh sách chữ`)
+  if (g.version !== undefined && typeof g.version !== 'string') throw bad('generate.version phải là khoá bản ghim (chữ) trong versions.json')
+  for (const key of ['replace', 'gitignore', 'gitignoreRemove', 'markers', 'notes']) if (t[key] !== undefined && (!Array.isArray(t[key]) || t[key].some((x) => typeof x !== 'string'))) throw bad(`"${key}" phải là danh sách chữ`)
+  // after = lệnh chạy SAU lớp phủ (vd shadcn init cần tsconfig và thư mục src đã đúng): pm-exec (kèm package, args, version?), pm-run (kèm script) hoặc pm-bin (kèm args).
+  const argsOk = (s) => Array.isArray(s.args) && s.args.every((a) => typeof a === 'string')
+  const stepOk = (s) => Boolean(s) && typeof s.say === 'string' && (s.runner === 'pm-run' ? typeof s.script === 'string' : s.runner === 'pm-bin' ? argsOk(s) : s.runner === 'pm-exec' && typeof s.package === 'string' && argsOk(s))
+  if (t.after !== undefined && (!Array.isArray(t.after) || !t.after.every(stepOk))) throw bad('"after" phải là danh sách { say, runner:"pm-exec" (kèm package, args) | "pm-run" (kèm script) | "pm-bin" (kèm args) }')
+  if (t.scriptsSet !== undefined && (!t.scriptsSet || typeof t.scriptsSet !== 'object' || Array.isArray(t.scriptsSet) || Object.values(t.scriptsSet).some((s) => typeof s !== 'string'))) throw bad('"scriptsSet" phải là các cặp tên script → lệnh (chữ)')
+  const depList = (key) => t[key] !== undefined && (!Array.isArray(t[key]) || t[key].some((d) => !d || typeof d.name !== 'string' || typeof d.version !== 'string'))
+  if (depList('deps') || depList('devDeps')) throw bad('"deps" và "devDeps" phải là danh sách { name, version (khoá bản ghim) }')
   for (const p of [...(t.replace ?? []), ...(t.markers ?? []), ...(t.remove ?? []).map((r) => r?.path), ...(t.move ?? []).flatMap((m) => [m?.from, m?.to]), ...(t.patch ?? []).map((x) => x?.file), t.pkgDir ?? '.']) {
     if (p !== '.' && !safeRel(p)) throw bad(`đường dẫn không hợp lệ: ${JSON.stringify(p)}`)
   }
@@ -124,7 +147,7 @@ export function loadTemplate(type, kit = KIT_DIR) {
   const overlayDir = path.join(root, t.overlay ?? 'overlay')
   if (!isDir(overlayDir)) throw bad(`thiếu thư mục ${t.overlay ?? 'overlay'}`)
   if (!t.next || typeof t.next.dev !== 'string' || typeof t.next.url !== 'string') throw bad('thiếu next.dev và next.url (lệnh chạy thử và địa chỉ mở app)')
-  return { replace: [], gitignore: [], gitignoreRemove: [], markers: ['package.json'], remove: [], move: [], devDeps: [], scripts: {}, needs: [], patch: [], install: false, browser: false, build: false, ...t, overlayDir }
+  return { replace: [], gitignore: [], gitignoreRemove: [], markers: ['package.json'], remove: [], move: [], devDeps: [], deps: [], after: [], notes: [], scripts: {}, needs: [], patch: [], install: false, browser: false, build: false, ...t, overlayDir }
 }
 
 // ---------- chạy lệnh ngoài ----------
@@ -300,7 +323,8 @@ export function doctor({ type, io: rawIo, pm: wantPm, cwd } = {}) {
 
   const node = versionOf(io.nodeVersion)
   found.node = node ? showVer(node) : null
-  if (!node || cmpVer(node, versionOf(v.node.min)) < 0) need('node', node ? old('Node', node, v.node.min) : 'Chưa thấy Node.', inst.node)
+  const nodeMin = nodeMinOf(v, type)
+  if (!node || cmpVer(node, versionOf(nodeMin)) < 0) need('node', node ? old('Node', node, nodeMin) : 'Chưa thấy Node.', inst.node)
 
   const gitOut = ask('git', ['--version'])
   const git = gitOut && versionOf(gitOut)
@@ -379,13 +403,20 @@ export function doctor({ type, io: rawIo, pm: wantPm, cwd } = {}) {
 // ---------- lệnh tạo ----------
 
 export function generatorCommand(template, { name, pm, versions }) {
-  const g = template.generate
+  return stepCommand(template.generate, { name, pm, versions })
+}
+
+// Một lệnh của kit: runner "bin" (chạy thẳng), "pm-exec" (chạy gói đã ghim bản: pnpm dlx / npx --yes; step.version = khoá bản ghim, mặc định cùng tên gói),
+// "pm-run" (chạy script trong package.json của app: pnpm run / npm run) hoặc "pm-bin" (chạy lệnh đã cài trong node_modules của app: pnpm exec / npx --yes).
+export function stepCommand(step, { name, pm, versions }) {
   const sub = (s) => s.replaceAll('{{name}}', name).replaceAll('{{pm}}', pm)
-  const args = g.args.map(sub)
-  if (g.runner === 'bin') return { cmd: g.bin, args }
-  const ver = versions[g.package]
-  if (!ver) throw new NewAppError(`kit/templates/versions.json chưa ghim bản cho "${g.package}".`)
-  const spec = `${g.package}@${ver}`
+  if (step.runner === 'pm-run') return pm === 'pnpm' ? { cmd: 'pnpm', args: ['run', step.script] } : { cmd: 'npm', args: ['run', step.script] }
+  if (step.runner === 'pm-bin') return pm === 'pnpm' ? { cmd: 'pnpm', args: ['exec', ...step.args.map(sub)] } : { cmd: 'npx', args: ['--yes', ...step.args.map(sub)] }
+  const args = step.args.map(sub)
+  if (step.runner === 'bin') return { cmd: step.bin, args }
+  const ver = versions[step.version ?? step.package]
+  if (!ver) throw new NewAppError(`kit/templates/versions.json chưa ghim bản cho "${step.version ?? step.package}".`)
+  const spec = `${step.package}@${ver}`
   return pm === 'pnpm' ? { cmd: 'pnpm', args: ['dlx', spec, ...args] } : { cmd: 'npx', args: ['--yes', spec, ...args] }
 }
 
@@ -401,6 +432,7 @@ function walk(dir, base = dir) {
   return out
 }
 
+const BINARY_FILE = /\.(?:png|jpe?g|gif|webp|ico|woff2?|ttf|otf)$/i
 const fillTokens = (text, tokens) => text.replace(/\{\{([A-Z_]+)\}\}/g, (m, k) => (Object.hasOwn(tokens, k) ? tokens[k] : m))
 const fillDeep = (v, tokens) => (typeof v === 'string' ? fillTokens(v, tokens) : Array.isArray(v) ? v.map((x) => fillDeep(x, tokens)) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fillDeep(x, tokens)])) : v)
 
@@ -428,7 +460,8 @@ function dropGitignore(appDir, lines) {
   if (next !== cur) fs.writeFileSync(file, next)
 }
 
-function mergeScripts(appDir, pkgDir, scripts) {
+// scripts: chỉ thêm script CHƯA có. scriptsSet (override): đặt script, đè cả script lệnh tạo đã sinh (vd postinstall của create-cloudflare thêm react-router typegen).
+function mergeScripts(appDir, pkgDir, scripts, { override = false } = {}) {
   const entries = Object.entries(scripts ?? {})
   if (!entries.length) return []
   const file = path.join(appDir, pkgDir, 'package.json')
@@ -438,14 +471,14 @@ function mergeScripts(appDir, pkgDir, scripts) {
   const indent = /^(\s+)"/m.exec(text)?.[1] ?? 2
   pkg.scripts ??= {}
   const added = []
-  for (const [k, v] of entries) if (!Object.hasOwn(pkg.scripts, k)) { pkg.scripts[k] = v; added.push(k) }
+  for (const [k, v] of entries) if (override ? pkg.scripts[k] !== v : !Object.hasOwn(pkg.scripts, k)) { pkg.scripts[k] = v; added.push(k) }
   if (added.length) writeJson(file, pkg, indent)
   return added
 }
 
 // Phủ overlay/** lên appDir. File đã có (do lệnh tạo sinh) chỉ bị đè khi nằm trong template.replace; còn lại giữ nguyên.
 export function applyOverlay({ template, overlayDir = template.overlayDir, appDir, tokens = {} }) {
-  const res = { added: [], replaced: [], kept: [], removed: [], moved: [], scripts: [], patched: [] }
+  const res = { added: [], replaced: [], kept: [], removed: [], moved: [], scripts: [], scriptsSet: [], patched: [] }
   const root = path.resolve(appDir)
   const within = (rel) => {
     const abs = path.resolve(root, rel)
@@ -467,6 +500,9 @@ export function applyOverlay({ template, overlayDir = template.overlayDir, appDi
     if (text === null) continue
     if (r.contains && !text.includes(r.contains)) { res.kept.push(slash(r.path)); continue }
     fs.unlinkSync(abs)
+    // Thư mục vừa bị gỡ hết file (vd src/welcome của create-cloudflare) không để lại thư mục rỗng; rmdir chỉ chạy được trên thư mục RỖNG nên không đụng đồ khác.
+    const parent = path.dirname(abs)
+    if (parent !== root) { try { fs.rmdirSync(parent) } catch { /* còn file khác trong đó */ } }
     res.removed.push(slash(r.path))
   }
   const replace = new Set(template.replace.map(slash))
@@ -474,12 +510,15 @@ export function applyOverlay({ template, overlayDir = template.overlayDir, appDi
     const target = within(rel)
     const had = exists(target)
     if (had && !replace.has(rel)) { res.kept.push(rel); continue }
-    const text = fillTokens(readText(path.join(overlayDir, ...rel.split('/'))).replace(/\r\n/g, '\n'), tokens)
+    const from = path.join(overlayDir, ...rel.split('/'))
     fs.mkdirSync(path.dirname(target), { recursive: true })
-    fs.writeFileSync(target, text)
+    // Ảnh, phông: sao chép nguyên byte (đọc như chữ rồi ghi lại sẽ làm hỏng file).
+    if (BINARY_FILE.test(rel)) fs.copyFileSync(from, target)
+    else fs.writeFileSync(target, fillTokens(readText(from).replace(/\r\n/g, '\n'), tokens))
     ;(had ? res.replaced : res.added).push(rel)
   }
   res.scripts = mergeScripts(root, template.pkgDir ?? '.', template.scripts)
+  res.scriptsSet = mergeScripts(root, template.pkgDir ?? '.', template.scriptsSet, { override: true })
   // patch: đặt giá trị cho khoá cấp cao nhất của file JSON do lệnh tạo sinh (vd wails.json: đổi npm → pnpm). Khác overlay: đè khoá có sẵn có chủ đích.
   // Giá trị có thể là chữ, danh sách hoặc object (vd "overrides" của npm); token {{…}} điền ở mọi chữ bên trong. Mục có "pm" chỉ áp khi đúng trình quản lý gói (tokens.PM).
   for (const p of template.patch) {
@@ -573,8 +612,8 @@ function prepareTarget(parent, name) {
 
 function pmCommands(pm) {
   return pm === 'pnpm'
-    ? { install: ['pnpm', ['install']], add: (pkgs) => ['pnpm', ['add', '-D', ...pkgs]], run: (script) => ['pnpm', ['run', script]], exec: (args) => ['pnpm', ['exec', ...args]], tokens: { PM: 'pnpm', PM_RUN: 'pnpm', PM_DEV: 'pnpm dev', PM_EXEC: 'pnpm exec', PM_DLX: 'pnpm dlx' } }
-    : { install: ['npm', ['install']], add: (pkgs) => ['npm', ['install', '-D', ...pkgs]], run: (script) => ['npm', ['run', script]], exec: (args) => ['npx', ['--yes', ...args]], tokens: { PM: 'npm', PM_RUN: 'npm run', PM_DEV: 'npm run dev --', PM_EXEC: 'npx', PM_DLX: 'npx --yes' } }
+    ? { install: ['pnpm', ['install']], add: (pkgs) => ['pnpm', ['add', '-D', ...pkgs]], addRun: (pkgs) => ['pnpm', ['add', ...pkgs]], run: (script) => ['pnpm', ['run', script]], exec: (args) => ['pnpm', ['exec', ...args]], tokens: { PM: 'pnpm', PM_RUN: 'pnpm', PM_DEV: 'pnpm dev', PM_EXEC: 'pnpm exec', PM_DLX: 'pnpm dlx' } }
+    : { install: ['npm', ['install']], add: (pkgs) => ['npm', ['install', '-D', ...pkgs]], addRun: (pkgs) => ['npm', ['install', ...pkgs]], run: (script) => ['npm', ['run', script]], exec: (args) => ['npx', ['--yes', ...args]], tokens: { PM: 'npm', PM_RUN: 'npm run', PM_DEV: 'npm run dev --', PM_EXEC: 'npx', PM_DLX: 'npx --yes' } }
 }
 
 export function create({ type, name, parent = '.', pm: wantPm, io: rawIo } = {}) {
@@ -635,12 +674,27 @@ export function create({ type, name, parent = '.', pm: wantPm, io: rawIo } = {})
     const r = io.run(c, a, { cwd: pkgDir, timeoutMs: INSTALL_TIMEOUT_MS })
     if (r.error || r.status !== 0) throw failure(r, `${pm} install`, `App đã tạo ở ${target}; chạy lại "${pm} install" trong ${slash(path.relative(parentAbs, pkgDir)) || name} khi mạng ổn.`)
   }
+  // Lệnh sau khi tạo (template.after): chạy trong thư mục app SAU lớp phủ (vd shadcn init cần tsconfig và thư mục src đã đúng).
+  for (const s of template.after) {
+    step('after', s.say)
+    const cmd = stepCommand(s, { name, pm, versions })
+    const r = io.run(cmd.cmd, cmd.args, { cwd: pkgDir, timeoutMs: INSTALL_TIMEOUT_MS })
+    if (r.error || r.status !== 0) throw failure(r, cmd.cmd, `App đã tạo ở ${target}; chạy lại "${[cmd.cmd, ...cmd.args].join(' ')}" trong ${slash(path.relative(parentAbs, pkgDir)) || name} khi sửa xong lỗi trên.`)
+  }
+  const pinned = (list, key) => list.map((d) => {
+    if (!versions[d.version]) throw new NewAppError(`kit/templates/${type}/template.json: ${key} "${d.name}" trỏ tới bản ghim "${d.version}" mà kit/templates/versions.json không có.`)
+    return `${d.name}@${versions[d.version]}`
+  })
+  if (template.deps.length) {
+    step('deps', 'Ghim bản thư viện chạy (React Router từ bản đã vá lỗ hổng)…')
+    const pkgs = pinned(template.deps, 'deps')
+    const [c, a] = cmds.addRun(pkgs)
+    const r = io.run(c, a, { cwd: pkgDir, timeoutMs: INSTALL_TIMEOUT_MS })
+    if (r.error || r.status !== 0) throw failure(r, `${pm} add`, `App đã tạo ở ${target}; chạy lại "${pm} add ${pkgs.join(' ')}" khi mạng ổn.`)
+  }
   if (template.devDeps.length) {
     step('devdeps', 'Thêm công cụ kiểm thử và máy kiểm (Playwright, axe, knip, size-limit…)…')
-    const pkgs = template.devDeps.map((d) => {
-      if (!versions[d.version]) throw new NewAppError(`kit/templates/${type}/template.json: devDeps "${d.name}" trỏ tới bản ghim "${d.version}" mà kit/templates/versions.json không có.`)
-      return `${d.name}@${versions[d.version]}`
-    })
+    const pkgs = pinned(template.devDeps, 'devDeps')
     const [c, a] = cmds.add(pkgs)
     const r = io.run(c, a, { cwd: pkgDir, timeoutMs: INSTALL_TIMEOUT_MS })
     if (r.error || r.status !== 0) throw failure(r, `${pm} add`, `App đã tạo ở ${target}; chạy lại "${pm} add -D ${pkgs.join(' ')}" khi mạng ổn.`)
@@ -672,6 +726,8 @@ export function create({ type, name, parent = '.', pm: wantPm, io: rawIo } = {})
     const r = io.run(c, a, { cwd: pkgDir, timeoutMs: INSTALL_TIMEOUT_MS })
     if (r.error || r.status !== 0) throw failure(r, `${pm} run build`, `App đã tạo ở ${target}; chạy lại "${pm} run build" trong ${slash(path.relative(parentAbs, pkgDir)) || name} để xem lỗi.`)
   }
+
+  for (const n of template.notes) notes.push(n)
 
   step('save', 'Lưu thành điểm "Tạo app"…')
   commitAll(io, target, 'Tạo app từ mẫu của kit')

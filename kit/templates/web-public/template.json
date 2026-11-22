@@ -1,0 +1,77 @@
+{
+  "$comment": "Mẫu webapp CÓ TRANG CÔNG KHAI (Google tìm thấy, Zalo/Facebook xem trước link đúng ảnh + tên): React Router v8 chế độ framework trên Cloudflare Workers (một Worker: trang dựng ở máy chủ + khu /admin sau đăng nhập), Tailwind v4, shadcn. Lệnh tạo chính hãng = create-cloudflare (cấu hình Workers là của Cloudflare, kit không đoán; nó tự cài thư viện nên install=false). Lớp phủ: code chuyển từ app/ sang src/ (move) để giữ src/features/* của kit; SEO mặc định (shared/seo: meta theo trang, canonical, OG, sitemap sinh từ route, robots, 404 thật); header bảo mật trong code Worker cho MỌI phản hồi (shared/security) + CSP có nonce (entry.server.tsx); e2e/seo.spec.ts cho máy kiểm seo-public. after = LỆNH SAU KHI TẠO, chạy sau lớp phủ: shadcn init -t react-router chỉ chạy được khi tsconfig đã có paths '~/*' (lớp phủ tsconfig.json) và code đã ở src/; cf-typegen sinh lại worker-configuration.d.ts theo wrangler.jsonc của lớp phủ (SITE_URL, CF_VERSION_METADATA). Kiểu của route (.react-router/types) do `react-router typegen` sinh, `react-router build` KHÔNG sinh: thiếu thì tsc-build và knip báo ./+types/* không thấy ⇒ bước after chạy typegen một lần, và scriptsSet.postinstall (create-cloudflare chỉ chạy wrangler types) thêm typegen để cài ở đâu (kể cả worktree mới) cũng có. deps = thư viện chạy ghim bản (React Router từ bản đã vá lỗ hổng, reactRouter trong versions.json); devDeps = công cụ máy kiểm + Playwright/axe (bản ghim ở versions.json) + ESLint (create-cloudflare không cài ESLint). node tối thiểu theo mẫu: versions.json node.byType. build = dựng một lần sau khi tạo để secret-build / size-limit có bản build (build/). Đọc bởi hooks/lib/new-app.mjs.",
+  "type": "web-public",
+  "label": "webapp có trang công khai",
+  "stack": "web",
+  "port": 5173,
+  "needs": [],
+  "generate": {
+    "runner": "pm-exec",
+    "package": "create-cloudflare",
+    "version": "createCloudflare",
+    "args": ["{{name}}", "--framework", "react-router", "--no-deploy", "--no-git", "--no-open", "--no-agents", "--no-auto-update", "--accept-defaults"]
+  },
+  "markers": ["package.json", "react-router.config.ts", "wrangler.jsonc"],
+  "pkgDir": ".",
+  "install": false,
+  "move": [{ "from": "app", "to": "src" }],
+  "remove": [
+    { "path": "src/welcome/welcome.tsx" },
+    { "path": "src/welcome/logo-dark.svg" },
+    { "path": "src/welcome/logo-light.svg" }
+  ],
+  "patch": [
+    { "file": "package.json", "pm": "npm", "set": { "overrides": { "minimatch": "^11.0.1" } } }
+  ],
+  "replace": [
+    "pnpm-workspace.yaml",
+    "react-router.config.ts",
+    "tsconfig.json",
+    "tsconfig.cloudflare.json",
+    "vite.config.ts",
+    "wrangler.jsonc",
+    "workers/app.ts",
+    "src/root.tsx",
+    "src/routes.ts",
+    "src/routes/home.tsx"
+  ],
+  "after": [
+    { "say": "Cài shadcn (nút, ô nhập…) lên dự án vừa tạo…", "runner": "pm-exec", "package": "shadcn", "args": ["init", "-d", "-t", "react-router", "-y"] },
+    { "say": "Sinh lại kiểu của Worker theo cấu hình (wrangler types)…", "runner": "pm-run", "script": "cf-typegen" },
+    { "say": "Sinh kiểu của từng route (react-router typegen)…", "runner": "pm-bin", "args": ["react-router", "typegen"] }
+  ],
+  "deps": [{ "name": "react-router", "version": "reactRouter" }],
+  "devDeps": [
+    { "name": "@react-router/dev", "version": "reactRouter" },
+    { "name": "@playwright/test", "version": "playwright" },
+    { "name": "@axe-core/playwright", "version": "axe" },
+    { "name": "@shadcn/lint", "version": "shadcnLint" },
+    { "name": "eslint", "version": "eslint" },
+    { "name": "@eslint/js", "version": "eslintJs" },
+    { "name": "typescript-eslint", "version": "tsEslint" },
+    { "name": "eslint-plugin-react-hooks", "version": "reactHooks" },
+    { "name": "globals", "version": "globals" },
+    { "name": "knip", "version": "knip" },
+    { "name": "jscpd", "version": "jscpd" },
+    { "name": "size-limit", "version": "sizeLimit" },
+    { "name": "@size-limit/file", "version": "sizeLimit" },
+    { "name": "dependency-cruiser", "version": "depcruise" }
+  ],
+  "browser": true,
+  "build": true,
+  "scripts": { "test:e2e": "playwright test" },
+  "scriptsSet": { "postinstall": "wrangler types && react-router typegen" },
+  "gitignore": [".env", ".env.*", "!.env.example", "playwright-report/", "test-results/"],
+  "next": { "dev": "{{PM_DEV}}", "url": "http://localhost:5173" },
+  "notes": [
+    "Trước khi phát hành: đặt SITE_URL thật (tên miền của bạn) ở wrangler.jsonc, mục vars; địa chỉ mẫu *.example.com làm canonical và sitemap sai.",
+    "public/og-default.png là ảnh chia sẻ tạm (Zalo/Facebook): thay bằng ảnh thương hiệu 1200x630."
+  ],
+  "archProblem": "Webapp có trang công khai mới tạo (React Router trên Cloudflare Workers): trang đầu (S-01) còn trống, chưa có dữ liệu, tính năng hay khu đăng nhập nào. Thay bằng bài toán thật của app khi viết SPEC.",
+  "archDescs": {
+    "src/features/home": "Màn đầu (S-01, giữ chỗ): chỉ hiện tên app; thay bằng màn thật khi có SPEC; KHÔNG gọi dịch vụ ngoài từ ui, KHÔNG import tính năng khác.",
+    "src/routes": "Route (trang công khai + resource route như sitemap.xml, robots.txt): file mỏng chỉ khai meta/loader rồi ráp màn từ features và shared; KHÔNG chứa logic nghiệp vụ.",
+    "src/components": "Thành phần giao diện của shadcn (nút, ô nhập…); KHÔNG chứa logic nghiệp vụ.",
+    "src/lib": "Hàm tiện ích của shadcn (cn); KHÔNG chứa logic nghiệp vụ."
+  }
+}

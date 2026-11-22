@@ -57,6 +57,12 @@
     { "say": "thiết kế hệ thống cho app đặt lịch này giúp tôi, về sau đông người có scale dễ không", "want": "flow-system-design", "old": "flow-architecture" },
     { "say": "luồng đăng ký đăng nhập nên thiết kế thế nào để né spam ngay từ đầu, đừng để bị spam rồi mới sửa", "want": "flow-system-design", "old": "flow-security" },
     { "say": "xem giúp thiết kế hệ thống hiện tại có chỗ nào sập khi đông người không", "want": "flow-system-design", "old": "flow-scale" },
+    { "say": "hỏi tôi về business của app này đi, khách là ai, thu tiền ra sao, rồi mới làm tiếp", "want": "flow-business", "old": "flow-spec" },
+    { "say": "app này tôi làm từ trước, chưa ghi lại gì về khách và cách thu tiền, hỏi tôi một buổi cho rõ", "want": "flow-business", "old": "flow-spec" },
+    { "say": "tôi đổi ý: app bỏ miễn phí, chuyển sang thuê bao tháng và nhắm khách là chuỗi tiệm, cập nhật bản business giúp", "want": "flow-business", "old": "flow-impact" },
+    { "say": "chọn công nghệ nền cho app đặt lịch này giúp tôi, gói nhẹ hay gói chắc, kèm phí mỗi tháng", "want": "flow-stack", "old": "flow-system-design" },
+    { "say": "đổi cơ sở dữ liệu của app này sang loại khác, nói tôi nghe lý do và chịu được bao nhiêu người", "want": "flow-stack", "old": "flow-system-design" },
+    { "say": "làm cho tôi trang web giới thiệu tiệm tóc, lên được Google và gửi link Zalo hiện đúng ảnh và tên, chưa có gì cả", "want": "flow-new-app", "old": "flow-new-app" },
     { "say": "viết hàm cộng hai số trong file này", "want": "none", "old": "none" },
     { "say": "cảm ơn bạn", "want": "none", "old": "none" },
     { "say": "đổi chữ nút Lưu thành Lưu đơn", "want": "none", "old": "none" }

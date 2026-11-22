@@ -97,5 +97,5 @@ Queue và webhook giao **ít nhất một lần** ⇒ cùng một tin có thể 
 
 - Xác minh chữ ký trên **thân thô** của request, rồi trả 2xx **ngay**; việc nặng đẩy vào queue.
 - Lưu ID sự kiện đã xử lý, bỏ qua trùng.
-- Stripe thử lại tới vài ngày; Lemon Squeezy chỉ thử lại vài phút ⇒ cần job đối soát định kỳ (cron) so với API nhà cung cấp để bắt sự kiện bị lỡ (suy luận).
+- Lịch gửi lại khác nhau từng nhà (Stripe tới vài ngày, SePay khoảng nửa giờ; tra tài liệu nhà đã chọn) ⇒ cần job đối soát định kỳ (cron) so với API nhà cung cấp để bắt sự kiện bị lỡ (suy luận).
 - Đợt dồn đầu tháng (gia hạn hàng loạt) ⇒ queue san tải.

@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // new-app: tạo app mới từ số 0 (skill flow-new-app). Thư viện: lib/new-app.mjs. Mẫu: kit/templates/<loại>/ (template.json + overlay/**), bản ghim: kit/templates/versions.json.
-//   doctor --type web|desktop|extension [--pm pnpm|npm] [--json]
-//          kiểm máy đủ phần mềm chưa (Node, Git, pnpm/npm; app máy tính: Go, Wails, WebView2/Xcode; và công cụ máy kiểm flow-check coi là bắt buộc theo kit/checkers.json: osv-scanner, ast-grep…).
+//   doctor --type web|desktop|extension|web-public [--pm pnpm|npm] [--json]
+//          kiểm máy đủ phần mềm chưa (Node — bản tối thiểu theo loại app, web-public cần Node mới hơn ba loại kia —, Git, pnpm/npm; app máy tính: Go, Wails, WebView2/Xcode; và công cụ máy kiểm flow-check coi là bắt buộc theo kit/checkers.json: osv-scanner, ast-grep…).
 //          KHÔNG cài gì; thiếu gì thì in đúng lệnh cài của hệ điều hành đang chạy (Windows hoặc Mac). Có phần mềm nhưng KHÔNG CHẠY ĐƯỢC (EPERM/EACCES: bị chặn quyền/sandbox) ⇒ báo riêng, không bảo là chưa có.
 //   create --type <loại> --name <tên> [--dir <thư mục cha>] [--pm pnpm|npm] [--json]
-//          tạo <thư mục cha>/<tên> bằng lệnh chính hãng ghim bản + lớp phủ của kit, bật git và điểm lưu "Tạo app". Thư mục đích đã có đồ ⇒ từ chối, không đè.
+//          tạo <thư mục cha>/<tên> bằng lệnh chính hãng ghim bản + lớp phủ của kit + (nếu mẫu có) lệnh sau khi tạo, bật git và điểm lưu "Tạo app". Thư mục đích đã có đồ ⇒ từ chối, không đè.
+//          web-public = webapp có trang công khai (React Router trên Cloudflare Workers; Google và Zalo/Facebook đọc được trang).
 // Exit: 0 xong · 1 lỗi hoặc từ chối (mạng, quyền, ổ đĩa, thư mục đã có đồ…) · 2 dùng sai · 3 máy thiếu phần mềm (doctor/create).
 import fs from 'node:fs'
 import path from 'node:path'
@@ -12,7 +13,8 @@ import { fileURLToPath } from 'node:url'
 import { NewAppError, TYPES, create, doctor, installLines, loadTemplate } from './lib/new-app.mjs'
 
 const USAGE = `dùng: new-app.mjs <lệnh> [...]
-  doctor --type web|desktop|extension [--pm pnpm|npm] [--json]       kiểm máy, in lệnh cài nếu thiếu (không cài gì)
+  doctor --type web|desktop|extension|web-public [--pm pnpm|npm] [--json]
+                                                                      kiểm máy, in lệnh cài nếu thiếu (không cài gì)
   create --type <loại> --name <tên> [--dir <thư mục cha>] [--pm pnpm|npm] [--json]
                                                                       tạo app mới (tên: chữ thường không dấu, số, gạch ngang)
 exit: 0 xong · 1 lỗi/từ chối · 2 dùng sai · 3 thiếu phần mềm`

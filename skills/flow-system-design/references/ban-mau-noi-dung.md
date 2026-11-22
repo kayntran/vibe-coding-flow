@@ -2,6 +2,8 @@
 
 Dùng ở bước 4 của `flow-system-design`.
 
+**Câu business trong "Hỏi user" không hỏi user**: câu nào `docs/BUSINESS.md` đã trả lời (khách, nước, giá, gói, hạn mức, ngân sách, giờ, giọng) thì lấy từ bản; chưa có hoặc bản chưa nói thì tự suy theo "Ranh giới tự suy" của `flow-business`, ghi `(AI suy từ B-xx)`. Chỉ hỏi chi tiết riêng của tính năng.
+
 ## Mục lục
 
 - Tải file/ảnh lên
@@ -51,7 +53,7 @@ Nhận ra khi: "bình luận", "đánh giá sao", "review sản phẩm", "góp �
 Hỏi user (lúc viết SPEC):
 - Ai được bình luận/đánh giá? → khuyên: chỉ người đã đăng nhập; đánh giá sản phẩm chỉ người đã mua.
 - Mỗi người đánh giá một món mấy lần? → khuyên: một lần, sửa được; sửa thì thay điểm cũ chứ không cộng thêm.
-- Bình luận hiện ngay hay chờ duyệt? → khuyên: hiện ngay, có nút báo vi phạm; tài khoản tạo chưa tới 1 ngày mà có link thì chờ duyệt.
+- Bình luận hiện ngay hay chờ duyệt? (lấy từ BUSINESS.md B-PL14; chưa có thì tự suy) → khuyên: hiện ngay, có nút báo vi phạm; tài khoản tạo chưa tới 1 ngày mà có link thì chờ duyệt.
 - Trả lời lồng mấy tầng? → khuyên: một tầng (bình luận + trả lời), không lồng sâu.
 
 | Mặt | Làm ngay | Chừa chỗ | Chưa làm (cần khi…) |
@@ -159,7 +161,7 @@ Hay sai:
 Nhận ra khi: "báo cáo", "report", "kiểm duyệt", "ẩn nội dung xấu", "duyệt bài", "khoá tài khoản vi phạm", "nội dung không phù hợp".
 
 Hỏi user (lúc viết SPEC):
-- Ai xử lý báo cáo, trong bao lâu? → khuyên: bạn (admin) xem hàng chờ mỗi ngày; nội dung bị từ 3 người khác nhau báo thì tự ẩn chờ xem.
+- Ai xử lý báo cáo, trong bao lâu? (lấy từ BUSINESS.md B-PL14, B-VH1; chưa có thì tự suy) → khuyên: bạn (admin) xem hàng chờ mỗi ngày; nội dung bị từ 3 người khác nhau báo thì tự ẩn chờ xem.
 - Bị ẩn/khoá có báo người đăng và cho khiếu nại không? → khuyên: có báo kèm lý do, cho khiếu nại một lần.
 - Nội dung đã gỡ giữ lại bao lâu? → khuyên: giữ bản ẩn 90 ngày (để xử lý khiếu nại, làm bằng chứng) rồi xoá hẳn.
 
@@ -186,7 +188,7 @@ Hay sai:
 Nhận ra khi: "trang hồ sơ công khai", "chia sẻ lên Facebook/Zalo hiện ảnh", "Google tìm thấy", "link ngắn", "trang giới thiệu", "trang bán hàng".
 
 Hỏi user (lúc viết SPEC):
-- Trang nào được Google thấy? → khuyên: chỉ trang người dùng bật công khai; mặc định không.
+- Trang nào được Google thấy? (lấy từ BUSINESS.md B-KN2, B-KN7; chưa có thì tự suy) → khuyên: chỉ trang người dùng bật công khai; mặc định không.
 - Link ngắn có hết hạn, có xem số lượt bấm? → khuyên: không hết hạn, có đếm lượt bấm theo ngày, chủ xoá được.
 - Ảnh hiện khi dán link (ảnh chia sẻ, thẻ OG) tự tạo hay người dùng chọn? → khuyên: tự tạo từ tiêu đề + ảnh đại diện, người dùng thay được.
 

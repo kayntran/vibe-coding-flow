@@ -17,6 +17,10 @@ Hai chế độ dùng chung một bộ luật: **Làm** khi đang viết giao di
 5. Mặc định trong `references/defaults.md`, chỉ khi các nguồn trên không nói. Bảng đó là giá trị khởi đầu cho bộ token 3 tầng
    (`references/tokens.md`): có ngay từ đầu, đủ 8 nhóm, trạng thái, sáng/tối, độ dày.
 
+**Chữ trên giao diện** (nhãn, thông báo, màn trống, lỗi, email): giọng, cách xưng hô và từ cấm lấy từ mục "Từ điển và giọng nói" của
+`docs/BUSINESS.md`; dùng từ cấm (`_Tránh_`) là lỗi "Nên sửa". Khung và thư viện giao diện theo `docs/STACK.md`, không đổi hay thêm khi
+user chưa bảo. Không hỏi user câu business (khách, giá, giọng): bản chưa nói ⇒ theo `ui-style.md`, ghi `(AI suy từ B-xx)`.
+
 ## Chế độ Làm
 
 0. Chưa có bộ token 3 tầng (`references/tokens.md`) ⇒ dựng trước, rồi mới làm màn. Thành phần bấm được có đủ token trạng thái.
