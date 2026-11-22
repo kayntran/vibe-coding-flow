@@ -13,8 +13,7 @@ node ~/.claude/hooks/review-ext.mjs --model grok|flash|codex|opus --wt "<WT>" --
 
 Exit 0 xong · 1 lỗi/CLI chưa sẵn sàng/hết giờ ⇒ dự phòng (xem SKILL.md) · 3 xem SKILL.md. Codex >30 phút không ra file ⇒ dự phòng.
 
-**Paseo:** đang ở Paseo, trừ Windows ⇒ lượt Codex chạy thành phiên Paseo trên bản sao đã lọc (`review-ext.mjs --prepare` … `--collect`,
-skill `flow-paseo`). Windows ⇒ `review-ext.mjs --model codex` như lệnh trên [8338].
+**Paseo:** đang ở Paseo vẫn chạy đúng lệnh trên (hiện ở ô "background tasks"), không tạo phiên Paseo [5wud].
 
 **Gửi sạch:** bỏ file bí mật/dữ liệu riêng khỏi diff và workspace, quét khoá cả dòng đã xoá, reviewer đọc thư mục tạm, không nhận
 biến môi trường dạng khoá. Chỉ gửi code, không gửi dữ liệu thật và khoá.

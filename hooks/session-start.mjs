@@ -427,8 +427,8 @@ function hiddenNotice(base) {
 
 // Chạy trong app Paseo (Paseo đặt PASEO_AGENT_ID cho mọi phiên, cả Claude lẫn Codex) ⇒ dặn một lần dùng đồ của Paseo (chốt 3ak3vbv0).
 // Ngoài Paseo không in gì: kit chạy y như cũ.
-const PASEO_NOTICE = 'Đang chạy trong Paseo: giao việc cho AI phụ, soát code bằng model khác, nhắn/bàn giao phiên và cho user xem app ' +
-  'đều làm theo skill `flow-paseo` (tool mcp__paseo__*: phiên AI phụ hiện trên Paseo, thư mục làm việc hiện ở thanh bên). Ngoài các việc đó làm như thường.'
+const PASEO_NOTICE = 'Đang chạy trong Paseo: nhắn/bàn giao phiên và cho user xem app làm theo skill `flow-paseo` (tool mcp__paseo__*). ' +
+  'Giao việc cho AI phụ, soát code bằng model khác làm như thường (chạy ngầm, hiện ở ô "background tasks"), không tạo phiên Paseo cho AI phụ.'
 function paseoNotice() {
   return process.env.PASEO_AGENT_ID ? PASEO_NOTICE : ''
 }

@@ -6,8 +6,8 @@ user-invocable: false
 
 # Đội hình & giao việc
 
-**Đang chạy trong Paseo** (hook mở phiên báo, hoặc `node ~/.claude/hooks/paseo.mjs on` ra "có") ⇒ chọn vai như dưới, nhưng
-giao bằng phiên Paseo theo skill `flow-paseo` thay cho Agent tool và CLI ngoài.
+**Đang chạy trong Paseo** ⇒ giao y như dưới (Agent tool / CLI chạy `run_in_background`, hiện ở ô "background tasks" dưới khung
+chat); không tạo phiên hay workspace Paseo cho worker [5wud]. Nhắn, bàn giao, cho user xem app ⇒ skill `flow-paseo`.
 
 ## Chọn worker
 

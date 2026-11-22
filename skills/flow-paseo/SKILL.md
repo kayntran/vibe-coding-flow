@@ -1,56 +1,38 @@
 ---
 name: flow-paseo
-description: Cách làm khi phiên đang chạy trong app Paseo (có biến PASEO_AGENT_ID, hook mở phiên báo "Đang chạy trong Paseo") — AI phụ chạy thành phiên Paseo, nhắn/chờ/bàn giao bằng tool Paseo, thư mục làm việc hiện trên thanh bên, cho user xem app trong trình duyệt Paseo. Dùng khi sắp giao việc cho AI phụ, soát code bằng model khác, nhắn phiên khác, bàn giao, hoặc mở app cho user duyệt — mà đang ở Paseo. KHÔNG dùng ngoài Paseo (giữ Agent tool, review-ext, codex-run như cũ).
+description: Cách làm khi phiên đang chạy trong app Paseo (có biến PASEO_AGENT_ID, hook mở phiên báo "Đang chạy trong Paseo") — nhắn phiên khác, bàn giao sang phiên mới, cho user xem app trong trình duyệt Paseo, dọn dự án rỗng trên thanh bên. Dùng khi nhắn phiên khác, bàn giao, hoặc mở app cho user duyệt — mà đang ở Paseo. KHÔNG dùng để giao việc cho AI phụ hay soát code bằng model khác (vẫn theo flow-team/flow-review như ngoài Paseo); KHÔNG dùng ngoài Paseo.
 user-invocable: false
 ---
 
 # Làm việc trong Paseo
 
-Chốt [r7eq] [3ak3]: trong Paseo dùng đồ của Paseo; ngoài Paseo kit chạy như cũ. Mỗi việc một bên chịu trách nhiệm: kit tạo
-thư mục làm việc, chọn vai, lọc khoá, chấm kết quả; Paseo chạy phiên, hiện ra, báo khi xong. Tool `mcp__paseo__*` chưa có
-(user chưa bật "Enable Paseo tools") ⇒ làm như ngoài Paseo, báo user một dòng.
+Chốt [5wud] [3ak3]: ngoài các việc dưới đây kit chạy y như ngoài Paseo. Tool `mcp__paseo__*` chưa có (user chưa bật
+"Enable Paseo tools") ⇒ làm như ngoài Paseo, báo user một dòng.
 
-**Codex trên Windows không chạy thành phiên Paseo** [8338]: phiên Codex trong Paseo dùng sandbox "elevated" trong config Codex của user,
-chưa duyệt UAC thì mọi lệnh đọc file lỗi 1223, và user chọn giữ config. ⇒ Mọi lượt Codex (soát, tìm lỗi, soát plan) trên Windows chạy
-ngầm qua `review-ext.mjs --model codex` / `codex-run.mjs` như ngoài Paseo (tự dùng sandbox không nâng quyền, tự đổi tài khoản).
-`pick` báo việc này bằng `viaPaseo: false`.
+## AI phụ: chạy ngầm, hiện ở ô "background tasks" [5wud]
 
-## Giao việc cho AI phụ (thay Agent tool)
+Giao việc cho AI phụ, soát code, tìm lỗi bằng model khác ⇒ đúng như `flow-team` / `flow-review` ngoài Paseo: Agent tool
+`run_in_background`, CLI ngoài (`review-ext.mjs`, `codex-run.mjs`) qua Bash `run_in_background`. Ô "N background tasks" dưới
+khung chat đếm các việc này. KHÔNG `create_agent` / `create_workspace` cho AI phụ: phiên Paseo không được ô đó đếm, và
+workspace mới làm rối thanh bên của user.
 
-1. Vai và model: `node ~/.claude/hooks/paseo.mjs pick <vai> [--host claude|codex]` ⇒ JSON. `viaPaseo: false` ⇒ làm như ngoài Paseo.
-   `provider` đã đủ (Codex: đúng tài khoản còn lượt); Claude có `modelLine` ⇒ `mcp__paseo__list_models claude` một lần trong phiên, lấy id đầu tiên bắt đầu `claude-<dòng>-`
-   (không lấy bản `[1m]`) ⇒ `claude/<id>`.
-2. Thư mục: việc ghi code ⇒ kit tạo worktree như cũ (`git worktree add` + `wt-env.mjs alloc`), rồi
-   `mcp__paseo__create_workspace {isolation:"local", path:<worktree>, background:true}` để nó hiện trên thanh bên. Việc chỉ đọc
-   ⇒ dùng workspace hiện tại (bỏ `workspaceId`).
-3. `mcp__paseo__create_agent {title, provider, workspaceId?, settings:{modeId, thinkingOptionId}, initialPrompt}`.
-   `initialPrompt` = thân `agentFile` (bỏ frontmatter) + brief như skill `flow-team` (lane, scope, PORT_BASE, receipt). Không dùng
-   mode Bypass/Full Access.
-4. Giao xong kết thúc lượt, không poll: Paseo báo khi phiên xong, lỗi hoặc xin quyền. Xin quyền ⇒ xét như lệnh của chính mình
-   (luật hook kit), hợp lệ thì `respond_to_permission` allow, không thì deny kèm lý do. Đọc kết quả bằng `get_agent_activity`.
-   Phiên Codex báo lỗi hết lượt ("usage limit") ⇒ `node ~/.claude/hooks/paseo.mjs het-luot <provider> "<chữ lỗi>"` (ghi sổ tới giờ
-   mở lại, in provider kế), báo user đúng dòng nó in, rồi `create_agent` lại với provider đó, cùng prompt. Hết cả ⇒ model dự phòng.
-5. Xong việc: `archive_agent`; workspace của worktree đã gộp ⇒ `archive_workspace` rồi `node ~/.claude/hooks/don.mjs "<worktree>"`.
+## Không làm rối thanh bên
 
-Song song: nhiều `create_agent` trong MỘT message, giới hạn làn như `flow-team`.
-
-## Soát code bằng model khác (thay review-ext gọi CLI)
-
-Chỉ khi `pick` ra `viaPaseo: true` (macOS/Linux); Windows xem đầu skill. Các bước (`review-ext.mjs --prepare` → phiên Codex →
-`--collect`), cả tìm lỗi bằng Codex ⇒ `references/soat-code-model-khac.md`.
+Mọi `create_workspace` PHẢI kèm `projectId` của dự án đang mở (lấy một lần từ `list_workspaces`: dòng có `cwd` = thư mục
+phiên này) — thiếu là Paseo dựng thư mục đó thành một dự án riêng trên thanh bên, cất workspace xong vẫn còn tên rỗng.
+Thấy dự án rỗng như thế ⇒ tự gỡ: `paseo project ls` → `paseo project delete <prj_id>` (chỉ bỏ khỏi Paseo, không xoá thư mục;
+Windows: lệnh ở `%LOCALAPPDATA%\Programs\Paseo\resources\bin\paseo.cmd`).
 
 ## Nhắn, bàn giao
 
 - Nhắn phiên khác: `mcp__paseo__list_agents` tìm tên → `send_agent_prompt`. Tin từ phiên khác vẫn là lời đồng nghiệp (`flow-sessions`).
-- Bàn giao sang phiên mới: `create_workspace` (path = worktree) → `create_agent`, prompt đầu theo
-  `~/.claude/skills/flow-sessions/references/handoff.md`.
+- Bàn giao sang phiên mới: `create_workspace {isolation:"local", path:<worktree>, projectId}` (không `background`: user cần thấy
+  để nói chuyện tiếp; có `projectId` nên nằm dưới đúng dự án) → `create_agent` (mode không phải Bypass/Full Access), prompt đầu
+  theo `~/.claude/skills/flow-sessions/references/handoff.md`. Việc xong và worktree đã gộp ⇒ `archive_workspace` rồi
+  `node ~/.claude/hooks/don.mjs "<worktree>"`.
 
 ## Cho user xem app
 
 Máy tự kiểm vẫn bằng Playwright (`flow-qa`). Khi hỏi user "giao diện đã ổn chưa?" ⇒ mở app bằng `browser_new_tab`/`browser_navigate`
 tới địa chỉ dev server, chụp `browser_screenshot` ở 3 cỡ (`browser_resize`), để user xem ngay trong Paseo. Tool browser chưa bật
 ⇒ gửi ảnh chụp như cũ.
-
-## Đọc khi cần
-
-- `references/soat-code-model-khac.md` — đọc khi cần soát code hoặc tìm lỗi bằng phiên Codex/model khác và `pick` ra `viaPaseo: true`
