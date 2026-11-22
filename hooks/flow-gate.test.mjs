@@ -579,6 +579,43 @@ describe('stamp & status', () => {
     assert.equal(cli(fx2, fx2.wt, 'stamp', 'qa', write(fx2.root, 'q.md', 'ok\n')).status, 0)
   })
 
+  test('file giao diện CHỈ nằm dưới kit/templates/** (màn giàn giáo của mẫu tạo app) ⇒ không đòi dòng "User duyệt giao diện" [wy6x]', () => {
+    const fx = fixture()
+    commit(fx.wt, 'kit/templates/web/overlay/src/App.tsx', 'export {}\n', 'mẫu tsx')
+    commit(fx.wt, 'kit/templates/desktop/overlay/frontend/src/style.css', 'a{}\n', 'mẫu css')
+    commit(fx.wt, 'kit/templates/web/overlay/index.html', '<html></html>\n', 'mẫu html')
+    assert.match(cli(fx, fx.wt, 'status').stdout, /uiTouched: false/)
+    assert.equal(cli(fx, fx.wt, 'stamp', 'qa', write(fx.root, 'q.md', 'QA đạt hết\n')).status, 0) // không có dòng duyệt vẫn đóng dấu được
+    assert.match(cli(fx, fx.wt, 'status').stdout, /qa: có/)
+  })
+
+  test('diff có file giao diện ở chỗ KHÁC ngoài kit/templates/** (dù có cả file mẫu) ⇒ vẫn đòi dòng duyệt như cũ; tên gần giống kit/templates/ không được miễn', () => {
+    const fx = fixture()
+    commit(fx.wt, 'kit/templates/web/overlay/src/App.tsx', 'export {}\n', 'mẫu')
+    commit(fx.wt, 'src/Page.tsx', 'export {}\n', 'app')
+    assert.match(cli(fx, fx.wt, 'status').stdout, /uiTouched: true/)
+    const thieu = cli(fx, fx.wt, 'stamp', 'qa', write(fx.root, 'q1.md', 'QA đạt hết\n'))
+    assert.equal(thieu.status, 1)
+    assert.match(thieu.stderr, /duyệt giao diện/)
+    assert.equal(cli(fx, fx.wt, 'stamp', 'qa', write(fx.root, 'q2.md', 'QA đạt\nUser duyệt giao diện: có\n')).status, 0)
+    for (const [i, rel] of ['kit/templatesX/App.tsx', 'kit/template/App.tsx', 'docs/kit/templates/App.tsx', 'kit/other/App.tsx', 'templates/App.tsx'].entries()) {
+      const fy = fixture()
+      commit(fy.wt, rel, 'export {}\n', 'gần giống')
+      assert.match(cli(fy, fy.wt, 'status').stdout, /uiTouched: true/, `${i}: ${rel}`)
+      assert.equal(cli(fy, fy.wt, 'stamp', 'qa', write(fy.root, 'q.md', 'QA đạt hết\n')).status, 1, rel)
+    }
+  })
+
+  test('đổi tên file giao diện từ ngoài vào kit/templates/ không lọt qua phần miễn (tên cũ vẫn tính là file giao diện)', () => {
+    const fx = fixture()
+    commit(fx.main, 'src/Page.tsx', 'export const Page = () => null\n', 'app có màn')
+    git(fx.wt, 'rebase', 'main')
+    fs.mkdirSync(path.join(fx.wt, 'kit', 'templates', 'web'), { recursive: true })
+    git(fx.wt, 'mv', 'src/Page.tsx', 'kit/templates/web/Page.tsx')
+    git(fx.wt, 'commit', '-m', 'chuyển màn vào mẫu')
+    assert.match(cli(fx, fx.wt, 'status').stdout, /uiTouched: true/)
+  })
+
   test('cổng gộp kiểm lại dấu QA đã lưu: diff có UI mà file dấu thiếu dòng duyệt (vd đóng dấu lúc uiPattern tạm loại UI) ⇒ coi như thiếu qa', () => {
     const fx = fixture()
     commit(fx.wt, 'Page.vue', '<template/>\n', 'ui')

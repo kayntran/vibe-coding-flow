@@ -31,3 +31,5 @@ ignores:
   - '**/*.test.*'
   - '**/*.spec.*'
   - '**/*.stories.*'
+  # Thành phần do shadcn sinh ra (components/ui) viết theo thiết kế riêng của shadcn (vd text-[0.8rem]): chỉ luật giao diện này bỏ qua, luật SAST (kit/rules/sast) vẫn quét thư mục đó.
+  - '**/components/ui/**'

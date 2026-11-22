@@ -8,7 +8,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { main as mainReal } from './new-app.mjs'
-import { KIT_DIR, TYPES, loadTemplate, loadVersions } from './lib/new-app.mjs'
+import { KIT_DIR, TYPES, applyOverlay, goAdvice, loadTemplate, loadVersions } from './lib/new-app.mjs'
 
 // doctor tìm công cụ của máy kiểm (osv-scanner, ast-grep…) bằng findTool của flow-check trên máy THẬT; test mặc định coi mọi công cụ là "có" (kết quả không phụ thuộc máy chạy test).
 const main = (argv, io = {}) => mainReal(argv, { which: (name) => `/fake/bin/${name}`, ...io })
@@ -332,7 +332,8 @@ describe('web-public: create (lệnh ngoài giả)', () => {
     const has = (rel) => fs.existsSync(path.join(dir, rel))
     const read = (rel) => fs.readFileSync(path.join(dir, rel), 'utf8')
     assert.ok(!has('app') && !has('src/welcome'), 'app/ đã chuyển, welcome mẫu đã gỡ')
-    for (const f of ['src/root.tsx', 'src/routes.ts', 'src/routes/home.tsx', 'src/routes/sitemap.xml.ts', 'src/routes/robots.txt.ts', 'src/entry.server.tsx', 'src/shared/server-context.ts', 'src/shared/security/headers.ts', 'src/shared/seo/seo-meta.ts', 'src/shared/seo/sitemap.ts', 'src/features/home/ui/home-screen.tsx', 'workers/app.ts', 'wrangler.jsonc', 'react-router.config.ts', 'e2e/seo.spec.ts', 'e2e/first-screen.spec.ts', 'playwright.config.ts', 'AI_RULES.md', 'public/_headers', 'pnpm-workspace.yaml', '.ignore']) assert.ok(has(f), `thiếu ${f}`)
+    for (const f of ['src/root.tsx', 'src/routes.ts', 'src/routes/home.tsx', 'src/routes/sitemap.xml.ts', 'src/routes/robots.txt.ts', 'src/entry.server.tsx', 'src/shared/server-context.ts', 'src/shared/security/headers.ts', 'src/shared/seo/seo-meta.ts', 'src/shared/seo/sitemap.ts', 'src/features/home/ui/home-screen.tsx', 'workers/app.ts', 'wrangler.jsonc', 'react-router.config.ts', 'e2e/seo.spec.ts', 'e2e/first-screen.spec.ts', 'playwright.config.ts', 'AI_RULES.md', 'public/_headers', 'pnpm-workspace.yaml']) assert.ok(has(f), `thiếu ${f}`)
+    assert.ok(!has('.ignore'), '.ignore che file khỏi quét bảo mật (ast-grep đọc nó cho cả luật SAST): mẫu không được có')
     assert.doesNotMatch(read('src/root.tsx'), /do create-cloudflare sinh/, 'root.tsx là bản của kit')
     assert.match(read('react-router.config.ts'), /appDirectory: "src"/)
     assert.match(read('wrangler.jsonc'), /"name": "cua-hang"/)
@@ -398,5 +399,196 @@ describe('web-public: create (lệnh ngoài giả)', () => {
       const t = loadTemplate(type)
       assert.deepEqual([t.after, t.deps, t.notes], [[], [], []], type)
     }
+  })
+})
+
+// ---------- mẫu cũ (web, desktop, extension): qua flow-check ngay sau khi tạo, không đỏ sẵn ----------
+
+const MINIMATCH_PATCHED = [11, 0, 1] // minimatch <= 10.2.6 có lỗ hổng DoS GHSA-g3hv-75wg-m249 (công bố 2026-10-30), vá ở 11.0.1
+// Dòng ép minimatch trong pnpm-workspace.yaml (bỏ dòng chú thích) → [khoá, khoảng bản] | null
+const yamlMinimatch = (yaml) => {
+  const m = /^\s+(minimatch(?:@[^:\s]+)?):\s*(\S+)\s*$/m.exec(yaml.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n'))
+  return m ? [m[1], m[2]] : null
+}
+const atLeast = (v, min) => v[0] - min[0] || v[1] - min[1] || v[2] - min[2]
+
+// Phủ lớp phủ THẬT của mẫu lên một thư mục app giả đã có file như lệnh tạo chính hãng sinh ra → hàm đọc file của app.
+function overlayOn(type, pm, files) {
+  const appDir = mk()
+  for (const [rel, text] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(appDir, rel)), { recursive: true })
+    fs.writeFileSync(path.join(appDir, rel), text)
+  }
+  applyOverlay({ template: loadTemplate(type), appDir, tokens: { PM: pm, PM_RUN: pm, PM_DEV: pm === 'pnpm' ? 'pnpm dev' : 'npm run dev --', APP_NAME: 'mau-thu', PORT: '5173' } })
+  return (rel) => fs.readFileSync(path.join(appDir, rel), 'utf8')
+}
+const SHADCN_WORKSPACE = 'packages: []\n\nallowBuilds:\n  esbuild: true\n  msw: false\n' // đúng như `shadcn init` ghi
+const PKG = '{\n  "name": "x",\n  "scripts": {}\n}\n'
+
+describe('mẫu cũ: minimatch bản vá (osv-scanner) + ui-token không soát thành phần shadcn', () => {
+  test('web: pnpm-workspace.yaml của kit ép minimatch bản vá mà vẫn giữ allowBuilds của `shadcn init`; npm thì ép qua package.json', () => {
+    const pnpm = overlayOn('web', 'pnpm', { 'package.json': PKG, 'pnpm-workspace.yaml': SHADCN_WORKSPACE })
+    const y = pnpm('pnpm-workspace.yaml')
+    assert.match(y, /^packages: \[\]$/m)
+    assert.match(y, /^allowBuilds:\n {2}esbuild: true\n {2}msw: false$/m, 'giữ allowBuilds của shadcn (thiếu ⇒ pnpm 11+ dừng cài ERR_PNPM_IGNORED_BUILDS)')
+    assert.match(y, /^overrides:\n {2}minimatch@\^10: \^11\.0\.1$/m)
+    assert.equal(JSON.parse(pnpm('package.json')).overrides, undefined, 'pnpm dùng pnpm-workspace.yaml')
+    const npm = overlayOn('web', 'npm', { 'package.json': PKG, 'pnpm-workspace.yaml': SHADCN_WORKSPACE })
+    assert.deepEqual(JSON.parse(npm('package.json')).overrides, { 'minimatch@^10': '^11.0.1' })
+  })
+
+  test('web, web-public: KHÔNG có file .ignore (ast-grep đọc nó cho cả luật SAST bắt buộc ⇒ che src/components/ui khỏi quét bảo mật); ui-token bỏ qua components/ui bằng `ignores` của chính luật', () => {
+    for (const type of ['web', 'web-public']) {
+      assert.ok(!fs.existsSync(path.join(loadTemplate(type).overlayDir, '.ignore')), `${type}: overlay không được có .ignore`)
+    }
+    const rule = fs.readFileSync(path.join(KIT_DIR, 'rules', 'ui', 'rules', 'ui-token-hardcoded.yml'), 'utf8')
+    assert.match(rule, /^ignores:\n(?:  .*\n)*? {2}- '\*\*\/components\/ui\/\*\*'$/m)
+  })
+
+  test('không overlay nào của kit/templates/*/overlay có file .ignore ở bất kỳ thư mục nào (nó che file khỏi quét bảo mật của ast-grep và ripgrep)', () => {
+    const found = []
+    const walkDir = (dir, rel = '') => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const r = rel ? `${rel}/${e.name}` : e.name
+        if (e.isDirectory()) walkDir(path.join(dir, e.name), r)
+        else if (e.name === '.ignore') found.push(r)
+      }
+    }
+    for (const t of fs.readdirSync(path.join(KIT_DIR, 'templates'), { withFileTypes: true }).filter((d) => d.isDirectory())) {
+      walkDir(path.join(KIT_DIR, 'templates', t.name, 'overlay'), `${t.name}/overlay`)
+    }
+    assert.deepEqual(found, [])
+  })
+
+  test('desktop: frontend/pnpm-workspace.yaml ép minimatch bản vá (giữ esbuild); npm thì ép qua frontend/package.json', () => {
+    const files = { 'wails.json': '{ "name": "x" }\n', 'frontend/package.json': PKG } // wails init không sinh pnpm-workspace.yaml: file này do lớp phủ thêm
+    const y = overlayOn('desktop', 'pnpm', files)('frontend/pnpm-workspace.yaml')
+    assert.match(y, /^allowBuilds:\n {2}esbuild: true$/m)
+    assert.match(y, /^overrides:\n {2}minimatch@\^10: \^11\.0\.1$/m)
+    const npm = overlayOn('desktop', 'npm', files)
+    assert.deepEqual(JSON.parse(npm('frontend/package.json')).overrides, { 'minimatch@^10': '^11.0.1' })
+    assert.equal(JSON.parse(npm('wails.json')).name, 'x', 'patch wails.json vẫn chạy')
+  })
+
+  test('extension: ép CẢ shell-quote (có sẵn) lẫn minimatch, ở pnpm-workspace.yaml và ở package.json cho npm (hai patch không đè nhau)', () => {
+    const y = overlayOn('extension', 'pnpm', { 'package.json': PKG })('pnpm-workspace.yaml') // wxt init không sinh pnpm-workspace.yaml: file này do lớp phủ thêm
+    assert.match(y, /^overrides:\n {2}shell-quote: \^1\.11\.0\n {2}minimatch@\^10: \^11\.0\.1$/m)
+    const npm = overlayOn('extension', 'npm', { 'package.json': PKG })
+    assert.deepEqual(JSON.parse(npm('package.json')).overrides, { 'shell-quote': '^1.11.0', 'minimatch@^10': '^11.0.1' })
+  })
+
+  test('cả 4 mẫu (kể cả web-public) ép minimatch từ bản đã vá trở lên, cả đường pnpm lẫn npm; ba mẫu cũ CHỈ ép dòng ^10 (ép hết làm web-ext lint sập)', () => {
+    for (const type of TYPES) {
+      const t = loadTemplate(type)
+      const ws = t.pkgDir === '.' ? 'pnpm-workspace.yaml' : `${t.pkgDir}/pnpm-workspace.yaml`
+      const [sel, range] = yamlMinimatch(fs.readFileSync(path.join(t.overlayDir, ...ws.split('/')), 'utf8')) ?? []
+      const [key, val] = Object.entries(t.patch.find((p) => p.pm === 'npm' && Object.keys(p.set.overrides ?? {}).some((k) => k.startsWith('minimatch')))?.set.overrides ?? {}).find(([k]) => k.startsWith('minimatch')) ?? []
+      assert.ok(t.replace.includes(ws) || type !== 'web', `${type}: pnpm-workspace.yaml của lệnh tạo phải nằm trong replace`)
+      for (const [from, r] of [['pnpm-workspace.yaml', range], ['patch npm', val]]) {
+        const v = /^\^(\d+)\.(\d+)\.(\d+)$/.exec(r ?? '')?.slice(1).map(Number)
+        assert.ok(v && atLeast(v, MINIMATCH_PATCHED) >= 0, `${type}: ${from} phải ép minimatch từ ${MINIMATCH_PATCHED.join('.')} trở lên (có: ${r})`)
+      }
+      if (type !== 'web-public') assert.deepEqual([sel, key], ['minimatch@^10', 'minimatch@^10'], `${type}: chỉ ép dòng ^10`)
+    }
+  })
+})
+
+// ---------- Go của máy còn lỗ hổng thư viện chuẩn: doctor báo kèm lệnh cập nhật, không chặn tạo app ----------
+
+describe('desktop: Go của máy còn lỗ hổng (govulncheck) ⇒ doctor báo bản Go tối thiểu + lệnh cập nhật', () => {
+  const SAFE = { 1.26: '1.26.11', 1.27: '1.27.4' }
+  const ver = (s) => s.split('.').map(Number)
+  const IO = { platform: 'win32', nodeVersion: '26.8.1' }
+  // Máy giả đủ đồ cho app máy tính; Go báo bản `goVer`.
+  function deskRun(goVer) {
+    const base = fakeRun()
+    const run = (cmd, args = [], o = {}) => {
+      if (cmd === 'go' && args[0] === 'version') return ok(`go version go${goVer} windows/amd64\n`)
+      if (cmd === 'wails' && args[0] === 'version') return ok('v2.12.0\n')
+      if (cmd === 'reg') return ok('    pv    REG_SZ    130.0.2849.39\n')
+      if (cmd === 'wails' && args[0] === 'init') {
+        const d = path.join(o.cwd, args[args.indexOf('-n') + 1])
+        fs.mkdirSync(path.join(d, 'frontend'), { recursive: true })
+        fs.writeFileSync(path.join(d, 'wails.json'), '{ "name": "x" }\n')
+        fs.writeFileSync(path.join(d, 'go.mod'), 'module x\n\ngo 1.23\n')
+        fs.writeFileSync(path.join(d, 'frontend', 'package.json'), PKG)
+        return ok()
+      }
+      return base.run(cmd, args, o)
+    }
+    return { run, calls: base.calls }
+  }
+
+  test('goAdvice: theo từng dòng Go; dòng cũ hơn bảng ⇒ cần bản mới nhất; dòng mới hơn bảng hoặc bảng trống ⇒ chưa biết lỗ hổng nào', () => {
+    for (const [have, want] of [['1.27.2', '1.27.4'], ['1.27.0', '1.27.4'], ['1.27.3', '1.27.4'], ['1.27.4', null], ['1.27.9', null], ['1.26.10', '1.26.11'], ['1.26.11', null], ['1.25.9', '1.27.4'], ['1.23.0', '1.27.4'], ['1.28.0', null], ['2.0.0', null]]) {
+      assert.equal(goAdvice(ver(have), SAFE), want, have)
+    }
+    assert.equal(goAdvice(ver('1.27.2'), {}), null)
+    assert.equal(goAdvice(ver('1.27.2'), undefined), null)
+    assert.equal(goAdvice(null, SAFE), null)
+  })
+
+  test('versions.json: go.safe có bản mỗi dòng Go; loadVersions từ chối khoá không phải dòng Go hoặc bản sai dòng', () => {
+    const v = loadVersions()
+    assert.deepEqual(Object.keys(v.go.safe), ['1.26', '1.27'])
+    assert.equal(goAdvice(ver('1.27.2'), v.go.safe), '1.27.4', 'Go 1.27.2 của máy này còn GO-2026-6859 (net/http), vá ở 1.27.4')
+    const kit = path.join(mk(), 'kit')
+    fs.mkdirSync(path.join(kit, 'templates'), { recursive: true })
+    const put = (safe) => fs.writeFileSync(path.join(kit, 'templates', 'versions.json'), JSON.stringify({ ...v, go: { ...v.go, safe } }))
+    for (const safe of [{ moi: '1.27.4' }, { 1.27: '1.26.11' }, { 1.27: 'x' }]) {
+      put(safe)
+      assert.throws(() => loadVersions(kit), /go\.safe/, JSON.stringify(safe))
+    }
+    put(undefined)
+    assert.doesNotThrow(() => loadVersions(kit), 'go.safe không bắt buộc')
+  })
+
+  test('Go 1.27.2 ⇒ doctor VẪN exit 0, thêm mục "Nên cập nhật" nêu bản cần và lệnh winget; Mac chỉ in lệnh brew; --json có advice', async () => {
+    const r = await main(['doctor', '--type', 'desktop'], { ...IO, run: deskRun('1.27.2').run })
+    assert.equal(r.code, 0, r.lines.join('\n'))
+    const text = r.lines.join('\n')
+    assert.match(text, /^Máy đủ phần mềm để tạo app máy tính/)
+    assert.match(text, /Nên cập nhật 1 thứ \(vẫn tạo app được\):\n- go: Go 1\.27\.2 còn lỗ hổng đã công bố .*Go 1\.27\.4 trở lên.*govulncheck/)
+    assert.match(text, /Windows: winget upgrade --id GoLang\.Go/)
+    assert.doesNotMatch(text, /Mac:|brew/)
+    const mac = await main(['doctor', '--type', 'desktop'], { platform: 'darwin', nodeVersion: '26.8.1', run: deskRun('1.27.2').run })
+    assert.equal(mac.code, 0, mac.lines.join('\n'))
+    assert.match(mac.lines.join('\n'), /Mac: brew upgrade go/)
+    assert.doesNotMatch(mac.lines.join('\n'), /Windows|winget/)
+    const j = JSON.parse((await main(['doctor', '--type', 'desktop', '--json'], { ...IO, run: deskRun('1.27.2').run })).lines[0])
+    assert.equal(j.ok, true)
+    assert.deepEqual(j.advice.map((a) => [a.tool, a.update.win, a.update.mac]), [['go', 'winget upgrade --id GoLang.Go', 'brew upgrade go']])
+  })
+
+  test('Go đã vá (1.27.4, 1.26.11) hoặc dòng mới hơn ⇒ không có mục cập nhật; web và extension không hỏi Go nên không có', async () => {
+    for (const goVer of ['1.27.4', '1.26.11', '1.28.0']) {
+      const r = await main(['doctor', '--type', 'desktop', '--json'], { ...IO, run: deskRun(goVer).run })
+      const j = JSON.parse(r.lines[0])
+      assert.deepEqual([r.code, j.ok, j.advice], [0, true, []], goVer)
+      assert.doesNotMatch((await main(['doctor', '--type', 'desktop'], { ...IO, run: deskRun(goVer).run })).lines.join('\n'), /Nên cập nhật/, goVer)
+    }
+    for (const type of ['web', 'extension']) {
+      const r = await main(['doctor', '--type', type, '--json'], { ...IO, run: deskRun('1.20.0').run })
+      assert.deepEqual([r.code, JSON.parse(r.lines[0]).advice], [0, []], type)
+    }
+  })
+
+  test('Go cũ hơn mức tối thiểu để dựng app (go.min) ⇒ vẫn chặn như cũ (exit 3), không biến thành lời khuyên', async () => {
+    const r = await main(['doctor', '--type', 'desktop', '--json'], { ...IO, run: deskRun('1.20.0').run })
+    const j = JSON.parse(r.lines[0])
+    assert.deepEqual([r.code, j.missing.map((m) => m.tool), j.advice], [3, ['go'], []])
+  })
+
+  test('create desktop với Go 1.27.2 ⇒ vẫn tạo xong (exit 0), "Lưu ý" nói bản Go cần và lệnh cập nhật để user tự chạy; Go đã vá thì không nhắc', async () => {
+    const old = await main(['create', '--type', 'desktop', '--name', 'may-thu', '--dir', mk(), '--json'], { ...IO, run: deskRun('1.27.2').run })
+    assert.equal(old.code, 0, old.errLines.join('\n'))
+    const j = JSON.parse(old.lines[0])
+    assert.ok(j.steps.some((s) => s.id === 'save'), 'tạo xong tới bước lưu')
+    assert.equal(j.notes.filter((n) => /Go 1\.27\.2 còn lỗ hổng/.test(n)).length, 1)
+    assert.match(j.notes.join('\n'), /Go 1\.27\.4 trở lên.*Bạn tự chạy: Windows: winget upgrade --id GoLang\.Go/)
+    const text = (await main(['create', '--type', 'desktop', '--name', 'may-hai', '--dir', mk()], { ...IO, run: deskRun('1.27.2').run })).lines.join('\n')
+    assert.match(text, /Lưu ý: Go 1\.27\.2 còn lỗ hổng/)
+    const fine = JSON.parse((await main(['create', '--type', 'desktop', '--name', 'may-ba', '--dir', mk(), '--json'], { ...IO, run: deskRun('1.27.4').run })).lines[0])
+    assert.ok(!fine.notes.some((n) => /Go \d/.test(n)), fine.notes.join('\n'))
   })
 })

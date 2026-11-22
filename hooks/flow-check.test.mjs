@@ -823,6 +823,33 @@ test('ui-token chạy THẬT bằng ast-grep: bắt màu/cỡ gõ cứng (Tailwi
   assert.equal(hits.filter((h) => path.basename(h.file) === 'good.tsx').length, 0)
 })
 
+// Thành phần shadcn (components/ui) viết theo thiết kế riêng nên luật ui-token bỏ qua — nhưng CHỈ luật đó. Cách cũ (file .ignore trong mẫu app) làm ast-grep
+// bỏ thư mục khỏi cả lượt SAST bắt buộc ⇒ dangerouslySetInnerHTML/eval đặt ở đó lọt qua quét bảo mật.
+test('ui-token bỏ qua components/ui bằng `ignores` của chính luật; luật SAST và sgconfig SAST không bỏ qua thư mục đó', () => {
+  const uiRule = fs.readFileSync(path.join(RULES_DIR, 'ui', 'rules', 'ui-token-hardcoded.yml'), 'utf8')
+  assert.match(uiRule, /^ignores:\n(?:  .*\n)*? {2}- '\*\*\/components\/ui\/\*\*'$/m)
+  for (const id of Object.keys(RULES)) assert.doesNotMatch(fs.readFileSync(path.join(SAST_DIR, `${id}.yml`), 'utf8'), /components\/ui/, `${id}: không được bỏ qua components/ui`)
+  assert.doesNotMatch(fs.readFileSync(path.join(RULES_DIR, 'sgconfig.yml'), 'utf8'), /components|ignore/i)
+})
+
+test('chạy THẬT: src/components/ui bị SAST quét (dangerouslySetInnerHTML từ biến ⇒ báo) nhưng ui-token bỏ qua nó; code app vẫn bị ui-token soát', { skip: AST_GREP ? false : 'máy không có ast-grep/sg' }, () => {
+  const bad = fs.readFileSync(path.join(FIXTURES_DIR, 'ai-dangerously-set-html', 'bad.tsx'), 'utf8')
+  const hard = fs.readFileSync(path.join(RULES_DIR, 'ui', 'fixtures', 'ui-token-hardcoded', 'bad.tsx'), 'utf8')
+  const work = project({ 'src/components/ui/x.tsx': `${bad}\n${hard}`, 'src/features/home/ui/y.tsx': hard }, 'sast shadcn ')
+  const scan = (cfg) => {
+    const r = spawnSync(AST_GREP, ['scan', '--config', path.join(RULES_DIR, ...cfg).replace(/\\/g, '/'), '--json', '.'], { cwd: work, encoding: 'utf8', shell: IS_WIN && /\.(cmd|bat)$/i.test(AST_GREP) })
+    assert.ok(r.status === 0 || r.status === 1, `ast-grep lỗi (${r.status}): ${r.stderr}`)
+    let hits
+    try { hits = JSON.parse(r.stdout || '[]') } catch { hits = r.stdout.split('\n').filter(Boolean).map((l) => JSON.parse(l)) }
+    return hits.map((h) => `${h.ruleId}@${h.file.replace(/\\/g, '/')}`)
+  }
+  const sast = scan(['sgconfig.yml'])
+  assert.ok(sast.includes('ai-dangerously-set-html@src/components/ui/x.tsx'), `SAST phải quét components/ui: ${sast.join(', ')}`)
+  const ui = scan(['ui', 'sgconfig.yml'])
+  assert.ok(!ui.some((h) => h.includes('components/ui')), `ui-token phải bỏ qua components/ui: ${ui.join(', ')}`)
+  assert.equal(ui.filter((h) => h.endsWith('@src/features/home/ui/y.tsx')).length, 4, 'code của app vẫn bị ui-token soát')
+})
+
 // --- đợt 2 (làn B): máy kiểm kiến trúc / API / migration --------------------------------------------------------------------------------------
 
 const git = (cwd, ...args) => {

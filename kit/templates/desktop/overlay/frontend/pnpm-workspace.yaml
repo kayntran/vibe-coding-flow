@@ -2,3 +2,8 @@ packages: []
 
 allowBuilds:
   esbuild: true
+
+# minimatch 10.x (<= 10.2.6) có lỗ hổng DoS (GHSA-g3hv-75wg-m249, công bố 2026-10-30, vá ở 11.0.1); nó đi theo ESLint và typescript-eslint,
+# chỉ là công cụ lúc dev. Ép dùng bản vá, chỉ cho gói đòi dòng ^10 (gói đòi dòng cũ hơn giữ nguyên). Khi các gói đó tự nâng minimatch thì bỏ khối này.
+overrides:
+  minimatch@^10: ^11.0.1

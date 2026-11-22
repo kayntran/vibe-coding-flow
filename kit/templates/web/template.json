@@ -1,5 +1,5 @@
 {
-  "$comment": "Mẫu webapp: Vite React-TS + Tailwind + shadcn (MỘT lệnh shadcn init tạo cả dự án; KHÔNG chạy init trên app create-vite trần — lỗi). Đọc bởi hooks/lib/new-app.mjs. replace = file do lệnh tạo sinh mà lớp phủ được phép thay; mọi file khác của overlay không đè file có sẵn. devDeps = công cụ của máy kiểm flow-check (kit/checkers.json) + Playwright/axe, bản ghim ở versions.json; cấu hình của chúng nằm trong overlay (eslint.config.js bật @shadcn/lint, knip.jsonc, .size-limit.json, osv-scanner.toml). build = dựng một lần sau khi tạo để secret-build / size-limit có bản build.",
+  "$comment": "Mẫu webapp: Vite React-TS + Tailwind + shadcn (MỘT lệnh shadcn init tạo cả dự án; KHÔNG chạy init trên app create-vite trần — lỗi). Đọc bởi hooks/lib/new-app.mjs. replace = file do lệnh tạo sinh mà lớp phủ được phép thay; mọi file khác của overlay không đè file có sẵn. devDeps = công cụ của máy kiểm flow-check (kit/checkers.json) + Playwright/axe, bản ghim ở versions.json; cấu hình của chúng nằm trong overlay (eslint.config.js bật @shadcn/lint, knip.jsonc, .size-limit.json, osv-scanner.toml). build = dựng một lần sau khi tạo để secret-build / size-limit có bản build. Máy kiểm osv-scanner và ui-token đạt ngay sau khi tạo: pnpm-workspace.yaml (replace: thay file `shadcn init` ghi, giữ allowBuilds của nó) ép minimatch bản vá, patch ép cho npm; ui-token bỏ qua src/components/ui (thành phần shadcn viết theo thiết kế riêng) bằng `ignores` của chính luật trong kit/rules/ui; KHÔNG dùng file .ignore trong overlay vì ast-grep đọc nó cho cả luật SAST bắt buộc, làm thư mục đó lọt khỏi quét bảo mật.",
   "type": "web",
   "label": "webapp",
   "stack": "web",
@@ -22,7 +22,10 @@
   "browser": true,
   "build": true,
   "scripts": { "test:e2e": "playwright test" },
-  "replace": ["src/App.tsx", "index.html", "vite.config.ts", "eslint.config.js"],
+  "patch": [
+    { "file": "package.json", "pm": "npm", "set": { "overrides": { "minimatch@^10": "^11.0.1" } } }
+  ],
+  "replace": ["src/App.tsx", "index.html", "vite.config.ts", "eslint.config.js", "pnpm-workspace.yaml"],
   "gitignore": [".env", ".env.*", "!.env.example", "playwright-report/", "test-results/"],
   "next": { "dev": "{{PM_DEV}}", "url": "http://localhost:5173" },
   "archProblem": "Webapp mới tạo: màn đầu (S-01) còn trống, chưa có dữ liệu hay tính năng nào. Thay bằng bài toán thật của app khi viết SPEC.",

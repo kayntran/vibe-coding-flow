@@ -1122,7 +1122,7 @@ describe('create — extension (WXT)', () => {
 
   test('--pm npm: ép shell-quote bản vá qua "overrides" của package.json (pnpm-workspace.yaml không có tác dụng với npm)', () => {
     const r2 = create({ type: 'extension', name: 'luu-npm', parent: mk(), pm: 'npm', io: { run: makeRun().run, platform: 'win32' } })
-    assert.deepEqual(JSON.parse(read(r2.dir, 'package.json')).overrides, { 'shell-quote': '^1.11.0' })
+    assert.deepEqual(JSON.parse(read(r2.dir, 'package.json')).overrides, { 'shell-quote': '^1.11.0', 'minimatch@^10': '^11.0.1' })
     assert.equal(JSON.parse(read(r2.dir, 'package.json')).scripts['test:e2e'], 'wxt build && playwright test')
   })
 

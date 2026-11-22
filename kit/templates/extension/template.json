@@ -1,5 +1,5 @@
 {
-  "$comment": "Mẫu extension Chrome (Manifest V3): WXT mẫu react. Chưa xin quyền nào (không khai permissions), bỏ content script mẫu chạy trên *.google.com, code đặt trong src/ (srcDir) để theo kit/arch/extension.arch.json. Bản build ra dist/ (wxt.config.ts: outDir) để máy kiểm quét khoá, đo dung lượng và tìm manifest; vì bản build Chrome và Firefox cùng ra dist/ nên patch bỏ các script *:firefox của WXT (mẫu này là extension Chrome, tránh bản Firefox đè bản Chrome). WXT mẫu không có ESLint ⇒ devDeps thêm eslint + typescript-eslint… (eslint.config.js trong overlay). tsconfig.json thay bằng bản có paths '@/*' ngay trong file (WXT chỉ khai paths trong .wxt/tsconfig.json với đường dẫn '../src', dependency-cruiser không đọc được ⇒ báo import '@/…' không tìm thấy). archDeps = module nào được import module nào trong docs/arch.json (popup ráp màn từ features/home). pnpm-workspace.yaml ép shell-quote bản vá, osv-scanner.toml miễn lỗ hổng chưa có bản vá (có hạn). Đọc bởi hooks/lib/new-app.mjs.",
+  "$comment": "Mẫu extension Chrome (Manifest V3): WXT mẫu react. Chưa xin quyền nào (không khai permissions), bỏ content script mẫu chạy trên *.google.com, code đặt trong src/ (srcDir) để theo kit/arch/extension.arch.json. Bản build ra dist/ (wxt.config.ts: outDir) để máy kiểm quét khoá, đo dung lượng và tìm manifest; vì bản build Chrome và Firefox cùng ra dist/ nên patch bỏ các script *:firefox của WXT (mẫu này là extension Chrome, tránh bản Firefox đè bản Chrome). WXT mẫu không có ESLint ⇒ devDeps thêm eslint + typescript-eslint… (eslint.config.js trong overlay). tsconfig.json thay bằng bản có paths '@/*' ngay trong file (WXT chỉ khai paths trong .wxt/tsconfig.json với đường dẫn '../src', dependency-cruiser không đọc được ⇒ báo import '@/…' không tìm thấy). archDeps = module nào được import module nào trong docs/arch.json (popup ráp màn từ features/home). pnpm-workspace.yaml ép shell-quote và minimatch dòng ^10 lên bản vá (patch package.json ép cho npm; KHÔNG ép minimatch 3.x của web-ext → multimatch: minimatch 11 hết export default làm web-ext lint sập), osv-scanner.toml miễn lỗ hổng chưa có bản vá (có hạn). Đọc bởi hooks/lib/new-app.mjs.",
   "type": "extension",
   "label": "extension trình duyệt",
   "stack": "extension",
@@ -41,7 +41,7 @@
         }
       }
     },
-    { "file": "package.json", "pm": "npm", "set": { "overrides": { "shell-quote": "^1.11.0" } } }
+    { "file": "package.json", "pm": "npm", "set": { "overrides": { "shell-quote": "^1.11.0", "minimatch@^10": "^11.0.1" } } }
   ],
   "move": [
     { "from": "entrypoints", "to": "src/entrypoints" },

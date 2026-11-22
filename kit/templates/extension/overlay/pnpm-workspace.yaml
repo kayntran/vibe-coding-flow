@@ -4,5 +4,9 @@ allowBuilds:
   esbuild: true
 
 # shell-quote 1.10.0 (đi theo web-ext → fx-runner) có lỗ hổng nghiêm trọng, đã vá ở 1.11.0: ép dùng bản vá.
+# minimatch 10.x (<= 10.2.6) có lỗ hổng DoS (GHSA-g3hv-75wg-m249, công bố 2026-10-30, vá ở 11.0.1); nó đi theo ESLint và typescript-eslint,
+# chỉ là công cụ lúc dev. Ép dùng bản vá, CHỈ cho gói đòi dòng ^10: web-ext (multimatch) đòi minimatch 3.x và `import minimatch from 'minimatch'`,
+# minimatch 11 không còn export default nên ép hết mọi dòng làm `web-ext lint` sập. Khi các gói đó tự nâng minimatch thì bỏ dòng này.
 overrides:
   shell-quote: ^1.11.0
+  minimatch@^10: ^11.0.1

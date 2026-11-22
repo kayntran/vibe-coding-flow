@@ -5,9 +5,11 @@
 //   validateName(name)                 → null | lời báo       tên chỉ gồm a-z, 0-9, gạch ngang (đặt tên thư mục và tên gói)
 //   loadVersions(kit?) · loadTemplate(type, kit?)             kit/templates/versions.json · kit/templates/<type>/template.json (kiểm dạng, chặn đường dẫn lạ)
 //                                       versions.json: node.min (cả 3 loại cũ) + node.byType[<loại>] (Node tối thiểu riêng của loại đó, vd web-public); reactRouter không được dưới 8.5.1.
-//   doctor({ type, io, cwd? })         → { ok, missing:[{tool, why, install:{win, mac}}], blocked:[{tool, why}], found:{…}, pm }   KHÔNG cài gì
+//   doctor({ type, io, cwd? })         → { ok, missing:[{tool, why, install:{win, mac}}], blocked:[{tool, why}], advice:[{tool, why, update:{win, mac}}], found:{…}, pm }   KHÔNG cài gì
 //                                       missing = chưa có / cũ quá (ENOENT); blocked = có nhưng không chạy được (spawn EPERM/EACCES: bị chặn quyền hoặc sandbox).
+//                                       advice = có rồi, đủ để tạo app, nhưng nên cập nhật (không chặn, không đổi ok): Go còn lỗ hổng thư viện chuẩn đã công bố (versions.json go.safe) ⇒ máy kiểm govulncheck đỏ cho app máy tính; create ghi vào notes.
 //                                       Kiểm cả công cụ máy kiểm flow-check coi là BẮT BUỘC cho loại app (requiredTools: đọc kit/checkers.json, tìm bằng findTool của flow-check từ cwd).
+//   goAdvice(have, safe)               → bản Go cần cập nhật lên (chữ) | null   have = [maj, min, patch]; safe = versions.json go.safe
 //   requiredTools(template, kit?)      → [{ id, title, names, identify, install:{win, mac} }]   công cụ MÁY phải có (không tính thứ app tự cài bằng `npm i -D`)
 //   generatorCommand(template, { name, pm, versions })        → { cmd, args }   lệnh tạo chính hãng (đã ghim bản; generate.version = khoá bản ghim khi khác tên gói, vd create-cloudflare ↔ createCloudflare)
 //   stepCommand(step, { name, pm, versions })                 → { cmd, args }   một "lệnh sau khi tạo" (template.after): pm-exec (chạy gói đã ghim bản), pm-run (script trong package.json) hoặc pm-bin (lệnh đã cài trong app)
@@ -100,6 +102,12 @@ function readJsonFile(file, what) {
 export function loadVersions(kit = KIT_DIR) {
   const v = readJsonFile(path.join(kit, 'templates', 'versions.json'), 'bảng phiên bản kit/templates/versions.json')
   for (const k of ['node', 'git', 'go', 'wails']) if (!v?.[k]?.min || !versionOf(v[k].min)) throw new NewAppError(`kit/templates/versions.json thiếu "${k}.min".`)
+  // go.safe (không bắt buộc): bản Go thấp nhất không còn lỗ hổng đã biết, theo từng dòng Go ({ "1.27": "1.27.4" }); khoá là dòng, giá trị phải thuộc đúng dòng đó.
+  for (const [train, min] of Object.entries(v.go.safe ?? {})) {
+    const m = /^(\d+)\.(\d+)$/.exec(train)
+    const mv = versionOf(min ?? '')
+    if (!m || !mv || mv[0] !== Number(m[1]) || mv[1] !== Number(m[2])) throw new NewAppError(`kit/templates/versions.json: go.safe "${train}" phải là dòng Go dạng 1.27 với bản của đúng dòng đó (vd 1.27.4).`)
+  }
   for (const k of PINNED) if (!versionOf(v[k] ?? '')) throw new NewAppError(`kit/templates/versions.json thiếu bản ghim "${k}".`)
   for (const [k, min] of Object.entries(MIN_PINS)) {
     if (cmpVer(versionOf(v[k]), versionOf(min)) < 0) throw new NewAppError(`kit/templates/versions.json ghim "${k}" ${v[k]}, thấp hơn ${min} (bản cũ hơn có lỗ hổng đã công bố). Nâng lên ${min} trở lên.`)
@@ -251,6 +259,22 @@ const INSTALL = (v) => ({
   xcode: { win: null, mac: 'xcode-select --install' },
 })
 
+// Lệnh CẬP NHẬT (user tự chạy) cho phần mềm máy đã có nhưng cũ/có lỗ hổng; doctor chỉ in, không chạy.
+const UPDATE = {
+  go: { win: 'winget upgrade --id GoLang.Go', mac: 'brew upgrade go' },
+}
+
+// Go của máy (have = [maj, min, patch]) còn lỗ hổng thư viện chuẩn đã công bố không? safe = versions.json go.safe ({ "1.27": "1.27.4" }: bản thấp nhất đã vá của từng dòng).
+// → bản cần cập nhật lên (chữ) | null (đã vá, hoặc dòng Go mới hơn mọi dòng trong bảng, hoặc bảng trống ⇒ chưa biết lỗ hổng nào).
+// Dòng không có trong bảng mà cũ hơn dòng đầu bảng (hết hỗ trợ, không có bản vá) ⇒ cần bản mới nhất của bảng.
+export function goAdvice(have, safe) {
+  const rows = Object.values(safe ?? {}).map(versionOf).filter(Boolean).sort(cmpVer)
+  if (!have || rows.length === 0) return null
+  const own = rows.find((r) => r[0] === have[0] && r[1] === have[1])
+  if (own) return cmpVer(have, own) < 0 ? showVer(own) : null
+  return cmpVer(have, rows[0]) < 0 ? showVer(rows.at(-1)) : null
+}
+
 // Dòng lệnh cài của hệ điều hành ĐANG CHẠY: Windows ⇒ chỉ dòng Windows, Mac ⇒ chỉ dòng Mac; hệ khác (Linux…) ⇒ cả hai (không đoán).
 export function installLines(install = {}, platform = process.platform) {
   const win = platform === 'win32'
@@ -315,6 +339,7 @@ export function doctor({ type, io: rawIo, pm: wantPm, cwd } = {}) {
   const v = loadVersions(io.kit)
   const inst = INSTALL(v)
   const missing = []
+  const advice = [] // việc nên làm nhưng KHÔNG chặn tạo app: { tool, why, update: { win, mac } }
   const found = {}
   const blocked = new Map()
   const need = (tool, why, install) => { if (!blocked.has(tool)) missing.push({ tool, why, install }) }
@@ -347,6 +372,11 @@ export function doctor({ type, io: rawIo, pm: wantPm, cwd } = {}) {
     found.go = gv ? showVer(gv) : null
     if (!gv) need('go', 'Chưa có Go (ngôn ngữ của phần lõi app máy tính).', inst.go)
     else if (cmpVer(gv, versionOf(v.go.min)) < 0) need('go', old('Go', gv, v.go.min), inst.go)
+    else {
+      // Go có nhưng còn lỗ hổng thư viện chuẩn đã công bố: govulncheck (máy kiểm) báo đỏ cho app máy tính và mẫu không sửa được Go của máy ⇒ báo kèm lệnh cập nhật, KHÔNG chặn tạo app.
+      const want = goAdvice(gv, v.go.safe)
+      if (want) advice.push({ tool: 'go', why: `Go ${showVer(gv)} còn lỗ hổng đã công bố (thư viện chuẩn của Go); cập nhật lên Go ${want} trở lên, không thì máy kiểm govulncheck báo đỏ cho app máy tính.`, update: UPDATE.go })
+    }
   }
   if (template.needs.includes('wails')) {
     const out = ask('wails', ['version'])
@@ -397,7 +427,7 @@ export function doctor({ type, io: rawIo, pm: wantPm, cwd } = {}) {
 
   // pnpm/npm chỉ cần cái được chọn: pnpm bị chặn mà npm chạy được thì vẫn đi tiếp bằng npm.
   const stuck = [...blocked].filter(([tool]) => (tool !== 'pnpm' && tool !== 'npm') || tool === pm).map(([tool, why]) => ({ tool, why }))
-  return { ok: missing.length === 0 && stuck.length === 0, missing, blocked: stuck, found, pm, platform: io.platform }
+  return { ok: missing.length === 0 && stuck.length === 0, missing, blocked: stuck, advice, found, pm, platform: io.platform }
 }
 
 // ---------- lệnh tạo ----------
@@ -638,6 +668,7 @@ export function create({ type, name, parent = '.', pm: wantPm, io: rawIo } = {})
   }
   const pm = dr.pm
   const cmds = pmCommands(pm)
+  for (const a of dr.advice) notes.push(`${a.why} Bạn tự chạy: ${installLines(a.update, dr.platform).map((l) => l.trim()).join(' · ')}`)
 
   fs.mkdirSync(parentAbs, { recursive: true })
   if (empty) {

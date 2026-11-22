@@ -32,6 +32,7 @@ const LOG_FILE = process.env.FLOW_GATE_LOG || path.join(HOOK_DIR, 'flow-gate.log
 const APPROVAL_LOG = path.join(path.dirname(LOG_FILE), 'flow-approvals.log') // lệnh đã đi qua lối ra FLOW_OK=
 const DEFAULT_UI = /\.(tsx|jsx|vue|svelte|astro|html|css|scss|sass|less)$/i
 const DOC_FILE = /\.(md|mdx|txt)$/i // diff chỉ có file này (hoặc dưới docs/) ⇒ không đòi dấu test
+const TEMPLATE_SCAFFOLD = /^kit\/templates\// // màn giàn giáo của mẫu tạo app (gốc repo): file giao diện ở đây không đòi user duyệt giao diện [wy6x]
 const DEPS_BUDGET_MS = 8000 // tổng thời gian kiểm thư viện mới (hook bash có 15 s); quá hạn ⇒ unknown, không chặn
 const RECEIPT_RE = /return=(done_with_concerns|done|needs_context|blocked|green|red)\b/ // green|red là của test-runner
 const NA_RE = /^\uFEFF?\s*N\/A/i
@@ -135,8 +136,10 @@ function patchId(dir, base, head) {
   return /^[0-9a-f]{40,64}$/.test(tok) ? tok : null
 }
 
+// Diff có file giao diện không? File dưới kit/templates/** (màn giàn giáo của mẫu) không tính [wy6x]; file giao diện ở chỗ khác vẫn tính như cũ.
+// --no-renames: đổi tên file giao diện từ ngoài vào kit/templates/ vẫn lộ tên cũ, không lọt qua phần miễn.
 function uiTouched(info, base, head) {
-  const out = git(info.dir, ['diff', '--name-only', '-z', `${base}...${head}`, '--'])
+  const out = git(info.dir, ['diff', '--name-only', '--no-renames', '-z', `${base}...${head}`, '--'])
   if (!out) return false
   let re = DEFAULT_UI
   try {
@@ -145,7 +148,7 @@ function uiTouched(info, base, head) {
   } catch (e) {
     if (e?.code !== 'ENOENT') log(`flow.json: ${e.message}`)
   }
-  return out.split('\0').some((f) => f && re.test(f))
+  return out.split('\0').some((f) => f && !TEMPLATE_SCAFFOLD.test(f) && re.test(f))
 }
 
 // Nội dung file dấu; ENOENT = chưa có dấu (null). Lỗi đọc khác thì ném ra, không được coi là "thiếu".

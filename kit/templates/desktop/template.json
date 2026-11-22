@@ -1,5 +1,5 @@
 {
-  "$comment": "Mẫu app máy tính: Wails v2 (stable; v3 còn beta) mẫu react-ts. Lõi Go theo kit/arch/go.arch.json (internal/<miền>/{domain,service,store,transport}); mẫu mới tạo CHƯA có miền Go nào (app.go chỉ có struct App rỗng; go-arch-lint tự BỎ QUA khi docs/arch.json chưa có miền, golangci-lint và ast-grep vẫn chạy); giao diện React chạy được cả trong trình duyệt (dữ liệu mẫu) để Playwright/ui-check kiểm. Mẫu Wails không có Tailwind/shadcn: CSS thường trong thư mục tính năng. Frontend của mẫu Wails dùng Vite 3 + TypeScript 4 (đời cũ: ~14 lỗ hổng, depcruise và typescript-eslint không chạy được) nên devDeps nâng lên cùng bản với mẫu web (vite, plugin-react, typescript, @types/node) và overlay thay tsconfig.json (một file, moduleResolution bundler; TS 6 từ chối cấu hình cũ) + vite.config.ts (cổng đọc từ PORT); tsconfig.node.json cũ bị gỡ. Máy kiểm flow-check: devDeps + cấu hình trong overlay/frontend (eslint.config.js, knip.jsonc, .size-limit.json). Đọc bởi hooks/lib/new-app.mjs.",
+  "$comment": "Mẫu app máy tính: Wails v2 (stable; v3 còn beta) mẫu react-ts. Lõi Go theo kit/arch/go.arch.json (internal/<miền>/{domain,service,store,transport}); mẫu mới tạo CHƯA có miền Go nào (app.go chỉ có struct App rỗng; go-arch-lint tự BỎ QUA khi docs/arch.json chưa có miền, golangci-lint và ast-grep vẫn chạy); giao diện React chạy được cả trong trình duyệt (dữ liệu mẫu) để Playwright/ui-check kiểm. Mẫu Wails không có Tailwind/shadcn: CSS thường trong thư mục tính năng. Frontend của mẫu Wails dùng Vite 3 + TypeScript 4 (đời cũ: ~14 lỗ hổng, depcruise và typescript-eslint không chạy được) nên devDeps nâng lên cùng bản với mẫu web (vite, plugin-react, typescript, @types/node) và overlay thay tsconfig.json (một file, moduleResolution bundler; TS 6 từ chối cấu hình cũ) + vite.config.ts (cổng đọc từ PORT); tsconfig.node.json cũ bị gỡ. Máy kiểm flow-check: devDeps + cấu hình trong overlay/frontend (eslint.config.js, knip.jsonc, .size-limit.json). frontend/pnpm-workspace.yaml ép minimatch bản vá (patch frontend/package.json ép cho npm) để osv-scanner đạt ngay sau khi tạo. govulncheck đỏ vì CHÍNH Go của máy (thư viện chuẩn Go có lỗ hổng) mẫu không sửa được: doctor báo bản Go tối thiểu không có lỗ hổng đã biết (versions.json: go.safe) kèm lệnh cập nhật. Đọc bởi hooks/lib/new-app.mjs.",
   "type": "desktop",
   "label": "app máy tính (Wails)",
   "stack": "wails",
@@ -34,7 +34,8 @@
     {
       "file": "wails.json",
       "set": { "frontend:install": "{{PM}} install", "frontend:build": "{{PM_RUN}} build", "frontend:dev:watcher": "{{PM_RUN}} dev" }
-    }
+    },
+    { "file": "frontend/package.json", "pm": "npm", "set": { "overrides": { "minimatch@^10": "^11.0.1" } } }
   ],
   "remove": [{ "path": "frontend/tsconfig.node.json", "contains": "composite" }],
   "replace": ["app.go", "frontend/src/App.tsx", "frontend/src/style.css", "frontend/tsconfig.json", "frontend/vite.config.ts"],

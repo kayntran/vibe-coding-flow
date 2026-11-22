@@ -3,6 +3,7 @@
 //   doctor --type web|desktop|extension|web-public [--pm pnpm|npm] [--json]
 //          kiểm máy đủ phần mềm chưa (Node — bản tối thiểu theo loại app, web-public cần Node mới hơn ba loại kia —, Git, pnpm/npm; app máy tính: Go, Wails, WebView2/Xcode; và công cụ máy kiểm flow-check coi là bắt buộc theo kit/checkers.json: osv-scanner, ast-grep…).
 //          KHÔNG cài gì; thiếu gì thì in đúng lệnh cài của hệ điều hành đang chạy (Windows hoặc Mac). Có phần mềm nhưng KHÔNG CHẠY ĐƯỢC (EPERM/EACCES: bị chặn quyền/sandbox) ⇒ báo riêng, không bảo là chưa có.
+//          Go (app máy tính) cũ hơn bản không còn lỗ hổng đã biết (versions.json go.safe) ⇒ in thêm mục "Nên cập nhật" kèm lệnh cập nhật (winget/brew) cho user tự chạy; KHÔNG chặn, exit vẫn 0 (JSON: trường advice).
 //   create --type <loại> --name <tên> [--dir <thư mục cha>] [--pm pnpm|npm] [--json]
 //          tạo <thư mục cha>/<tên> bằng lệnh chính hãng ghim bản + lớp phủ của kit + (nếu mẫu có) lệnh sau khi tạo, bật git và điểm lưu "Tạo app". Thư mục đích đã có đồ ⇒ từ chối, không đè.
 //          web-public = webapp có trang công khai (React Router trên Cloudflare Workers; Google và Zalo/Facebook đọc được trang).
@@ -44,10 +45,19 @@ function needType(o) {
   return o.type
 }
 
+// Việc nên làm nhưng không chặn tạo app (vd Go còn lỗ hổng): in cả khi máy đủ đồ, kèm lệnh cập nhật của hệ điều hành đang chạy (user tự chạy).
+function adviceLines(r) {
+  const advice = r.advice ?? []
+  return advice.length ? [
+    `Nên cập nhật ${advice.length} thứ (vẫn tạo app được):`,
+    ...advice.flatMap((a) => [`- ${a.tool}: ${a.why}`, ...installLines(a.update, r.platform)]),
+  ] : []
+}
+
 function doctorLines(r, label) {
   if (r.ok) {
     const have = Object.entries(r.found).filter(([, v]) => v).map(([k, v]) => (v === true ? k : `${k} ${v}`))
-    return [`Máy đủ phần mềm để tạo ${label} (${have.join(', ')}). Trình quản lý gói sẽ dùng: ${r.pm}.`]
+    return [`Máy đủ phần mềm để tạo ${label} (${have.join(', ')}). Trình quản lý gói sẽ dùng: ${r.pm}.`, ...adviceLines(r)]
   }
   const blocked = r.blocked ?? []
   return [
@@ -60,6 +70,7 @@ function doctorLines(r, label) {
       `Có ${blocked.length} phần mềm trên máy nhưng không chạy được (bị chặn quyền hoặc môi trường cô lập):`,
       ...blocked.map((b) => `- ${b.tool}: ${b.why}`),
     ] : []),
+    ...adviceLines(r),
   ]
 }
 
