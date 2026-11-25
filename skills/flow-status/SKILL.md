@@ -36,6 +36,9 @@ Ngắn, bỏ mục rỗng:
 4. **Nên làm tiếp:** tối đa 3 việc, mỗi việc một lý do. Ưu tiên mục tiêu user vừa nói, rồi việc chặn phát hành, rồi rủi ro đã thấy.
 5. **Cảnh báo:** chưa fetch nên có thể thiếu việc trên GitHub, worktree cũ, lệnh quét lỗi.
 
+**User vừa quay lại sau `flow-away`** (sổ có mục `## Vắng mặt` hoặc `notes/bao-cao-sang.md`): mở bằng "Có N việc chờ bạn quyết", rồi theo
+đúng 5 mục của báo cáo sáng trong skill đó; điều ⚠️ trong sổ chốt kể kèm "đổi lại thì tốn gì".
+
 Giữ đúng sự thật:
 - **Không trình bày thay đổi như đã phát hành.** Đã commit, đã gộp, đã push và đang chạy thật là bốn trạng thái khác nhau.
 - Thay đổi chưa lưu là thứ cần biết, không phải lý do để bỏ đi.

@@ -1202,6 +1202,41 @@ describe('stamp test (dấu test xanh)', () => {
     assert.match(cli(fx2, fx2.wt, 'status').stdout, /test: không đòi/)
   })
 
+  test('status nói dấu test còn đúng bản code không [1osp]: vừa chạy ⇒ dùng lại; có file sửa chưa commit, hoặc main nhích rồi rebase (diff y nguyên) ⇒ chạy lại', () => {
+    const fx = featFx()
+    assert.equal(stampTest(fx, 'node', '-e', '0').status, 0)
+    assert.match(JSON.parse(fs.readFileSync(stampFile(fx, 'json'), 'utf8')).tree, /^[0-9a-f]{40,64}$/)
+    assert.match(cli(fx, fx.wt, 'status').stdout, /test: có \(đúng bản code này/)
+    fs.appendFileSync(path.join(fx.wt, 'feat.go'), '// dở\n')
+    assert.match(cli(fx, fx.wt, 'status').stdout, /test: có \(code đã đổi/)
+    git(fx.wt, 'checkout', '--', 'feat.go')
+    assert.match(cli(fx, fx.wt, 'status').stdout, /test: có \(đúng bản code này/)
+    const pid = pidOf(fx)
+    commit(fx.main, 'khac.txt', 'x\n', 'main nhích')
+    git(fx.wt, 'rebase', 'main')
+    assert.equal(pidOf(fx), pid, 'điều kiện: rebase không đổi nội dung diff nên dấu cũ vẫn còn')
+    assert.match(cli(fx, fx.wt, 'status').stdout, /test: có \(code đã đổi/)
+  })
+
+  test('dấu test kiểu cũ (không ghi mã cây file) ⇒ status vẫn báo có nhưng bảo chạy lại', () => {
+    const fx = featFx()
+    assert.equal(stampTest(fx, 'node', '-e', '0').status, 0)
+    fs.writeFileSync(stampFile(fx, 'json'), JSON.stringify({ cmd: 'x', ts: new Date().toISOString(), durationMs: 1 }))
+    assert.match(cli(fx, fx.wt, 'status').stdout, /test: có \(code đã đổi/)
+  })
+
+  test('chạy test lúc còn file vá tạm hoặc file mới chưa add ⇒ dấu không ghi mã cây; bỏ file đó đi rồi status vẫn bảo chạy lại (bản đã commit chưa từng qua test)', () => {
+    for (const lamDo of [(wt) => fs.appendFileSync(path.join(wt, 'feat.go'), '// vá tạm\n'), (wt) => write(wt, 'moi.go', 'package x\n')]) {
+      const fx = featFx()
+      lamDo(fx.wt)
+      assert.equal(stampTest(fx, 'node', '-e', '0').status, 0)
+      assert.equal(JSON.parse(fs.readFileSync(stampFile(fx, 'json'), 'utf8')).tree, null)
+      git(fx.wt, 'checkout', '--', '.')
+      fs.rmSync(path.join(fx.wt, 'moi.go'), { force: true })
+      assert.match(cli(fx, fx.wt, 'status').stdout, /test: có \(code đã đổi/)
+    }
+  })
+
   // ----- diff chỉ có tài liệu (.md/.mdx/.txt hoặc dưới docs/) ⇒ không đòi dấu test; review + qa vẫn đòi -----
 
   const merge = (fx) => hook(fx, 'bash', bashIn(fx.main, 'git merge feat'))

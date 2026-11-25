@@ -275,6 +275,33 @@ function updatesSection() {
   return line ? `${UPDATES_PREFIX}${line}` : ''
 }
 
+// ---------- quét đồ tạm cũ [12e1] ----------
+
+// Mỗi ngày một lần kích `don.mjs --quet` chạy nền (tách khỏi phiên như launchRefresh): đồ trong thư mục tạm của AI quá 7 ngày không ai đụng tự được dọn.
+// Dấu "đã kích hôm nay" ghi TRƯỚC khi spawn; hai phiên mở sát nhau có thể cùng kích, vô hại (thứ đã mất thì lượt sau không thấy nữa).
+// Chỉ kích khi hook này đúng là bản đã cài của người đang dùng máy (thư mục hook = ~/.claude/hooks, tính cả lối tắt trỏ về đó):
+// test nào chạy hook với HOME giả thì không bao giờ chạm vào thư mục tạm thật. FLOW_DON=off tắt hẳn; FLOW_DON_SCRIPT để test thay bằng script giả.
+const DON_SCRIPT = process.env.FLOW_DON_SCRIPT || path.join(HOOK_DIR, 'don.mjs')
+const DON_MARK = path.join(LOGS_DIR, 'don-quet.json')
+function isInstalledHook() {
+  try {
+    return lower(fs.realpathSync.native(HOOK_DIR)) === lower(fs.realpathSync.native(path.join(os.homedir(), '.claude', 'hooks')))
+  } catch { return false }
+}
+function launchSweep() {
+  if (process.env.FLOW_DON === 'off') return ''
+  if (!process.env.FLOW_DON_SCRIPT && !isInstalledHook()) return ''
+  let last = 0
+  try { last = Number(JSON.parse(fs.readFileSync(DON_MARK, 'utf8')).ts) || 0 } catch { /* chưa có dấu hoặc dấu hỏng ⇒ coi như chưa quét */ }
+  if (Date.now() - last < DAY) return ''
+  fs.mkdirSync(LOGS_DIR, { recursive: true })
+  fs.writeFileSync(DON_MARK, JSON.stringify({ ts: Date.now() }) + '\n')
+  const child = spawn(process.execPath, [DON_SCRIPT, '--quet'], { cwd: HOOK_DIR, detached: true, stdio: 'ignore', windowsHide: true })
+  child.on('error', (e) => logErr(`kích quét đồ tạm lỗi (${errTag(e)})`))
+  child.unref()
+  return ''
+}
+
 // ---------- nhắc sau phát hành / khám sức khoẻ / sao lưu (v7 đợt 4) ----------
 
 const DUE_PREFIX = 'Báo user một lần, một dòng, không chặn việc đang làm. '
@@ -547,6 +574,7 @@ try {
   const mcp = safe('mcp', mcpSection)
   const upd = safe('cập nhật công cụ', updatesSection)
   const due = safe('nhắc sau phát hành', () => dueSection(cwd, repo?.top))
+  safe('quét đồ tạm', launchSweep)
   // Sổ chốt lấy phần trần còn lại sau nhắc ngôn ngữ + lời nhắc an toàn + tiến độ + bản business/công nghệ + nhắc MCP + nhắc sau phát hành + nhắc cập nhật (và các dòng trống ngăn cách giữa các phần) ⇒ tổng luôn ≤ TOTAL_CAP.
   const room = TOTAL_CAP - lang.length - notices.length - progress.length - biz.length - mcp.length - due.length - upd.length - (lang ? 2 : 0) - (notices ? 2 : 0) - (progress ? 2 : 0) - (biz ? 2 : 0) - (mcp ? 2 : 0) - (due ? 2 : 0) - (upd ? 2 : 0)
   const chot = repo ? safe('so-chot', () => excerpt(repo.top, { branch: repo.branch, budget: room })) : ''

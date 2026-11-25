@@ -44,6 +44,15 @@ Chỉ tự dọn worktree **do phiên mình tạo và đã gộp**. Theo đúng 
    giữ khoá file khi tiến trình còn chạy nên phải làm trước khi gỡ.
 3. **Gỡ:** `node ~/.claude/hooks/don.mjs "<đường worktree>"` (tự từ chối nếu chưa gộp sạch, bị khoá, có repo lồng), rồi
    `git branch -d <branch>` và `node ~/.claude/hooks/wt-env.mjs release <đường worktree>`. Không gõ lệnh xoá đệ quy.
+4. **Thư mục tạm của việc** [12e1]: chép thứ còn cần (ảnh bằng chứng, báo cáo) vào `docs/specs/<việc>/notes/`, rồi
+   `node ~/.claude/hooks/don.mjs "<thư mục tạm>"`. Việc không có worktree (hỏi đáp, research, việc ngoài git) cũng dọn bước này khi xong.
+
+### Đồ tạm: một việc, một thư mục [12e1]
+
+Log, ảnh chụp, repo tải về để đọc, dữ liệu thử, file nháp ⇒ để hết trong MỘT thư mục `<thư mục tạm>/<dự-án>-<việc>/` (Windows:
+`D:\tmp\…`), không rải file lẻ ở gốc thư mục tạm, không để trong dự án. Ghi đường dẫn vào `progress.md` mục `## Đang mở`. AI phụ nhận
+đường ghi nằm trong thư mục đó. Lưới an toàn: mỗi ngày hook mở phiên tự chạy `don.mjs --quet` xoá mục quá 7 ngày không ai đụng (không
+đụng worktree, không xoá repo còn thứ chưa đẩy lên). Xem trước sẽ dọn gì: `node ~/.claude/hooks/don.mjs --quet --thu`.
 
 ### Bản sao cũ bị quên
 

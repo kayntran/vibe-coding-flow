@@ -69,7 +69,8 @@ AGENTS.md, `.claude/rules/`) thắng phần này.
 | "phát hành", "đưa lên mạng" · xem lỗi bản thật · quay lại bản trước · sao lưu · khoá lộ, đổi khoá | skill `flow-release` · `flow-publish` · `flow-rollback` · `flow-backup` · `flow-key-leak` |
 | khám tổng thể · "khám sức khoẻ app", nhắc khám định kỳ · "app chậm", "chịu được bao nhiêu người" | skill `flow-health` · `flow-maintain` · `flow-scale` |
 | X ở đâu, chỗ nào dùng Y | tự tìm bằng công cụ Grep có sẵn hoặc `rg` một lệnh nhiều `-e` (không `grep -r`/`find` quét thư mục); thư mục bị git bỏ qua (worktree, thư mục nội bộ) ⇒ thêm `-uu` kẻo tìm sót |
-| giao việc cho worker / chạy song song | skill `flow-team` |
+| "tôi đi ngủ", "đi vắng", "cứ tự làm, mai tôi xem" | skill `flow-away` — hỏi gom một lần, tự làm tới hết, sáng báo việc chờ quyết |
+| giao việc cho worker / chạy song song | skill `flow-team` — trước khi mở hộp hỏi hay tự làm việc dài, giao phần không phụ thuộc chạy ngầm trước |
 | mở phiên chat mới / tiếp quản việc phiên cũ | trong Paseo (có biến `PASEO_AGENT_ID`) ⇒ skill `paseo`: `create_workspace` (local, path = worktree, `projectId` dự án đang mở — thiếu là thanh bên mọc thêm dự án rỗng) → `create_agent` (cấu hình từ `list_profiles`), prompt đầu theo mẫu `skills/flow-sessions/references/handoff.md`; không bảo user tự mở |
 | sắp sửa file trong git repo | skill `flow-worktree` |
 | kiến trúc, cấu trúc thư mục, file/hàm quá dài, tách module; dự án chưa có `docs/arch.json` | skill `flow-architecture` |
@@ -88,7 +89,7 @@ AGENTS.md, `.claude/rules/`) thắng phần này.
 - Hook chỉ chặn: lộ secret, ép/xoá nhánh chính, bỏ thay đổi ở bản chính, xoá thư mục, phá DB thật.
   Bị chặn ⇒ làm cách an toàn, không lách; thật cần ⇒ kể user mất gì, user gật thì chạy lại với `FLOW_OK=1` một lần. KHÔNG sửa kit giữa dự án.
 - Ghi file ưu tiên Write/Edit (Codex: apply_patch). Dọn thư mục tạm, build, worktree đã gộp sạch ⇒
-  `node ~/.claude/hooks/don.mjs "<đường dẫn>"`, không gõ lệnh xoá đệ quy.
+  `node ~/.claude/hooks/don.mjs "<đường dẫn>"`, không gõ lệnh xoá đệ quy. Đồ tạm của một việc để trong MỘT thư mục, xong việc là dọn.
 - Viết/sửa SPEC, plan, báo cáo xong ⇒ tóm tắt ngắn ngay trong chat + chép bản xem vào thư mục mở phiên và mở sẵn (khung
   xem file không mở được file trong worktree); chỉ đưa link khi mở được thật.
 - Gọi CLI/model ngoài (codex, agy, cursor-agent, grok, devin) ⇒ `node ~/.claude/hooks/cli-check.mjs <tên>` trước; chưa

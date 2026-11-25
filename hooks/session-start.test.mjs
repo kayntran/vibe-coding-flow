@@ -1257,6 +1257,50 @@ describe('sổ đang chờ user gật', () => {
   })
 })
 
+// Quét đồ tạm cũ [12e1]: mỗi ngày một lần hook kích `don.mjs --quet` chạy nền. Ở đây tiến trình nền là script GIẢ (FLOW_DON_SCRIPT) chỉ ghi lại đối số.
+describe('quét đồ tạm cũ mỗi ngày một lần', () => {
+  const mark = (fx) => path.join(fx.home, '.claude', 'logs', 'don-quet.json')
+  function fakeSweep(fx) {
+    const script = path.join(fx.root, 'fake-don.mjs')
+    const log = path.join(fx.root, 'don-spawned.log')
+    fs.writeFileSync(script, `import fs from 'node:fs'\nfs.appendFileSync(${JSON.stringify(log)}, process.argv.slice(2).join(' ') + '\\n')\n`)
+    return { env: { FLOW_DON_SCRIPT: script }, spawned: () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n') : []) }
+  }
+  const waitFor = async (fn, ms = 8000) => {
+    const t0 = Date.now()
+    while (Date.now() - t0 < ms) {
+      if (fn()) return true
+      await new Promise((r) => setTimeout(r, 50))
+    }
+    return fn()
+  }
+
+  test('lần mở phiên đầu trong ngày ⇒ kích đúng một lần với --quet và ghi dấu; mở lại trong ngày ⇒ không kích; dấu quá một ngày ⇒ kích lại', async () => {
+    const fx = fixture()
+    const bg = fakeSweep(fx)
+    run(fx, { env: bg.env })
+    assert.ok(await waitFor(() => bg.spawned().length === 1), 'phải kích quét')
+    assert.deepEqual(bg.spawned(), ['--quet'])
+    assert.ok(JSON.parse(fs.readFileSync(mark(fx), 'utf8')).ts > 0)
+    run(fx, { env: bg.env })
+    await new Promise((r) => setTimeout(r, 400))
+    assert.equal(bg.spawned().length, 1, 'cùng ngày không kích lại')
+    fs.writeFileSync(mark(fx), JSON.stringify({ ts: Date.now() - 25 * 3600000 }))
+    run(fx, { env: bg.env })
+    assert.ok(await waitFor(() => bg.spawned().length === 2), 'dấu quá một ngày ⇒ kích lại')
+  })
+
+  test('FLOW_DON=off, hoặc hook chạy với HOME giả mà không chỉ script ⇒ không kích, không ghi dấu (test khác không bao giờ chạm thư mục tạm thật)', async () => {
+    const fx = fixture()
+    const bg = fakeSweep(fx)
+    run(fx, { env: { ...bg.env, FLOW_DON: 'off' } })
+    run(fx) // HOME giả, không FLOW_DON_SCRIPT: hook không phải bản đã cài của HOME này
+    await new Promise((r) => setTimeout(r, 400))
+    assert.deepEqual(bg.spawned(), [])
+    assert.equal(fs.existsSync(mark(fx)), false)
+  })
+})
+
 describe('chạy trong Paseo', () => {
   test('có PASEO_AGENT_ID ⇒ dặn dùng skill flow-paseo; không có ⇒ không nhắc gì về Paseo', () => {
     const fx = fixture()

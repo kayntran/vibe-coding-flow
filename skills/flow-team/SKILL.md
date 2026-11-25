@@ -29,6 +29,8 @@ Chia nhiều làn ⇒ đọc `references/chay-song-song.md` trước khi giao. C
   chính, cấm nối database thật. Worktree chỉ cô lập file: không chạy migration đồng thời lên cùng DB local.
 - Làn cần chạy app/dev server/`qa-tester` ⇒ cấp port bằng `wt-env.mjs alloc`, không bao giờ dùng port mặc định của dự án.
 - Giao xong không ngó chừng (không sleep/poll/đọc log) — hệ thống tự báo khi xong.
+- **Không ai ngồi chờ** [2t4a]: trước khi mở hộp hỏi user, hoặc trước khi captain bắt tay vào việc dài của riêng mình (dựng demo, soát
+  giao diện, viết SPEC), việc nào không phụ thuộc thì giao worker chạy ngầm TRƯỚC. Hộp hỏi làm phiên đứng im; worker nền vẫn chạy.
 - Làn trả về: `lane-check.mjs audit` trước khi nhận; có file ngoài scope (`OUTSIDE`) ⇒ không gộp.
 - KHÔNG song song khi: cỡ S hoặc tổng việc < ~30 phút · `lane-check plan` vẫn báo OVERLAP/HOT sau một lần chỉnh bảng · việc nguyên khối
   · chuỗi wave > 3 mà mỗi wave chỉ 1 làn · cần soát diff >4 làn một lúc (giữ ≤4).

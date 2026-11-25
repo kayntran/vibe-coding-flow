@@ -1187,6 +1187,25 @@ function commandLine(tokens) {
   return tokens.map(quote).join(' ')
 }
 
+// Mã cây file của commit đang đứng (HEAD^{tree}): hai commit cùng mã này có nội dung y hệt nhau, dù khác lịch sử (gom commit, rebase không đổi gì).
+const headTree = (info) => (git(info.dir, ['rev-parse', 'HEAD^{tree}']) ?? '').trim() || null
+
+// Thư mục làm việc đúng bằng commit đang đứng: không file sửa dở, không file mới chưa đưa vào git (file bị git bỏ qua không tính). Không hỏi được git ⇒ coi là không sạch.
+const workClean = (info) => (git(info.dir, ['status', '--porcelain']) ?? 'x').trim() === ''
+
+// Mã cây file để ghi vào dấu test, hoặc null khi lúc chạy test thư mục làm việc KHÁC commit (file vá tạm, file mới chưa add mà test có dùng):
+// khi đó bản đã commit chưa từng qua test, dấu không được coi là "đúng bản code này" về sau.
+const stampTree = (info) => (workClean(info) ? headTree(info) : null)
+
+// Dấu test của diff `pid` có đúng là của bản code đang đứng không [1osp]: lúc chạy và lúc hỏi thư mục làm việc đều sạch, cùng mã cây file.
+// Sai (main đã nhích rồi rebase, chạy test lúc còn file dở, dấu kiểu cũ không ghi mã cây) ⇒ bộ test đủ phải chạy lại trước khi gộp; đúng ⇒ dùng lại.
+function testStampCurrent(info, pid) {
+  let stamp
+  try { stamp = JSON.parse(readMark(path.join(info.gatesDir, `test-${pid}.json`)) ?? 'null') } catch { return false }
+  if (!stamp?.tree || stamp.tree !== headTree(info)) return false
+  return workClean(info)
+}
+
 // stamp test -- <lệnh…>: chạy lệnh (shell) trong cwd, in output ra màn hình đồng thời ghi test-<pid>.log;
 // exit 0 ⇒ ghi test-<pid>.json {cmd, ts, durationMs}; exit ≠ 0 ⇒ không ghi dấu (gỡ dấu cũ của cùng diff) và thoát cùng mã.
 // Suốt lúc chạy có running-test-<pid>.json (xem stampTestRunning) để hook Stop không nhắc.
@@ -1197,6 +1216,7 @@ async function cliStampTest(tokens) {
   if (!pid) return fail(`Diff ${base}...HEAD rỗng (chưa commit hoặc không khác ${base}) nên không có patch-id để đóng dấu.`)
   const cmd = commandLine(tokens)
   const stamp = path.join(info.gatesDir, `test-${pid}.json`)
+  const tree = stampTree(info) // bản code lúc BẮT ĐẦU chạy (null nếu còn file dở): `status` so lại để biết dấu còn đúng bản code đang đứng không [1osp]
   fs.mkdirSync(info.gatesDir, { recursive: true })
   // Đánh dấu "đang chạy" để hook Stop không đòi dấu trong lúc AI chờ lệnh này; xoá trong finally (đạt, hỏng hay lỗi đều xoá).
   // Bị giết cứng thì không kịp xoá ⇒ hookStop tự bỏ đánh dấu của tiến trình đã chết.
@@ -1218,7 +1238,7 @@ async function cliStampTest(tokens) {
       process.exitCode = code
       return
     }
-    fs.writeFileSync(stamp, JSON.stringify({ cmd, ts: new Date().toISOString(), durationMs: Date.now() - started }) + '\n') // dấu xong rồi mới gỡ đánh dấu ⇒ hookStop không có lúc thấy cả hai đều trống
+    fs.writeFileSync(stamp, JSON.stringify({ cmd, ts: new Date().toISOString(), durationMs: Date.now() - started, tree }) + '\n') // dấu xong rồi mới gỡ đánh dấu ⇒ hookStop không có lúc thấy cả hai đều trống
     console.log(pid)
   } finally {
     try {
@@ -1279,7 +1299,8 @@ async function cliStatus() {
   console.log(`uiTouched: ${st ? st.ui : false}`)
   console.log(`review: ${st?.hasReview ? 'có' : 'không'}`)
   console.log(`qa: ${st?.hasQa ? 'có' : st?.naOnUi ? 'không (N/A nhưng diff có UI)' : st?.pUnreadable?.length ? `không (${unreadableNote(st.pUnreadable)})` : st?.pMissing?.length ? `không (thiếu dòng "${P_LINE_FORMAT}" cho ${st.pMissing.join(', ')})` : 'không'}`)
-  console.log(`test: ${st?.testExempt ? `không đòi (${st.testExempt})` : st?.hasTest ? 'có' : 'không'}`)
+  const testNote = !st?.hasTest ? 'không' : testStampCurrent(info, pid) ? 'có (đúng bản code này: dùng lại, không cần chạy lại)' : 'có (code đã đổi từ lần chạy: nền mới hoặc file sửa chưa commit — chạy lại bộ đủ trước khi gộp)'
+  console.log(`test: ${st?.testExempt ? `không đòi (${st.testExempt})` : testNote}`)
 }
 
 // ---------- main ----------

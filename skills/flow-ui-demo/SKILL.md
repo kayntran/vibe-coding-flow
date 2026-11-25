@@ -26,6 +26,8 @@ Mặc định **5 bản**, kể cả app đã có giao diện [oabq]. User nói 
 
 ## Cách dựng
 
+Đang trong `flow-feature`: TRƯỚC khi dựng, giao các làn không đụng giao diện cho worker chạy ngầm (`flow-team`); dựng demo và chờ user
+chọn không được chặn phần còn lại [2t4a].
 Làm trong worktree, ngay trong app của dự án, dùng stack và thành phần thật. Không widget/artifact, không HTML rời, không dịch vụ
 tạo giao diện ngoài. Chưa có app ⇒ dựng khung trước (`flow-new-app`).
 
@@ -54,6 +56,7 @@ Chạy app, mở cho user xem. Trong chat nêu một dòng cho mỗi bản, rồ
 chọn kèm phần đánh đổi. Được phép ghép ("bố cục bản 2, danh sách bản 4"). Sửa theo lời tới khi user gật.
 
 Không mở được trên máy (máy ảo, app desktop): gửi ảnh chụp từng bản ở từng cỡ.
+User vắng (`flow-away`) ⇒ không hỏi: tự chọn theo tiêu chí user đã cho, lưu ảnh mọi bản trước khi gỡ, ghi sổ chốt dạng chờ xem.
 
 ## Chọn xong
 

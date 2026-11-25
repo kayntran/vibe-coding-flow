@@ -36,6 +36,7 @@ git diff main...HEAD | node ~/.claude/hooks/secret-scan.mjs --diff -
 node ~/.claude/hooks/flow-check.mjs --dir <WT>
 node ~/.claude/hooks/deps-check.mjs --repo <WT> --base main --head HEAD
 ```
+`flow-check` đã xanh ở đúng commit này (`Kiểm máy: xanh @<commit>` trong `progress.md`) ⇒ bỏ dòng thứ hai, không chạy lại [1osp].
 Thêm: `.env` có bị git theo dõi không (`git ls-files .env .env.local .env.production`), thư viện vừa thêm có lỗ hổng không.
 Công cụ không chạy được ⇒ ghi "chưa kiểm được" vào báo cáo, không coi là sạch.
 

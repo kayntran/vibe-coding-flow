@@ -55,7 +55,8 @@ Xong ⇒ quay `flow-qa` chạy lại phần liên quan và một vòng luồng c
 
 ## 5. Khi không xong
 
-- Cùng một lỗi 2 vòng sửa vẫn đỏ ⇒ leo thang theo skill `flow-team`.
+- Cùng một lỗi 2 vòng sửa vẫn đỏ ⇒ viết ra giả định mà cả hai lần sửa cùng dựa vào và kiểm thẳng giả định đó (thường nó mới là
+  thứ sai), rồi mới leo thang theo skill `flow-team`.
 - 3 vòng ⇒ **dừng vá**: nhiều khả năng sai ở thiết kế. Xem lại kiến trúc và giả định quanh lỗi, báo user bằng lời kèm 2-3 hướng và đánh đổi của mỗi hướng. Không thử lần thứ tư; không đổi cách đếm để tránh mốc này.
 
 ## Những câu tự biện minh cần bắt

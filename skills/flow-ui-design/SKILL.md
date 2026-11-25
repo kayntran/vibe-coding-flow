@@ -67,7 +67,8 @@ Mỗi dòng: `màn, cỡ, trạng thái | thấy gì | ảnh | hướng sửa`. 
 - Không sửa kỳ vọng hay tắt máy kiểm cho khớp với lỗi.
 
 Báo theo khuôn: đã sửa gì, người dùng thấy gì khác, còn gì cần user quyết, phần nào chưa kiểm. Có đụng giao diện thì hỏi "giao diện
-đã ổn chưa?" theo luật trong `CLAUDE.md`; sửa rất nhỏ chỉ gửi ảnh trước/sau.
+đã ổn chưa?" theo luật trong `CLAUDE.md`; sửa rất nhỏ chỉ gửi ảnh trước/sau. Đang chạy trong luồng có `flow-qa` ⇒ không hỏi riêng ở
+đây: `flow-qa` mục 3 hỏi một lần cho cả việc [1osp].
 
 ## Đọc khi cần
 

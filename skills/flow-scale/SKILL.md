@@ -1,12 +1,18 @@
 ---
 name: flow-scale
-description: Đo app chịu được bao nhiêu người cùng lúc, tìm chỗ nghẽn, sửa rồi đo lại — luôn trên bản thử riêng, không đụng bản thật. Dùng khi user nói kiểu "app chậm", "sắp đông người", "có chịu nổi 500 người không", "kiểm tra tải", "load test", "k6". KHÔNG dùng để kiểm lỗi chức năng (dùng flow-qa) hay rà bảo mật (dùng flow-review).
+description: Đo app chịu được bao nhiêu người cùng lúc, tìm chỗ nghẽn, sửa rồi đo lại — luôn trên bản thử riêng, không đụng bản thật. Dùng khi user nói kiểu "app chậm", "nhiều request quá", "máy chủ nặng", "sắp đông người", "có chịu nổi 500 người không", "kiểm tra tải", "load test", "k6". KHÔNG dùng để kiểm lỗi chức năng (dùng flow-qa) hay rà bảo mật (dùng flow-review).
 ---
 
 # Flow — đo tải, tìm chỗ nghẽn, sửa, đo lại
 
 Tải quá tay trên gói miễn phí làm **app thật ngưng tới 00:00 UTC** (hết hạn mức ngày). Vì vậy: chỉ đo bản thử, tăng
 dần, dừng khi chạm 70% hạn mức.
+
+## 0. "Nhiều request", "máy chủ nặng", "tải chậm" ⇒ đếm trước, chưa đo tải vội [r69o]
+
+Đo tải trả lời "chịu được bao nhiêu người". Còn một người dùng đã tốn quá nhiều thì phải đếm: request theo màn và theo hành động, số
+lần đọc ghi cơ sở dữ liệu mỗi request, việc hẹn giờ chạy khi không ai dùng. Cách đếm và bảng mẫu lỗi: skill `flow-system-design`, file
+`references/tai-trang-request.md` (mục "Soát app đang chạy"). Chỉ đọc và đo; sửa là việc riêng qua `flow-feature`/`flow-fix`.
 
 ## 1. Hỏi mục tiêu bằng lời (AskUserQuestion, không hỏi kỹ thuật)
 - "Lúc đông nhất, khoảng bao nhiêu người dùng app cùng lúc?" (gợi ý các mức: 20 · 100 · 500 · 2.000).

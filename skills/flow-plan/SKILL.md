@@ -15,7 +15,8 @@ Trả lời trong đầu PLAN.md, mỗi câu một dòng:
 
 ## Chuẩn bị
 
-- **Skill/MCP của thư viện chính:** `node ~/.claude/hooks/skills-check.mjs --host claude|codex --dir <repo> --lib <a,b>`.
+- **Skill/MCP của thư viện chính** (đang trong `flow-feature` thì bước gom chuẩn bị đã kiểm và đã hỏi: dùng kết quả đó, không hỏi lại):
+  `node ~/.claude/hooks/skills-check.mjs --host claude|codex --dir <repo> --lib <a,b>`.
   `installed` + `ok` ⇒ đọc khi viết plan. `missing` ⇒ hỏi user một câu đời thường rồi chạy lệnh cài nó in (chỉ bản chính hãng trong
   `kit/official.json`; bản cộng đồng: đọc, soát, viết lại thành skill dự án). `needs-login` ⇒ báo đúng việc cần đăng nhập.
   `misconfigured` ⇒ báo một dòng. `unknown` ⇒ thử một lệnh đọc rẻ trước khi dựa vào. Cài xong cần mở lại phiên ⇒ ghi sổ tiến độ trước.

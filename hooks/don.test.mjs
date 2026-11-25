@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, test } from 'node:test'
-import { classify, don } from './don.mjs'
+import { classify, don, quet } from './don.mjs'
 
 const tmp = () => fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'don-')))
 const git = (dir, ...a) => {
@@ -227,5 +227,135 @@ describe('don: worktree', () => {
     const root = repo()
     const c = classify(root, { cwd: os.homedir() })
     assert.notEqual(c.kind, 'worktree')
+  })
+})
+
+describe('don --quet: đồ tạm cũ không ai đụng [12e1]', () => {
+  const DAY = 86400000
+  const cwd = os.homedir()
+  const lamCu = (p) => { const t = new Date(Date.now() - 30 * DAY); fs.utimesSync(p, t, t) }
+  const later = Date.now() + 30 * DAY // nhìn từ 30 ngày sau: mọi thứ vừa tạo đều đã cũ
+  const names = (list) => list.map((x) => path.basename(x.path)).sort()
+
+  function mixed() {
+    const root = tmp()
+    const cu = path.join(root, 'cu')
+    fs.mkdirSync(cu)
+    fs.writeFileSync(path.join(cu, 'a.log'), 'xyz')
+    lamCu(path.join(cu, 'a.log'))
+    lamCu(cu)
+    fs.writeFileSync(path.join(root, 'le.png'), 'xx')
+    lamCu(path.join(root, 'le.png'))
+    fs.mkdirSync(path.join(root, 'moi'))
+    const lai = path.join(root, 'lai') // thư mục cũ nhưng bên trong có file vừa sửa
+    fs.mkdirSync(path.join(lai, 'con'), { recursive: true })
+    fs.writeFileSync(path.join(lai, 'con', 'vua-sua.txt'), 'x')
+    lamCu(path.join(lai, 'con'))
+    lamCu(lai)
+    return root
+  }
+
+  const theoGioSua = (st) => st.mtimeMs // các test dựng đồ "cũ" bằng cách chỉnh giờ sửa ⇒ chỉ nhìn giờ sửa
+
+  test('thư mục cũ và file lẻ cũ bị dọn; mục còn mới và thư mục cũ có file vừa sửa bên trong thì giữ nguyên', () => {
+    const root = mixed()
+    const r = quet({ roots: [root], cwd, stamp: theoGioSua })
+    assert.deepEqual(names(r.removed), ['cu', 'le.png'])
+    assert.equal(r.fresh, 2)
+    assert.equal(r.bytes, 5)
+    assert.deepEqual(fs.readdirSync(root).sort(), ['lai', 'moi'])
+    assert.equal(fs.existsSync(path.join(root, 'lai', 'con', 'vua-sua.txt')), true)
+  })
+
+  test('chạy thử (dry) kể đúng những mục sẽ dọn nhưng không xoá gì', () => {
+    const root = mixed()
+    const r = quet({ roots: [root], cwd, dry: true, stamp: theoGioSua })
+    assert.deepEqual(names(r.removed), ['cu', 'le.png'])
+    assert.deepEqual(fs.readdirSync(root).sort(), ['cu', 'lai', 'le.png', 'moi'])
+  })
+
+  test('đồ vừa đưa vào hôm nay nhưng giờ sửa cũ (vừa giải nén, vừa chép vào) ⇒ còn mới, không dọn', () => {
+    const root = mixed() // mọi thứ vừa tạo; một số bị chỉnh giờ sửa lùi 30 ngày
+    const r = quet({ roots: [root], cwd })
+    assert.deepEqual(r.removed, [])
+    assert.equal(r.fresh, 4)
+    assert.deepEqual(fs.readdirSync(root).sort(), ['cu', 'lai', 'le.png', 'moi'])
+  })
+
+  test('bản tải về nguyên vẹn thì dọn; mọi repo còn thứ chỉ có ở máy này thì giữ và không mất gì', () => {
+    const origin = repo()
+    const root = tmp()
+    const NET = 'https://example.invalid/x.git'
+    const clone = (name, url = NET) => {
+      const d = path.join(root, name)
+      git(root, 'clone', '-q', origin, d)
+      if (url) git(d, 'remote', 'set-url', 'origin', url)
+      return d
+    }
+    clone('sach')
+    const coCommit = clone('co-commit')
+    fs.writeFileSync(path.join(coCommit, 'moi.txt'), 'x')
+    git(coCommit, 'add', '.')
+    git(coCommit, 'commit', '-qm', 'chua day')
+    fs.writeFileSync(path.join(clone('co-file-moi'), 'nhap.txt'), 'việc dở chưa add')
+    clone('noi-day-tai-may', null) // nơi đẩy lên là một đường dẫn trên máy
+    const long = clone('long') // repo ngoài sạch, nhưng bên trong (phần bị bỏ qua) có repo riêng chỉ nằm trên máy
+    fs.appendFileSync(path.join(long, '.git', 'info', 'exclude'), 'vendor/\n')
+    fs.mkdirSync(path.join(long, 'vendor', 'lib'), { recursive: true })
+    git(path.join(long, 'vendor', 'lib'), 'init', '-q', '-b', 'main')
+    fs.writeFileSync(path.join(long, 'vendor', 'lib', 'c.txt'), 'x')
+    git(path.join(long, 'vendor', 'lib'), 'add', '.')
+    git(path.join(long, 'vendor', 'lib'), 'commit', '-qm', 'c')
+    const rieng = path.join(root, 'rieng')
+    fs.mkdirSync(rieng)
+    git(rieng, 'init', '-q', '-b', 'main')
+    fs.writeFileSync(path.join(rieng, 'b.txt'), 'x')
+    git(rieng, 'add', '.')
+    git(rieng, 'commit', '-qm', 'b')
+    git(origin, 'worktree', 'add', '-q', '-b', 'wt', path.join(root, 'wt'))
+    const r = quet({ roots: [root], cwd, now: later })
+    assert.deepEqual(names(r.removed), ['sach'])
+    assert.deepEqual(fs.readdirSync(root).sort(), ['co-commit', 'co-file-moi', 'long', 'noi-day-tai-may', 'rieng', 'wt'])
+    const why = Object.fromEntries(r.kept.map((x) => [path.basename(x.path), x.why]))
+    assert.match(why['co-commit'], /chưa đẩy lên/)
+    assert.match(why['co-file-moi'], /file mới/)
+    assert.match(why['noi-day-tai-may'], /chỉ nằm trên máy/)
+    assert.match(why.long, /chỉ nằm trên máy/)
+    assert.match(why.rieng, /chỉ nằm trên máy/)
+    assert.match(why.wt, /worktree/)
+    for (const f of ['co-commit/moi.txt', 'co-file-moi/nhap.txt', 'long/vendor/lib/c.txt', 'rieng/b.txt', 'wt/a.txt']) assert.equal(fs.existsSync(path.join(root, f)), true, f)
+  })
+
+  test('thư mục cũ đang có tiến trình đứng bên trong ⇒ giữ nguyên, không mất file nào', { skip: process.platform !== 'win32' }, async () => {
+    const root = tmp()
+    const dang = path.join(root, 'dang-dung')
+    fs.mkdirSync(path.join(dang, 'con'), { recursive: true })
+    fs.writeFileSync(path.join(dang, 'con', 'a.txt'), 'x')
+    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { cwd: dang, stdio: 'ignore' })
+    try {
+      await new Promise((r) => setTimeout(r, 500))
+      const r = quet({ roots: [root], cwd, now: later })
+      assert.deepEqual(r.removed, [])
+      assert.match(r.kept[0].why, /đang được dùng/)
+      assert.equal(fs.existsSync(path.join(dang, 'con', 'a.txt')), true)
+    } finally {
+      child.kill()
+    }
+  })
+
+  test('liên kết tắt tới thư mục khác ⇒ giữ, thư mục đích không mất gì', () => {
+    const dich = tmp()
+    fs.writeFileSync(path.join(dich, 'quy.txt'), 'x')
+    const root = tmp()
+    fs.symlinkSync(dich, path.join(root, 'lk'), 'junction')
+    const r = quet({ roots: [root], cwd, now: later })
+    assert.deepEqual(r.removed, [])
+    assert.match(r.kept[0].why, /liên kết tắt/)
+    assert.equal(fs.existsSync(path.join(dich, 'quy.txt')), true)
+  })
+
+  test('số ngày dưới 1 ⇒ không chạy (tránh xoá đồ đang dùng)', () => {
+    assert.throws(() => quet({ roots: [mixed()], cwd, days: 0 }), /từ 1 trở lên/)
+    assert.throws(() => quet({ roots: [], cwd, days: Number.NaN }), /từ 1 trở lên/)
   })
 })

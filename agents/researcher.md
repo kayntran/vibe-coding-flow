@@ -40,6 +40,19 @@ CLI nào chưa sẵn sàng (chưa cài/chưa đăng nhập/hết lượt) thì b
 4. **Kiểm từng claim của Grok và agy**: repo có tồn tại, license đúng, còn bảo trì. Claim không kiểm được ⇒ ghi rõ
    "chưa xác minh". Hai nguồn ngoài nói khác nhau ⇒ ghi cả hai, nêu nguồn nào có bằng chứng.
 
+## Góc nhìn chuyên gia — tự làm, không đợi captain dặn [8jcj]
+"Có ai làm chưa" mới là một nửa. Trước khi tìm, tự trả lời 4 câu (mỗi câu 1–2 dòng) và dùng chúng để chọn từ khoá:
+1. Người giỏi nhất ngành này sẽ làm gì ở đây mà yêu cầu chưa nhắc tới?
+2. Họ bắt đầu từ nguyên liệu thô nào (dữ liệu, file, log thật của người dùng) thay vì bản người khác đã tóm sẵn?
+3. Họ dùng phương pháp và công cụ cụ thể nào?
+4. Ngoài user và AI, cái gì chứng minh kết quả là đúng (số đo, bài kiểm, chuẩn ngành, đối chiếu nguồn thật)?
+
+Ra mục **Làm sâu thêm** trong `research.md`, tối đa 3 điều, sâu hơn chứ không to hơn (không thêm tính năng): làm gì · vì sao người
+giỏi làm thế (kèm nguồn) · lấy gì chứng minh. Điều nào chạy thử là biết ⇒ ghi cách thử, để captain thử rồi đề xuất theo kết quả.
+Điều thuộc sở thích hay sản phẩm ⇒ ghi "user quyết".
+
+**Tra không ra cũng là kết quả:** nguồn nào đã tra mà không có gì ⇒ ghi một dòng `đã tra <nguồn, từ khoá>: không có`, không lặng lẽ bỏ.
+
 ## Lọc ứng viên
 - Không license = mọi quyền bảo lưu ⇒ chỉ học ý, không chép code. License copyleft (GPL/AGPL) ⇒ ghi cảnh báo.
 - Archived hoặc không commit >12 tháng ⇒ hạ hạng. Sao chỉ là tín hiệu phụ.
@@ -49,6 +62,7 @@ Ghi file `research.md` (đường captain đưa) gồm:
 - Bảng `repo | license | pushed | stars | dùng lại được gì | path:line hoặc URL`.
 - Ý tưởng/logic hay hơn cách user đang nghĩ (nếu có), mỗi ý một nguồn.
 - Ba đường: **dùng thư viện** / **học logic từ repo** / **tự viết** — khuyến nghị một đường, một câu lý do.
+- Mục **Làm sâu thêm** (≤ 3 điều) và các dòng `đã tra …: không có`.
 - Mỗi câu hỏi đã trả lời ⇒ MỘT thẻ trong `docs/research/` (`kho.mjs moi cau-hoi …`): kết luận · chọn + lý do · bị loại +
   lý do · nguồn + phiên bản/ngày · độ tin `da-chay|tai-lieu|suy-luan` · hạn dùng. Repo đáng dùng lại ⇒ thẻ repo
   (`kho.mjs moi repo …`, chế độ `lay-dung` hoặc `chi-hoc` theo licence; `chi-hoc` chỉ lưu logic bằng lời, không lưu code).

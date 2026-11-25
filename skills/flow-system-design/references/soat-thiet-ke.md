@@ -53,6 +53,9 @@ Dùng ở bước soát (sau bước 10) của `flow-system-design`.
 | 23 | Làm thừa: mỗi thành phần trả lời được "yêu cầu/con số nào bắt buộc có nó"? Không microservices/Kafka/K8s/Redis thiếu con số? | Vừa |
 | 24 | Đã đào sâu 2–3 phần rủi ro nhất thay vì dàn đều? | Nhẹ |
 | 25 | Có mục rủi ro và câu hỏi mở; câu hỏi cho user là về hành vi app/tiền, không về lựa chọn kỹ thuật? | Nhẹ |
+| 26 | App có màn hình: có bảng ngân sách request (lúc mở màn, lúc ngồi yên, mỗi hành động) và số lần đọc ghi cơ sở dữ liệu mỗi request, kèm bài kiểm đếm lại? Hành động lặp nhanh có gom lô? Các màn dùng chung một lớp tải dữ liệu có nhớ? | Vừa |
+| 27 | Tải trang: có ngưỡng dung lượng mã chạy lần đầu và thời gian hiện màn đầu; mọi loại file tĩnh (kể cả ảnh, âm thanh không có mã băm) có hạn nhớ; phản hồi dữ liệu được nén? | Vừa |
+| 28 | Việc hẹn giờ: tần suất có lý do, truy vấn dùng được chỉ mục, không tranh kết nối cơ sở dữ liệu với người dùng? Có số đo request và thời gian mỗi request từ ngày đầu? | Vừa |
 
 ## Soát hệ thống có sẵn
 
@@ -65,6 +68,8 @@ Dùng ở bước soát (sau bước 10) của `flow-system-design`.
 5. Chỗ gọi ra ngoài: tìm `fetch(`, SDK AI/SMS/email/thanh toán — có timeout, retry, trần chưa.
 6. Lần theo 1–2 luồng chính từ màn hình tới DB và ngược lại.
 7. Đếm sơ: số file, số module, số bảng — để xếp hạng quy mô thật.
+8. User than "nhiều request", "máy chủ nặng", "tải chậm" ⇒ đo trước khi đoán theo mục "Soát app đang chạy" của tài liệu request và tốc
+   độ tải trang (nhật ký máy chủ, đếm request theo màn, đếm đọc ghi cơ sở dữ liệu mỗi request).
 
 **Gắn nhãn mỗi phát hiện:**
 - **Đã thấy** — có bằng chứng `path:line` hoặc dòng cấu hình.

@@ -38,6 +38,11 @@ Với mỗi acceptance criteria, thử:
    đâu ⇒ bug (thiếu gợi ý ở đúng chỗ đó). Đồng thời liệt kê chữ THỪA: đoạn giải thích, tooltip/placeholder cho thứ hiển
    nhiên, nhãn dài >3 chữ, thông báo lặp lại điều UI đã thể hiện ⇒ ghi mức MINOR kèm ảnh, đề xuất bỏ.
 6. Mạng chậm (`page.route` thêm độ trễ) cho thao tác có gọi API.
+7. **Đếm request** (brief có ngân sách từ DESIGN.md, hoặc app có gọi máy chủ): số request dữ liệu lúc mở mỗi màn chính, trong 10 giây
+   ngồi yên, và khi làm hành động chính 10 lần liên tiếp; mở lại màn lần hai có tải lại file tĩnh không. Vượt ngân sách, hoặc ngồi
+   yên mà vẫn có request ⇒ bug MAJOR kèm danh sách request.
+
+Brief ghi có lượt `mode=nguoi-moi` riêng ⇒ bỏ mục 5 ở lượt này, không làm hai lần.
 
 **Brief ghi `mode=nguoi-moi`** ⇒ chỉ làm bài người mới: KHÔNG đọc code, SPEC, PLAN, test của dự án; chỉ có mục tiêu bằng
 lời trong brief. Đi từ màn đầu, mỗi bước ghi: thấy gì, định bấm gì, vì sao; đếm lần bấm nhầm, chỗ phải đoán, chỗ kẹt

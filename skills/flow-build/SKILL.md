@@ -27,7 +27,8 @@ Màn mới hoặc làm lại giao diện ⇒ task ghi `(chờ demo)` làm theo b
 
 ## 2. Chia việc
 
-Một mình làm được thì không chia. Chạy song song ⇒ theo `flow-team`, và:
+Một mình làm được thì không chia. Plan có task `(chờ demo)` ⇒ giao các làn còn lại cho worker chạy ngầm TRƯỚC khi captain dựng demo
+hay mở hộp hỏi; không tự làm lần lượt [2t4a]. Chạy song song ⇒ theo `flow-team`, và:
 - Bảng `## Làn` phải qua `node ~/.claude/hooks/lane-check.mjs plan <PLAN.md>`.
 - Mỗi làn một nhóm file riêng. Hai làn cần cùng file ⇒ gộp làn hoặc chạy nối tiếp.
 - File nóng (lockfile, migration, cấu hình gốc, i18n chung, registry) chỉ một chủ.
@@ -43,6 +44,11 @@ Một mình làm được thì không chia. Chạy song song ⇒ theo `flow-team
 
 PLAN cũ không có ô tick ⇒ ghi vào mục `## Kết quả`, không bắt viết lại plan.
 
+**Test đúng, không thừa** [1osp]: mỗi tiêu chí (`AC-nn`, `S-nn`, `P-nn`) và mỗi lỗi đã sửa có MỘT test bắt được nó, đặt ở tầng rẻ nhất
+bắt được (hàm → API → mở app). Không viết: test cho thư viện hay khung · test lặp cùng một nhánh code bằng số liệu khác mà không thêm ca
+biên · test bám cách viết bên trong (đổi ruột, kết quả y nguyên mà test đỏ ⇒ viết lại theo kết quả) · test chỉ kiểm mock của chính nó.
+Test mở app (e2e) chỉ cho luồng chính và thứ chỉ thấy được trên màn hình. Thêm test phải nói được nó bắt lỗi nào mà test đang có không bắt.
+
 ### Soát theo mốc (việc M/L) [lcly]
 
 **Mốc** = một làn xong, hoặc một khối 2–4 task liền nhau tạo thành phần chạy được (vd "lưu và đọc lượt đặt"). Plan có ghi mốc thì
@@ -55,8 +61,8 @@ làm gì + "SOÁT MỐC: chỉ BLOCKER/MAJOR; xem cả chỗ gọi tới phần 
 - AI ngoài hết lượt ⇒ dùng bậc dự phòng của `flow-review`; không còn gì ⇒ bỏ soát mốc, ghi "mốc chưa soát", soát cuối bù.
 - Cỡ S: không soát mốc, chỉ soát cuối.
 
-Xong hết task ⇒ **kiểm rộng:** `node ~/.claude/hooks/flow-check.mjs --dir <worktree>` và test của những chỗ gọi tới phần vừa sửa.
-Bộ đủ để dành cho `flow-qa`. Kết quả cũ chỉ dùng lại được khi code, dữ liệu vào và môi trường không đổi.
+Xong hết task ⇒ **kiểm rộng:** test của những chỗ gọi tới phần vừa sửa. Máy kiểm `flow-check.mjs` và bộ test đủ chạy MỘT lần ở `flow-qa`,
+không chạy ở đây rồi chạy lại ở đó [1osp]. Kết quả cũ chỉ dùng lại được khi code, dữ liệu vào và môi trường không đổi.
 
 ## 4. Khi kiểm hỏng
 

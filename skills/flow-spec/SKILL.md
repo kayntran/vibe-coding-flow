@@ -54,6 +54,11 @@ Thấy cách rẻ hơn đạt cùng kết quả thì kể một lần, kèm đá
   thẻ vào `docs/research/`.
 - User đưa repo/link: đọc kỹ MỘT lần, ghi thẻ (`kho.mjs moi repo …`: làm gì, cấu trúc, lấy được gì, licence, commit đã đọc, chế
   độ `lay-dung` hoặc `chi-hoc` cho GPL/AGPL/cấm thương mại, chỉ lưu logic bằng lời). Lần sau đọc thẻ.
+- **Góc nhìn chuyên gia** [8jcj], tự làm kể cả khi không gọi `researcher`: trả lời 4 câu — người giỏi nhất ngành sẽ làm gì ở đây mà
+  user chưa xin · họ bắt đầu từ nguyên liệu thô nào (dữ liệu, file, log thật) · dùng phương pháp và công cụ nào · cái gì ngoài user và AI
+  chứng minh kết quả đúng. Rút tối đa 3 điều làm yêu cầu **sâu hơn chứ không to hơn**; câu thứ tư thành dòng trong "Thế nào là đạt".
+  Lựa chọn chạy thử là biết ⇒ dựng bản thử nhỏ rồi đề xuất theo điều quan sát được; lựa chọn thuộc sở thích hay sản phẩm ⇒ user chọn.
+- Nguồn đã tra mà không ra gì vẫn ghi lại (`đã tra …: không có`), không lặng lẽ bỏ.
 - Có kết quả đáng giá thì kể user trước khi chốt SPEC.
 
 ## 4. Luồng màn hình

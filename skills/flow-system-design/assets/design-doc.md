@@ -28,6 +28,14 @@
 Request/giây trung bình và cao điểm · tỉ lệ đọc/ghi · dung lượng 1 năm · băng thông · **chi phí tháng theo từng khoản**
 (hạ tầng, AI, SMS/email, lưu file). Ghi phép tính, không chỉ ghi kết quả.
 
+**Ngân sách request và tải trang (M, app có màn hình)** — mỗi màn chính và mỗi hành động lặp nhiều một dòng; số mặc định và cách kiểm
+ở tài liệu request và tốc độ tải trang của skill:
+
+| Màn / hành động | Request lúc mở | Request khi ngồi yên 60 giây | Request mỗi hành động | Đọc ghi cơ sở dữ liệu mỗi request | Bài kiểm đếm lại |
+|---|---|---|---|---|---|
+
+Mã chạy tải lần đầu ≤ … kB · màn đầu hiện nội dung chính ≤ … giây · file tĩnh loại nào nhớ bao lâu.
+
 ## 5. Bản mẫu tính năng đã áp (M)
 | Loại | Làm ngay (→ AC/task) | Chừa chỗ (móc ở đâu) | Chưa làm (ngưỡng cần) |
 |---|---|---|---|

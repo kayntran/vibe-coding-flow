@@ -16,6 +16,8 @@ Soát chỉ là báo và kiểm. Sửa thuộc bước 4, gộp thuộc skill `f
 `node ~/.claude/hooks/flow-check.mjs --dir <WT>` (lint, typecheck, SAST, lỗ hổng thư viện, khoá trong bản build…) + test
 đủ bộ + `node ~/.claude/hooks/deps-check.mjs --repo <WT> --base main --head HEAD` (thư viện mới). Xanh rồi mới gọi model,
 để không tốn lượt cho thứ công cụ đã bắt. Không chạy được bước nào ⇒ ghi lại, báo ở bước 6, không đứng lại.
+**Dùng lại, không chạy lại** [1osp]: `node ~/.claude/hooks/flow-gate.mjs status` báo `test: có (đúng bản code này…)` ⇒ bỏ bộ test đủ;
+`progress.md` ghi `Kiểm máy: xanh @<commit đang đứng>` ⇒ bỏ `flow-check`; `flow-security` đã chạy `deps-check` trên commit này ⇒ bỏ nốt.
 
 ## 1. Đối chiếu yêu cầu trước
 

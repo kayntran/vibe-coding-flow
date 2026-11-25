@@ -5,8 +5,8 @@ description: Thiết kế hệ thống cho tính năng hoặc app trước khi l
 
 # Thiết kế hệ thống
 
-AI biết khái niệm; cái thiếu là kỷ luật: vẽ trước khi hỏi, không con số, không đánh đổi, làm thừa, quên chống spam tới khi bị
-spam. Skill là quy trình bắt buộc + luật cấm, không phải giáo trình. Chốt [89i7] [hzx4].
+AI biết khái niệm; cái thiếu là kỷ luật (vẽ trước khi hỏi, không con số, làm thừa, quên chống spam). Skill là quy trình bắt buộc +
+luật cấm, không phải giáo trình. Chốt [89i7] [hzx4].
 
 **Ra gì:** `docs/specs/<YYYY-MM-DD>-<slug>/DESIGN.md` theo `assets/design-doc.md`. Cỡ M: chỉ các mục đánh dấu bắt buộc trong mẫu
 (thường dưới 60 dòng). Cỡ L, app mới: đủ mục. Đổi thứ toàn app (module, ranh giới) ⇒ cập nhật `docs/ARCHITECTURE.md` theo `flow-architecture`.
@@ -22,7 +22,8 @@ hai bản chưa nói (app ngừng một giờ, dữ liệu mất thì sao).
 2. **Xếp hạng quy mô** — prototype · MVP · đang tăng · quy mô lớn (ngưỡng mỗi hạng: `references/uoc-luong.md`).
    Ghi hạng ở đầu DESIGN.md. Mọi thành phần phía sau phải khớp hạng; thành phần của hạng cao hơn ⇒ đưa vào lộ trình, không làm ngay.
 3. **Ước lượng bằng con số:** người dùng/ngày → request/giây trung bình và cao điểm, tỉ lệ đọc/ghi, dung lượng một năm, băng thông,
-   **chi phí tháng** (AI, SMS, email là khoản hay đội nhất). Công thức + số tham chiếu: `references/uoc-luong.md`.
+   **chi phí tháng** (AI, SMS, email là khoản hay đội nhất). Công thức + số tham chiếu: `references/uoc-luong.md`. App có màn hình ⇒
+   thêm ngân sách request và tải trang từng màn [r69o] (`references/tai-trang-request.md`).
 4. **Bản mẫu theo loại tính năng.** Nhận ra loại (đăng nhập, gửi mã, gọi AI, tải file, thanh toán…) ⇒ mở đúng file nhóm. Mỗi mục có
    3 tầng: **làm ngay** (rẻ bây giờ, rất đắt nếu để sau) ⇒ thành tiêu chí trong SPEC/task trong plan, kèm bài kiểm; **chừa chỗ** ⇒
    ghi chỗ móc sẵn để sau bật không phải đập đi; **chưa làm** ⇒ ghi ngưỡng sẽ cần. Câu hỏi hành vi trong bản mẫu ⇒ hỏi lúc viết SPEC.
@@ -46,7 +47,6 @@ hai bản chưa nói (app ngừng một giờ, dữ liệu mất thì sao).
   công khai): giới hạn tần suất, giới hạn chi phí, không để lộ thông tin dò được. Đây là tầng "làm ngay", không phải tối ưu.
 - **Không "MVP tạm rồi tính" cho phần khó sửa sau:** mô hình dữ liệu, khoá định danh, cách tách dữ liệu giữa khách hàng, hợp đồng API
   công khai, định dạng file người dùng lưu.
-- **Sơ đồ và chữ phải khớp** từng hộp.
 - **Giá, giới hạn gói, phiên bản thư viện:** tra trang chính thức (kho `kho.mjs tim` trước), ghi ngày tra; không đoán theo trí nhớ.
 - **Tách rõ đã biết và giả định.** Mỗi con số ghi nguồn (SPEC, user nói, đo, tra ngày …, giả định).
 
@@ -64,7 +64,6 @@ hai bản chưa nói (app ngừng một giờ, dữ liệu mất thì sao).
 - `flow-spec`: loại tính năng có bản mẫu ⇒ hỏi các câu hành vi của bản mẫu ở bước dò trường hợp hiếm; tầng "làm ngay" thành `AC-nn`.
 - `flow-feature`: chạy ngay sau khi SPEC được duyệt, trước `flow-plan`. Không thêm cổng duyệt: tóm tắt thiết kế (hạng, con số
   chính, phí tháng, đánh đổi lớn) đi cùng tóm tắt plan.
-- `flow-plan`: đọc DESIGN.md; mỗi mục "làm ngay" có task và Verify; "chừa chỗ" ghi trong mục kiến trúc của plan.
 
 ## Đọc khi cần
 
@@ -76,6 +75,7 @@ hai bản chưa nói (app ngừng một giờ, dữ liệu mất thì sao).
 | `references/kien-truc.md` | bước 5, kiểu kiến trúc |
 | `references/du-lieu.md` · `references/api.md` | bước 6 |
 | `references/noi-luu-supabase.md` · `references/noi-luu-cloudflare-d1.md` · `references/noi-luu-postgres-vps.md` · `references/noi-luu-postgres-workers.md` (Chắc) | chọn nơi lưu (bước 6, app mới), rồi áp công thức đã chọn |
+| `references/tai-trang-request.md` | app có màn hình; app nhiều request, tải chậm |
 | `references/cache.md` | đọc nhiều hoặc chậm |
 | `references/bat-dong-bo.md` | việc nền, queue, gửi hàng loạt |
 | `references/tin-cay.md` | bước 8, sự cố, sao lưu, khôi phục |

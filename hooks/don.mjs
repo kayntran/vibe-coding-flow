@@ -1,5 +1,6 @@
 // don: dọn thư mục có kiểm tra trước, thay cho lệnh xoá đệ quy (bị flow-gate + mod chan-nguy-hiem chặn, và làm app bật hộp hỏi) [psic].
 //   node ~/.claude/hooks/don.mjs <đường dẫn>…     mỗi đường dẫn in một dòng "đã dọn" / "từ chối: lý do"; có từ chối ⇒ exit 1.
+//   node ~/.claude/hooks/don.mjs --quet [--thu] [--ngay <n>]   quét đồ tạm cũ không ai đụng (xem cuối file) [12e1].
 // Chỉ dọn 3 loại, còn lại từ chối:
 //   1. Bên trong thư mục tạm: thư mục tạm hệ thống, <ổ đĩa>:\tmp, /tmp (không phải chính thư mục tạm), và không chứa repo git độc lập.
 //   2. Thư mục build trong một git repo (BUILD_NAMES) mà git đang bỏ qua (.gitignore) và không theo dõi file nào trong đó.
@@ -105,7 +106,7 @@ export function classify(raw, { cwd = process.cwd(), temps = tempRoots() } = {})
     const why = checkWorktree(target, wt)
     return why ? { refuse: why } : { kind: 'worktree', target, common: wt.common }
   }
-  if (holdsRepo(target)) return { refuse: 'trong này có repo git độc lập, có thể còn commit chưa đẩy lên' }
+  if (holdsRepo(target)) return { refuse: 'trong này có repo git độc lập, có thể còn commit chưa đẩy lên', code: 'repo' }
   const parent = path.dirname(target)
   const top = (git(parent, 'rev-parse', '--show-toplevel') ?? '').trim()
   // Có .git ở thư mục cha mà git báo lỗi (repo hỏng, khác chủ sở hữu) ⇒ không suy ra là "không có repo".
@@ -149,11 +150,160 @@ export function don(raw, opts = {}) {
   return { ok: true, line: `đã dọn: ${raw}` }
 }
 
+// ---------- quét đồ tạm cũ [12e1] ----------
+//   node ~/.claude/hooks/don.mjs --quet [--thu] [--ngay <n>]
+// Mỗi mục NGAY DƯỚI thư mục tạm của AI (<ổ đĩa>:\tmp) mà suốt <n> ngày (mặc định 7) không có gì bên trong được sửa ⇒ dọn; --thu chỉ liệt kê.
+// Không quét thư mục tạm hệ thống (của mọi app khác, hệ điều hành tự lo) và /tmp trên macOS/Linux (tự xoá khi khởi động lại).
+// Giữ lại và chỉ kể: bản sao code (worktree), thư mục có repo git còn thứ chưa đẩy lên, liên kết tắt, thứ đang bị tiến trình khác giữ.
+const DAY = 86400000
+
+export function sweepRoots() {
+  if (!WIN) return []
+  return [...'cdefgh'].map((c) => `${c}:\\tmp`).filter((p) => { try { return fs.statSync(p).isDirectory() } catch { return false } })
+}
+
+// Lần cuối một mục bị đụng tới: mới nhất trong sửa nội dung, tạo ra, đổi tên/chuyển chỗ. Chỉ nhìn giờ sửa thì đồ vừa giải nén hay vừa chuyển vào
+// (giờ sửa giữ nguyên từ nguồn) bị coi là cũ. renamed = chính lượt quét vừa đổi tên mục này ⇒ bỏ qua giờ đổi tên của nó.
+const touchedAt = (st, renamed = false) => Math.max(st.mtimeMs, st.birthtimeMs, renamed ? 0 : st.ctimeMs)
+
+// Lần đụng mới nhất và tổng dung lượng của `p`. Gặp thứ bị đụng sau `cutoff` ⇒ fresh và dừng ngay, không đi hết cây.
+function scan(p, cutoff, stamp, acc = { newest: 0, bytes: 0, fresh: false }, renamed = false) {
+  let st
+  try { st = fs.lstatSync(p) } catch { return acc }
+  const at = stamp(st, renamed)
+  if (at > acc.newest) acc.newest = at
+  if (at > cutoff) { acc.fresh = true; return acc }
+  if (st.isSymbolicLink() || !st.isDirectory()) { acc.bytes += st.size; return acc }
+  let entries
+  try { entries = fs.readdirSync(p) } catch { return acc }
+  for (const e of entries) {
+    scan(path.join(p, e), cutoff, stamp, acc)
+    if (acc.fresh) return acc
+  }
+  return acc
+}
+
+// Gốc của MỌI repo git nằm trong `dir` (kể cả chính nó và repo lồng trong repo khác: thư mục bị repo ngoài bỏ qua vẫn có thể là một repo
+// còn commit chưa đẩy). Không đi vào node_modules và ruột .git.
+function repoRoots(dir, out = []) {
+  let entries
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return out }
+  const has = (n) => entries.some((e) => e.name === n)
+  if (has('.git') || (has('HEAD') && has('objects') && has('refs'))) out.push(dir)
+  for (const e of entries) if (e.isDirectory() && e.name !== 'node_modules' && e.name !== '.git') repoRoots(path.join(dir, e.name), out)
+  return out
+}
+
+// Nơi đẩy lên nằm trên mạng (https, ssh, git, hoặc dạng user@máy:đường). Đường dẫn trên máy hay file:// không tính: nó có thể đã mất hoặc cũng là đồ tạm.
+const isNetUrl = (u) => /^(https?|ssh|git):\/\//i.test(u) || /^[\w.-]+@[\w.-]+:/.test(u)
+
+// null khi MỌI repo trong `dir` chỉ là bản tải về nguyên vẹn: có nơi đẩy lên trên mạng, không commit nào chưa đẩy, không file sửa dở hay file mới, không stash.
+// Ngược lại trả lý do giữ. Không hỏi được git ⇒ giữ.
+function repoKeepReason(dir) {
+  const roots = repoRoots(dir)
+  if (roots.length === 0) return 'không đọc được hết bên trong nên không biết có repo git nào' // classify coi thư mục không đọc được là "có repo"
+  for (const r of roots) {
+    let dotGit
+    try { dotGit = fs.statSync(path.join(r, '.git')) } catch { return 'có repo git dạng kho trần (bare), không kiểm được đã đẩy lên chưa' }
+    if (!dotGit.isDirectory()) return 'có bản sao code (worktree hoặc submodule) của một dự án bên trong'
+    const urls = (git(r, 'config', '--get-regexp', '^remote\\..*\\.url$') ?? '').split(/\r?\n/).map((l) => l.replace(/^\S+\s+/, '').trim()).filter(Boolean)
+    if (!urls.some(isNetUrl)) return 'có repo git chỉ nằm trên máy này (chưa có nơi đẩy lên trên mạng)'
+    const dirty = git(r, 'status', '--porcelain') // tính cả file mới chưa đưa vào git: việc làm dở chỉ có ở máy này
+    if (dirty === null) return 'có repo git không đọc được'
+    if (dirty.trim()) return 'có repo git còn file sửa dở hoặc file mới chưa lưu vào git'
+    const ahead = git(r, 'log', 'HEAD', '--branches', '--not', '--remotes', '-1', '--format=%h')
+    if (ahead === null) return 'có repo git không đọc được lịch sử'
+    if (ahead.trim()) return 'có repo git còn commit chưa đẩy lên'
+    if ((git(r, 'stash', 'list') ?? 'x').trim()) return 'có repo git còn thay đổi cất tạm (stash)'
+  }
+  return null
+}
+
+// Xoá thư mục cũ `p` theo cách không làm mất gì khi nó đang được dùng: ĐỔI TÊN trước (Windows từ chối ngay nếu có tiến trình đang đứng trong đó
+// hoặc đang mở file bên trong ⇒ chưa mất gì), soi lại bản đã đổi tên xem có gì vừa được ghi trong lúc kiểm không (có ⇒ trả tên cũ), rồi mới xoá.
+function removeOld(p, cutoff, stamp) {
+  const from = real(p)
+  const trash = `${from}.don-rac-${process.pid}`
+  try { fs.renameSync(from, trash) } catch (e) { return `đang được dùng (${e?.code ?? e?.message ?? e})` }
+  if (scan(trash, cutoff, stamp, undefined, true).fresh) {
+    try { fs.renameSync(trash, from) } catch { return `vừa có thứ được ghi bên trong; đang nằm ở tên tạm ${trash}` }
+    return 'vừa có thứ được ghi bên trong'
+  }
+  fs.rmSync(trash, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
+  return null
+}
+
+// Lý do giữ thư mục cũ `p`, hoặc null khi dọn được (và đã dọn, trừ khi dry).
+function sweepDir(p, { dry, cwd, temps, cutoff, stamp }) {
+  const c = classify(p, { cwd, temps })
+  if (c.kind === 'worktree') return 'bản sao code (worktree) đã gộp — không thuộc diện tự quét, dọn theo skill flow-worktree'
+  if (c.refuse) {
+    if (c.code !== 'repo') return c.refuse
+    const why = repoKeepReason(p)
+    if (why) return why
+  } else if (c.kind !== 'temp') return 'không phải đồ tạm'
+  return dry ? null : removeOld(p, cutoff, stamp)
+}
+
+// → { removed: [{path, bytes, newest}], kept: [{path, bytes, newest, why}], fresh: số mục còn mới, bytes: tổng dung lượng dọn được }
+// stamp: cách tính lần đụng cuối (mặc định touchedAt; test thay để dựng đồ "cũ" bằng cách chỉnh giờ sửa).
+export function quet({ days = 7, dry = false, roots = sweepRoots(), now = Date.now(), cwd = process.cwd(), stamp = touchedAt } = {}) {
+  if (!Number.isFinite(days) || days < 1) throw new Error('số ngày phải từ 1 trở lên')
+  const cutoff = now - days * DAY
+  const res = { removed: [], kept: [], fresh: 0, bytes: 0 }
+  for (const root of roots) {
+    let entries
+    try { entries = fs.readdirSync(root, { withFileTypes: true }) } catch { continue }
+    for (const e of entries) {
+      const p = path.join(root, e.name)
+      const s = scan(p, cutoff, stamp)
+      if (s.fresh) { res.fresh++; continue }
+      let why
+      try {
+        if (e.isSymbolicLink()) why = 'liên kết tắt, không tự dọn'
+        else if (e.isDirectory()) why = sweepDir(p, { dry, cwd, temps: [real(root)], cutoff, stamp })
+        else { if (!dry) fs.rmSync(p, { force: true }); why = null }
+      } catch (err) {
+        why = `đang được dùng hoặc không xoá được (${err?.code ?? err?.message ?? err})`
+      }
+      const item = { path: p, bytes: s.bytes, newest: s.newest }
+      if (why) res.kept.push({ ...item, why })
+      else { res.removed.push(item); res.bytes += s.bytes }
+    }
+  }
+  return res
+}
+
+const size = (b) => (b >= 1 << 30 ? `${(b / (1 << 30)).toFixed(1)} GB` : `${Math.round(b / (1 << 20))} MB`)
+
+function cliQuet(args) {
+  const dry = args.includes('--thu')
+  const i = args.indexOf('--ngay')
+  const days = i >= 0 ? Number(args[i + 1]) : 7
+  let r
+  try { r = quet({ days, dry }) } catch (e) { console.error(`Dùng: node ~/.claude/hooks/don.mjs --quet [--thu] [--ngay <n ≥ 1>] — ${e.message}`); process.exitCode = 2; return }
+  const verb = dry ? 'sẽ dọn' : 'đã dọn'
+  for (const x of r.removed) console.log(`${verb}: ${x.path} — ${size(x.bytes)} — sửa lần cuối ${new Date(x.newest).toISOString().slice(0, 10)}`)
+  for (const x of r.kept) console.log(`giữ: ${x.path} — ${size(x.bytes)} — ${x.why}`)
+  const sum = `${verb} ${r.removed.length} mục (${size(r.bytes)}); giữ ${r.kept.length} mục cũ; ${r.fresh} mục sửa trong ${days} ngày gần đây không đụng`
+  console.log(`Tổng: ${sum}.`)
+  if (dry) return
+  try {
+    const dir = path.join(os.homedir(), '.claude', 'logs')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.appendFileSync(path.join(dir, 'don-quet.log'), `${new Date().toISOString()} ${sum}\n`)
+  } catch { /* không ghi được nhật ký thì thôi: việc dọn đã xong */ }
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2)
   if (args.length === 0) {
-    console.error('Dùng: node ~/.claude/hooks/don.mjs <đường dẫn>…')
+    console.error('Dùng: node ~/.claude/hooks/don.mjs <đường dẫn>…   |   --quet [--thu] [--ngay <n>]')
     process.exitCode = 2
+  }
+  if (args[0] === '--quet') {
+    cliQuet(args.slice(1))
+    args.length = 0
   }
   for (const a of args) {
     let r

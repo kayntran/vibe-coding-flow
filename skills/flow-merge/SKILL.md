@@ -32,13 +32,16 @@ Thiếu bước kiểm không phải lý do đứng lại: test, review, QA là 
    file của việc mình (lạ ⇒ dừng, đừng commit) → `git commit`. **Mỗi việc đúng một commit**, dòng đầu tả việc đó theo quy ước dự án
    + dòng Co-Authored-By. Không tách commit theo loại. Phiên đang cô lập trong worktree: mỗi lệnh git một dòng, không
    `cd "$X" && git …` (harness từ chối).
-3. **Test ĐỦ BỘ ngay trong worktree sau rebase** (Agent `test-runner`, chạy qua
-   `node ~/.claude/hooks/flow-gate.mjs stamp test -- <lệnh test đủ bộ>`). Gộp là fast-forward nên đây chính là test trên `main`
-   sau gộp. Đỏ do việc của mình ⇒ sửa trên nhánh. Đỏ không liên quan, hoặc không chạy được test/review/QA (hết lượt, thiếu công
+3. **Test ĐỦ BỘ ngay trong worktree sau rebase** — trừ khi đã có [1osp]: `node ~/.claude/hooks/flow-gate.mjs status` báo
+   `test: có (đúng bản code này…)` (main không nhích từ lần kiểm, gom commit không đổi nội dung) ⇒ dùng lại, không chạy lại. Báo khác đi
+   ⇒ Agent `test-runner`, chạy qua `node ~/.claude/hooks/flow-gate.mjs stamp test -- <lệnh test đủ bộ>`. Gộp là fast-forward nên đây
+   chính là test trên `main` sau gộp. Đỏ do việc của mình ⇒ sửa trên nhánh. Đỏ không liên quan, hoặc không chạy được test/review/QA (hết lượt, thiếu công
    cụ) ⇒ báo user một dòng phần chưa kiểm; user vẫn muốn gộp thì gộp, ghi lại để kiểm bù.
    User từng bảo bỏ test hoặc `flow-review` đã ghi lỗi được chấp nhận ⇒ nhắc lại đúng một dòng ở đây.
-   Repo là kit (`~/.claude`) ⇒ chạy thêm `node ~/.claude/hooks/mac-check.mjs` (cùng bộ test trên máy macOS Devin — skill
-   `flow-devin`, bản đã commit; exit 3 = Devin không dùng được ⇒ báo user một dòng, không chặn gộp).
+   Repo là kit (`~/.claude`) và diff đụng `hooks/`, `install.*` hoặc `kit/` ⇒ chạy thêm `node ~/.claude/hooks/mac-check.mjs` (cùng bộ
+   test trên máy macOS Devin — skill `flow-devin`, bản đã commit; exit 3 = Devin không dùng được ⇒ báo user một dòng, không chặn gộp).
+   Diff chỉ có skill, agent, tài liệu ⇒ bỏ, chỉ chạy các test cấu trúc (`skills-structure`, `claude-md`). Bộ đủ của kit là
+   `node --test $(git ls-files '*.test.mjs')`; `node --test` trơn quét lẫn cả test của plugin và cache nằm cùng thư mục, kết quả vô nghĩa.
    Rebase làm diff đổi nội dung (xung đột, main có sửa chạm vùng mình) ⇒ chạy lại `flow-review` (và `flow-qa` nếu đụng UI) cho phần đổi.
 4. `ExitWorktree` `action: "keep"` → về thư mục chính, soi lại `git worktree list` + file các phiên khác đang đổi, rồi
    `git merge --ff-only <branch>`. File trùng tên đã nằm sẵn ở thư mục chính: việc dở của phiên khác thì giữ nguyên và hỏi user; còn lại cất sao lưu rồi gộp tiếp.
@@ -60,7 +63,7 @@ Thiếu bước kiểm không phải lý do đứng lại: test, review, QA là 
    nó, file dở của phiên khác ở thư mục chính bị gom thành commit trên nhánh chính (đã dính 2 lần).
 8. **Trước khi push:** `git log --oneline origin/main..main`. Ngoài commit của mình còn commit khác chưa push (của phiên khác/việc cũ) ⇒
    liệt kê cho user, hỏi có push kèm không — push là đẩy tất cả. Rồi `git push origin main` (nếu có remote).
-9. **Dọn:** theo mục "Dọn" của skill `flow-worktree` cho đúng worktree vừa gộp.
+9. **Dọn:** theo mục "Dọn" của skill `flow-worktree` cho đúng worktree vừa gộp, kể cả thư mục tạm của việc [12e1].
 10. Thứ tự cố định: gộp → `so-chot.mjs xong` → commit → push → dọn worktree. Bị ngắt giữa chừng ⇒ chạy lại từ bước 5.
 11. `merge --ff-only` bị từ chối ⇒ không ép, không stash hộ, không đụng file dở của phiên khác.
 
