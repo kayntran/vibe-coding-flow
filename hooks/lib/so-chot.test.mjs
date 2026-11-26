@@ -1540,6 +1540,36 @@ describe('CLI', () => {
     assert.equal(ok(run('close', root, JSON.stringify({ feature: '2026-10-02-cli' }))).cat.length, 0)
   })
 
+  test('gọi từ thư mục con của dự án đã có sổ ⇒ ghi về sổ ở gốc dự án, không mọc sổ lạc trong thư mục con', () => {
+    const root = repo()
+    const cu = ok(run('ghi', root, JSON.stringify({ tom_tat: 'Điều có sẵn ở gốc' })))
+    const con = path.join(root, 'skills', 'flow-x')
+    fs.mkdirSync(con, { recursive: true })
+    const d = ok(run('ghi', con, JSON.stringify({ tom_tat: 'Ghi từ thư mục con' })))
+    const y = ok(run('y-tuong', con, JSON.stringify({ loai: 'cải tiến', noi_dung: 'Ý từ thư mục con' })))
+    ok(run('gen', con))
+    assert.deepEqual(fs.readdirSync(con), [], 'thư mục con không được mọc .claude, docs hay .gitattributes')
+    assert.equal(fs.readdirSync(path.join(root, '.claude', 'so-chot', 'chung')).filter((f) => f.startsWith(d.ma)).length, 1)
+    assert.ok(read(root, 'docs/IDEAS.md').includes(y.ma))
+    assert.deepEqual(ok(run('tim', con, 'có sẵn')).map((x) => x.ma), [cu.ma], 'tra từ thư mục con thấy điều ở gốc')
+  })
+
+  test('thư mục con có sổ riêng (monorepo), hoặc dự án chưa có sổ nào ⇒ giữ nguyên chỗ ghi như cũ', () => {
+    const mono = repo()
+    ok(run('ghi', mono, JSON.stringify({ tom_tat: 'Điều của cả repo' })))
+    const app = path.join(mono, 'apps', 'a')
+    plant(app, { tom_tat: 'Điều riêng của app a' })
+    const d = ok(run('ghi', app, JSON.stringify({ tom_tat: 'Thêm cho app a' })))
+    assert.equal(fs.readdirSync(path.join(app, '.claude', 'so-chot', 'chung')).filter((f) => f.startsWith(d.ma)).length, 1)
+    assert.equal(fs.readdirSync(path.join(mono, '.claude', 'so-chot', 'chung')).filter((f) => f.startsWith(d.ma)).length, 0)
+    const trong = repo()
+    const sub = path.join(trong, 'pkg')
+    fs.mkdirSync(sub)
+    const e = ok(run('ghi', sub, JSON.stringify({ tom_tat: 'Repo chưa có sổ' })))
+    assert.equal(fs.readdirSync(path.join(sub, '.claude', 'so-chot', 'chung')).filter((f) => f.startsWith(e.ma)).length, 1)
+    assert.equal(exists(trong, '.claude'), false)
+  })
+
   test('lỗi ⇒ exit 1 + đúng một dòng stderr, stdout rỗng', () => {
     const root = repo()
     for (const r of [

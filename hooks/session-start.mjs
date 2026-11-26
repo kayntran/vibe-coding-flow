@@ -24,6 +24,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { SINCE_FLOOR } from './don.mjs'
 import { normalize } from './lib/host.mjs'
 import { dueReminders, readState } from './lib/release-state.mjs'
 import { scanHiddenPaths, scanText } from './lib/secrets.mjs'
@@ -277,7 +278,8 @@ function updatesSection() {
 
 // ---------- quét đồ tạm cũ [12e1] ----------
 
-// Mỗi ngày một lần kích `don.mjs --quet` chạy nền (tách khỏi phiên như launchRefresh): đồ trong thư mục tạm của AI quá 7 ngày không ai đụng tự được dọn.
+// Mỗi ngày một lần kích `don.mjs --quet --tu <mốc bật>` chạy nền (tách khỏi phiên như launchRefresh): đồ trong thư mục tạm của AI
+// tạo ra SAU khi bật tính năng mà quá 7 ngày không ai đụng tự được dọn; đồ có từ trước không bao giờ bị lượt tự quét đụng tới.
 // Dấu "đã kích hôm nay" ghi TRƯỚC khi spawn; hai phiên mở sát nhau có thể cùng kích, vô hại (thứ đã mất thì lượt sau không thấy nữa).
 // Chỉ kích khi hook này đúng là bản đã cài của người đang dùng máy (thư mục hook = ~/.claude/hooks, tính cả lối tắt trỏ về đó):
 // test nào chạy hook với HOME giả thì không bao giờ chạm vào thư mục tạm thật. FLOW_DON=off tắt hẳn; FLOW_DON_SCRIPT để test thay bằng script giả.
@@ -292,11 +294,21 @@ function launchSweep() {
   if (process.env.FLOW_DON === 'off') return ''
   if (!process.env.FLOW_DON_SCRIPT && !isInstalledHook()) return ''
   let last = 0
-  try { last = Number(JSON.parse(fs.readFileSync(DON_MARK, 'utf8')).ts) || 0 } catch { /* chưa có dấu hoặc dấu hỏng ⇒ coi như chưa quét */ }
-  if (Date.now() - last < DAY) return ''
+  let tu = 0
+  try {
+    const m = JSON.parse(fs.readFileSync(DON_MARK, 'utf8'))
+    last = Number(m.ts) || 0
+    tu = Number(m.tu) || 0
+  } catch { /* chưa có dấu hoặc dấu hỏng ⇒ coi như chưa quét */ }
+  const now = Date.now()
+  if (now - last < DAY) return ''
+  // `tu` = lúc tính năng tự dọn bắt đầu chạy trên máy này, ghi MỘT lần rồi giữ mãi. Lượt tự quét chỉ đụng đồ tạo ra từ mốc đó:
+  // đồ có sẵn trên máy từ trước (kể cả lúc mất dấu, dấu hỏng ⇒ mốc mới = bây giờ) là của user, chỉ dọn khi user bảo.
+  // Mốc trước ngày tính năng ra đời (đồng hồ máy từng chạy lùi lúc ghi) cũng bỏ: giữ nó thì mọi đồ có sẵn thành diện bị dọn.
+  if (!(tu >= SINCE_FLOOR && tu <= now)) tu = now
   fs.mkdirSync(LOGS_DIR, { recursive: true })
-  fs.writeFileSync(DON_MARK, JSON.stringify({ ts: Date.now() }) + '\n')
-  const child = spawn(process.execPath, [DON_SCRIPT, '--quet'], { cwd: HOOK_DIR, detached: true, stdio: 'ignore', windowsHide: true })
+  fs.writeFileSync(DON_MARK, JSON.stringify({ ts: now, tu }) + '\n')
+  const child = spawn(process.execPath, [DON_SCRIPT, '--quet', '--tu', String(tu)], { cwd: HOOK_DIR, detached: true, stdio: 'ignore', windowsHide: true })
   child.on('error', (e) => logErr(`kích quét đồ tạm lỗi (${errTag(e)})`))
   child.unref()
   return ''

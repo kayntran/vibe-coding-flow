@@ -1278,16 +1278,35 @@ describe('quét đồ tạm cũ mỗi ngày một lần', () => {
   test('lần mở phiên đầu trong ngày ⇒ kích đúng một lần với --quet và ghi dấu; mở lại trong ngày ⇒ không kích; dấu quá một ngày ⇒ kích lại', async () => {
     const fx = fixture()
     const bg = fakeSweep(fx)
+    const t0 = Date.now()
     run(fx, { env: bg.env })
     assert.ok(await waitFor(() => bg.spawned().length === 1), 'phải kích quét')
-    assert.deepEqual(bg.spawned(), ['--quet'])
-    assert.ok(JSON.parse(fs.readFileSync(mark(fx), 'utf8')).ts > 0)
+    const m1 = JSON.parse(fs.readFileSync(mark(fx), 'utf8'))
+    assert.ok(m1.ts > 0)
+    assert.ok(m1.tu >= t0 && m1.tu <= Date.now(), 'lần đầu: mốc bật = lúc này ⇒ đồ có sẵn trên máy không bị đụng')
+    assert.deepEqual(bg.spawned(), [`--quet --tu ${m1.tu}`])
     run(fx, { env: bg.env })
     await new Promise((r) => setTimeout(r, 400))
     assert.equal(bg.spawned().length, 1, 'cùng ngày không kích lại')
-    fs.writeFileSync(mark(fx), JSON.stringify({ ts: Date.now() - 25 * 3600000 }))
+    fs.writeFileSync(mark(fx), JSON.stringify({ ts: Date.now() - 25 * 3600000, tu: m1.tu }))
     run(fx, { env: bg.env })
     assert.ok(await waitFor(() => bg.spawned().length === 2), 'dấu quá một ngày ⇒ kích lại')
+    assert.equal(bg.spawned()[1], `--quet --tu ${m1.tu}`, 'mốc bật giữ nguyên qua các ngày')
+    assert.equal(JSON.parse(fs.readFileSync(mark(fx), 'utf8')).tu, m1.tu)
+  })
+
+  test('dấu cũ không có mốc bật, mốc ở tương lai, hoặc mốc trước ngày tính năng ra đời (đồng hồ máy từng chạy lùi) ⇒ mốc = lúc này, không bao giờ quét không mốc', async () => {
+    for (const old of [{ ts: 1 }, { ts: 1, tu: Date.now() + 30 * 86400000 }, { ts: 1, tu: Date.UTC(2020, 0, 1) }, { ts: 1, tu: 1 }]) {
+      const fx = fixture()
+      const bg = fakeSweep(fx)
+      fs.mkdirSync(path.dirname(mark(fx)), { recursive: true })
+      fs.writeFileSync(mark(fx), JSON.stringify(old))
+      const t0 = Date.now()
+      run(fx, { env: bg.env })
+      assert.ok(await waitFor(() => bg.spawned().length === 1), 'phải kích quét')
+      const tu = Number(bg.spawned()[0].match(/^--quet --tu (\d+)$/)?.[1])
+      assert.ok(tu >= t0 && tu <= Date.now(), `mốc phải là lúc này, nhận ${bg.spawned()[0]}`)
+    }
   })
 
   test('FLOW_DON=off, hoặc hook chạy với HOME giả mà không chỉ script ⇒ không kích, không ghi dấu (test khác không bao giờ chạm thư mục tạm thật)', async () => {

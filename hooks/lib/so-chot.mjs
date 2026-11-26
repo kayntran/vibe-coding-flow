@@ -90,7 +90,20 @@ const ma4 = (ma) => ma.slice(0, 4)
 const loiObj = (loai, msg, file) => ({ loai, msg, ...(file ? { file } : {}) })
 const lstatSafe = (p) => { try { return fs.lstatSync(p) } catch { return null } }
 const listDir = (p) => { try { return fs.readdirSync(p) } catch { return [] } }
-const realRootOf = (projectRoot) => fs.realpathSync.native(path.resolve(String(projectRoot)))
+// Phiên đang đứng ở một thư mục CON của dự án (vd skills/flow-ux, hooks) mà ghi sổ thì trước đây mọc một sổ chốt lạc ngay trong thư mục
+// con (gặp 2 lần: 29/10, 21/11). Thư mục được chỉ chưa có sổ riêng, không phải gốc repo/worktree, còn gốc git repo chứa nó ĐÃ có sổ
+// ⇒ dùng sổ ở gốc repo. Thư mục con có sổ riêng (monorepo), repo chưa có sổ nào, hoặc không phải git ⇒ giữ nguyên như cũ.
+const SO_REL = path.join('.claude', 'so-chot')
+function realRootOf(projectRoot) {
+  const root = fs.realpathSync.native(path.resolve(String(projectRoot)))
+  if (fs.existsSync(path.join(root, SO_REL)) || fs.existsSync(path.join(root, '.git'))) return root
+  const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: root, encoding: 'utf8', timeout: 5000, windowsHide: true })
+  if (r.error || r.status !== 0) return root
+  try {
+    const top = fs.realpathSync.native(r.stdout.trim())
+    return top !== root && fs.existsSync(path.join(top, SO_REL)) ? top : root
+  } catch { return root }
+}
 
 // Giờ Việt Nam (UTC+7), bất kể múi giờ máy.
 export const vnTime = (ms = Date.now()) => new Date(ms + 7 * 3600000).toISOString().slice(0, 16).replace('T', ' ')

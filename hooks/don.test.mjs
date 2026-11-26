@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, test } from 'node:test'
+import { fileURLToPath } from 'node:url'
 import { classify, don, quet } from './don.mjs'
 
 const tmp = () => fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'don-')))
@@ -352,6 +353,37 @@ describe('don --quet: đồ tạm cũ không ai đụng [12e1]', () => {
     assert.deepEqual(r.removed, [])
     assert.match(r.kept[0].why, /liên kết tắt/)
     assert.equal(fs.existsSync(path.join(dich, 'quy.txt')), true)
+  })
+
+  test('có mốc bật (lượt tự quét): đồ có từ trước mốc không bao giờ bị đụng dù cũ tới đâu; đồ tạo sau mốc thì dọn như thường', () => {
+    const root = mixed() // mọi thứ vừa tạo ra lúc này
+    const truoc = quet({ roots: [root], cwd, now: later, since: Date.now() + 60000 }) // bật tự dọn SAU khi đống này đã có
+    assert.deepEqual(truoc.removed, [])
+    assert.deepEqual(truoc.kept, [])
+    assert.equal(truoc.before, 4)
+    assert.deepEqual(fs.readdirSync(root).sort(), ['cu', 'lai', 'le.png', 'moi'])
+    const sau = quet({ roots: [root], cwd, now: later, since: Date.now() - 3600000 }) // đống này sinh ra sau khi bật
+    assert.equal(sau.before, 0)
+    assert.deepEqual(names(sau.removed), ['cu', 'lai', 'le.png', 'moi'])
+    assert.deepEqual(fs.readdirSync(root), [])
+  })
+
+  test('mốc bật không phải số ⇒ không chạy (không bao giờ rơi về quét không mốc)', () => {
+    assert.throws(() => quet({ roots: [mixed()], cwd, since: Number.NaN }), /mốc --tu/)
+    // Gọi qua dòng lệnh luôn kèm --thu: lỡ phần kiểm mốc bị làm hỏng thì bài này cũng chỉ liệt kê, không xoá gì trên máy thật.
+    const script = fileURLToPath(new URL('./don.mjs', import.meta.url))
+    // Gọi hàm: 0 = không truyền mốc (user bảo dọn cả đồ cũ); mọi mốc khác trước ngày tính năng ra đời đều bị từ chối.
+    for (const bad of [-5, 1, Date.UTC(2020, 0, 1), Number.POSITIVE_INFINITY]) {
+      assert.throws(() => quet({ roots: [], cwd, since: bad }), /mốc --tu/, String(bad))
+    }
+    // '', ' ', '0', '0x0' qua Number() đều ra 0 ("không mốc"); mốc trước ngày tính năng ra đời cũng coi như không mốc ⇒ tất cả phải bị từ chối.
+    const tails = [[], ['abc'], [''], [' '], ['0'], ['-0'], ['0x0'], ['1'], ['-5'], ['1e15'], [String(Date.UTC(2020, 0, 1))], ['--ngay', '7']]
+    for (const args of tails.map((t) => ['--quet', '--thu', '--tu', ...t])) {
+      const r = spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', windowsHide: true })
+      assert.equal(r.status, 2, JSON.stringify(args))
+      assert.match(r.stderr, /mốc --tu/)
+      assert.equal(r.stdout, '', 'không được liệt kê hay dọn gì khi mốc sai')
+    }
   })
 
   test('số ngày dưới 1 ⇒ không chạy (tránh xoá đồ đang dùng)', () => {

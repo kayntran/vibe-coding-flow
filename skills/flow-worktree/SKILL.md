@@ -52,7 +52,9 @@ Chỉ tự dọn worktree **do phiên mình tạo và đã gộp**. Theo đúng 
 Log, ảnh chụp, repo tải về để đọc, dữ liệu thử, file nháp ⇒ để hết trong MỘT thư mục `<thư mục tạm>/<dự-án>-<việc>/` (Windows:
 `D:\tmp\…`), không rải file lẻ ở gốc thư mục tạm, không để trong dự án. Ghi đường dẫn vào `progress.md` mục `## Đang mở`. AI phụ nhận
 đường ghi nằm trong thư mục đó. Lưới an toàn: mỗi ngày hook mở phiên tự chạy `don.mjs --quet` xoá mục quá 7 ngày không ai đụng (không
-đụng worktree, không xoá repo còn thứ chưa đẩy lên). Xem trước sẽ dọn gì: `node ~/.claude/hooks/don.mjs --quet --thu`.
+đụng worktree, repo còn thứ chưa đẩy lên, và mọi thứ đã nằm trong thư mục tạm từ trước khi bật tự dọn — đồ đó của user, user bảo mới
+dọn; đồ chép hay giải nén vào sau đó tính là mới). Xem trước lượt tự dọn: `node ~/.claude/hooks/don.mjs --quet --thu --tu <số tu
+trong ~/.claude/logs/don-quet.json>`; bỏ `--tu` là xét cả đồ có sẵn.
 
 ### Bản sao cũ bị quên
 

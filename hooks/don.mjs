@@ -1,6 +1,6 @@
 // don: dọn thư mục có kiểm tra trước, thay cho lệnh xoá đệ quy (bị flow-gate + mod chan-nguy-hiem chặn, và làm app bật hộp hỏi) [psic].
 //   node ~/.claude/hooks/don.mjs <đường dẫn>…     mỗi đường dẫn in một dòng "đã dọn" / "từ chối: lý do"; có từ chối ⇒ exit 1.
-//   node ~/.claude/hooks/don.mjs --quet [--thu] [--ngay <n>]   quét đồ tạm cũ không ai đụng (xem cuối file) [12e1].
+//   node ~/.claude/hooks/don.mjs --quet [--thu] [--ngay <n>] [--tu <mốc ms>]   quét đồ tạm cũ không ai đụng (xem cuối file) [12e1].
 // Chỉ dọn 3 loại, còn lại từ chối:
 //   1. Bên trong thư mục tạm: thư mục tạm hệ thống, <ổ đĩa>:\tmp, /tmp (không phải chính thư mục tạm), và không chứa repo git độc lập.
 //   2. Thư mục build trong một git repo (BUILD_NAMES) mà git đang bỏ qua (.gitignore) và không theo dõi file nào trong đó.
@@ -151,8 +151,9 @@ export function don(raw, opts = {}) {
 }
 
 // ---------- quét đồ tạm cũ [12e1] ----------
-//   node ~/.claude/hooks/don.mjs --quet [--thu] [--ngay <n>]
+//   node ~/.claude/hooks/don.mjs --quet [--thu] [--ngay <n>] [--tu <mốc ms>]
 // Mỗi mục NGAY DƯỚI thư mục tạm của AI (<ổ đĩa>:\tmp) mà suốt <n> ngày (mặc định 7) không có gì bên trong được sửa ⇒ dọn; --thu chỉ liệt kê.
+// --tu: chỉ xét mục tạo ra từ mốc đó (lượt tự quét luôn dùng: đồ có sẵn từ trước khi bật là của user, không tự dọn). Không --tu = user bảo dọn cả đồ cũ.
 // Không quét thư mục tạm hệ thống (của mọi app khác, hệ điều hành tự lo) và /tmp trên macOS/Linux (tự xoá khi khởi động lại).
 // Giữ lại và chỉ kể: bản sao code (worktree), thư mục có repo git còn thứ chưa đẩy lên, liên kết tắt, thứ đang bị tiến trình khác giữ.
 const DAY = 86400000
@@ -247,15 +248,27 @@ function sweepDir(p, { dry, cwd, temps, cutoff, stamp }) {
 
 // → { removed: [{path, bytes, newest}], kept: [{path, bytes, newest, why}], fresh: số mục còn mới, bytes: tổng dung lượng dọn được }
 // stamp: cách tính lần đụng cuối (mặc định touchedAt; test thay để dựng đồ "cũ" bằng cách chỉnh giờ sửa).
-export function quet({ days = 7, dry = false, roots = sweepRoots(), now = Date.now(), cwd = process.cwd(), stamp = touchedAt } = {}) {
+// since (ms): chỉ xét mục được TẠO RA từ mốc này trở đi; mục có từ trước (hoặc không đọc được giờ tạo) không bao giờ đụng, đếm vào `before`.
+// Lượt tự quét của hook mở phiên luôn truyền mốc = lúc bật tính năng: đồ có sẵn trên máy trước đó là của user, user bảo mới dọn.
+// Mốc hợp lệ không thể sớm hơn ngày tính năng ra đời: mốc 0, rỗng, rất nhỏ (biến rỗng khi ghép lệnh, đồng hồ máy chạy lùi) mà được nhận
+// thì thành quét không mốc ⇒ mất đồ có sẵn. since = 0 chỉ có nghĩa "không truyền mốc" khi gọi hàm; dòng lệnh có --tu thì phải là mốc thật.
+export const SINCE_FLOOR = Date.UTC(2026, 10, 25)
+const SINCE_ERR = 'mốc --tu phải là số mili giây của một thời điểm từ 2026-11-25 trở đi'
+export function quet({ days = 7, dry = false, roots = sweepRoots(), now = Date.now(), cwd = process.cwd(), stamp = touchedAt, since = 0 } = {}) {
   if (!Number.isFinite(days) || days < 1) throw new Error('số ngày phải từ 1 trở lên')
+  if (since !== 0 && !(Number.isFinite(since) && since >= SINCE_FLOOR)) throw new Error(SINCE_ERR)
   const cutoff = now - days * DAY
-  const res = { removed: [], kept: [], fresh: 0, bytes: 0 }
+  const res = { removed: [], kept: [], fresh: 0, before: 0, bytes: 0 }
   for (const root of roots) {
     let entries
     try { entries = fs.readdirSync(root, { withFileTypes: true }) } catch { continue }
     for (const e of entries) {
       const p = path.join(root, e.name)
+      if (since > 0) {
+        let born = 0
+        try { born = fs.lstatSync(p).birthtimeMs } catch { /* không đọc được ⇒ coi như có từ trước */ }
+        if (!(born >= since)) { res.before++; continue }
+      }
       const s = scan(p, cutoff, stamp)
       if (s.fresh) { res.fresh++; continue }
       let why
@@ -280,12 +293,16 @@ function cliQuet(args) {
   const dry = args.includes('--thu')
   const i = args.indexOf('--ngay')
   const days = i >= 0 ? Number(args[i + 1]) : 7
+  const j = args.indexOf('--tu')
+  // Có --tu thì giá trị phải là dãy chữ số: '' / '0' / ' ' mà qua Number() đều ra 0, tức "không mốc" ⇒ ép thành NaN để quet() từ chối.
+  const since = j >= 0 ? (/^\d+$/.test(args[j + 1] ?? '') && Number(args[j + 1]) >= SINCE_FLOOR ? Number(args[j + 1]) : Number.NaN) : 0
   let r
-  try { r = quet({ days, dry }) } catch (e) { console.error(`Dùng: node ~/.claude/hooks/don.mjs --quet [--thu] [--ngay <n ≥ 1>] — ${e.message}`); process.exitCode = 2; return }
+  try { r = quet({ days, dry, since }) } catch (e) { console.error(`Dùng: node ~/.claude/hooks/don.mjs --quet [--thu] [--ngay <n ≥ 1>] [--tu <mốc ms>] — ${e.message}`); process.exitCode = 2; return }
   const verb = dry ? 'sẽ dọn' : 'đã dọn'
   for (const x of r.removed) console.log(`${verb}: ${x.path} — ${size(x.bytes)} — sửa lần cuối ${new Date(x.newest).toISOString().slice(0, 10)}`)
   for (const x of r.kept) console.log(`giữ: ${x.path} — ${size(x.bytes)} — ${x.why}`)
-  const sum = `${verb} ${r.removed.length} mục (${size(r.bytes)}); giữ ${r.kept.length} mục cũ; ${r.fresh} mục sửa trong ${days} ngày gần đây không đụng`
+  const sum = `${verb} ${r.removed.length} mục (${size(r.bytes)}); giữ ${r.kept.length} mục cũ; ${r.fresh} mục sửa trong ${days} ngày gần đây không đụng` +
+    (since > 0 ? `; ${r.before} mục có từ trước khi bật tự dọn không đụng` : '')
   console.log(`Tổng: ${sum}.`)
   if (dry) return
   try {
@@ -298,7 +315,7 @@ function cliQuet(args) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2)
   if (args.length === 0) {
-    console.error('Dùng: node ~/.claude/hooks/don.mjs <đường dẫn>…   |   --quet [--thu] [--ngay <n>]')
+    console.error('Dùng: node ~/.claude/hooks/don.mjs <đường dẫn>…   |   --quet [--thu] [--ngay <n>] [--tu <mốc ms>]')
     process.exitCode = 2
   }
   if (args[0] === '--quet') {
