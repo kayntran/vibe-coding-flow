@@ -880,6 +880,118 @@ describe('pham_vi là thư mục tính năng chỉ có trong worktree khác củ
     assert.ok(exists(wt, `.claude/so-chot/${d.file}`))
   })
 
+  // Lỗi thật 23/11 (DouDou): dự án để git bỏ qua .claude ⇒ điều chốt ghi trong worktree kẹt lại đó, gộp xong không về sổ chính;
+  // phiên trong worktree cũng không thấy sổ chính. Sổ bị git bỏ qua ⇒ worktree đọc và ghi thẳng sổ ở thư mục chính.
+  function ignoredBook(tag) {
+    const main = repo(tag)
+    write(main, '.gitignore', '.claude/\n')
+    gitOk(main, 'add', '-A')
+    gitOk(main, 'commit', '-qm', 'base')
+    const co = L.ghi(main, { tom_tat: 'Luật có sẵn ở sổ chính' }, { gitattributes: false })
+    const wt = path.join(TMP, `${tag}-wt-${++seq}`)
+    gitOk(main, 'worktree', 'add', '-q', '-b', `b-${seq}`, wt)
+    return { main, wt: fs.realpathSync(wt), co }
+  }
+  const cli = (cmd, root, arg) => {
+    const r = spawnSync(process.execPath, [SCRIPT, cmd, root, ...(arg === undefined ? [] : [arg])], { encoding: 'utf8' })
+    assert.equal(r.status, 0, r.stderr)
+    return JSON.parse(r.stdout)
+  }
+
+  test('sổ bị git bỏ qua: phiên trong worktree thấy sổ chính; ghi, đánh dấu đã xem, huỷ đều vào sổ chính; worktree không mọc sổ riêng', () => {
+    const { main, wt, co } = ignoredBook('ign')
+    assert.deepEqual(cli('tim', wt, 'có sẵn').map((x) => x.ma), [co.ma], 'tra từ worktree thấy điều ở sổ chính')
+    assert.match(cli('excerpt', wt, JSON.stringify({ coMod: false })).text, /Luật có sẵn ở sổ chính/)
+    const d = cli('ghi', wt, JSON.stringify({ tom_tat: 'Chọn logo mẫu 06', ai_quyet: 'tu-chon-khi-vang' }))
+    assert.ok(exists(main, `.claude/so-chot/${d.file}`), 'điều ghi từ worktree nằm ở sổ chính')
+    assert.equal(exists(wt, '.claude'), false)
+    assert.match(read(main, INDEX), /Chọn logo mẫu 06/)
+    assert.equal(cli('da-xem', wt, d.ma).trang_thai, 'dang-dung')
+    assert.match(read(main, `.claude/so-chot/${d.file}`), /trang_thai: dang-dung/)
+    assert.equal(cli('huy', wt, co.ma).trang_thai, 'da-huy')
+    assert.equal(exists(wt, '.claude'), false)
+    gitOk(main, 'worktree', 'remove', '--force', wt) // dọn worktree: không mất điều nào
+    assert.deepEqual(cli('tim', main, 'logo').map((x) => x.ma), [d.ma])
+  })
+
+  test('sổ bị git bỏ qua: điều của tính năng đang làm dở trong worktree ghi vào sổ chính; ở thư mục chính tra thấy, không cảnh báo, sổ tiến độ vẫn ở worktree', () => {
+    const { main, wt } = ignoredBook('ign-feat')
+    spec(wt, '2026-11-23-logo', 'Trạng thái: đang làm\nNhánh / worktree: feat/logo\n')
+    const d = cli('ghi', wt, JSON.stringify({ tom_tat: 'Màu đỏ cho logo', pham_vi: '2026-11-23-logo' }))
+    assert.ok(exists(main, `.claude/so-chot/2026-11-23-logo/${path.basename(d.file)}`))
+    assert.equal(exists(main, 'docs/specs/2026-11-23-logo'), false)
+    assert.deepEqual(cli('tim', main, 'màu đỏ').map((x) => x.ma), [d.ma])
+    assert.deepEqual(cli('gen', main).canh_bao, [])
+    assert.match(cli('excerpt', wt, JSON.stringify({ branch: 'feat/logo', coMod: false })).text, /Tính năng đang làm: 2026-11-23-logo[\s\S]*Màu đỏ cho logo/)
+    assert.equal(exists(wt, '.claude'), false)
+  })
+
+  test('sổ bị git bỏ qua: gọi từ thư mục con của worktree ⇒ vẫn về sổ chính, không mọc sổ lạc', () => {
+    const { main, wt } = ignoredBook('ign-sub')
+    const con = path.join(wt, 'src', 'ui')
+    fs.mkdirSync(con, { recursive: true })
+    const d = cli('ghi', con, JSON.stringify({ tom_tat: 'Ghi từ thư mục con của worktree' }))
+    assert.ok(exists(main, `.claude/so-chot/${d.file}`))
+    assert.deepEqual(fs.readdirSync(con), [])
+    assert.equal(exists(wt, '.claude'), false)
+  })
+
+  test('sổ bị git bỏ qua: sổ riêng còn sót trong worktree (bản cũ ghi tại chỗ) ⇒ đọc thì cảnh báo, lần ghi kế tiếp tự chép về sổ chính, không ghi đè, không chép trùng mã', () => {
+    const { main, wt, co } = ignoredBook('ign-old')
+    const ket = plant(wt, { tom_tat: 'Chọn logo mẫu 06', trang_thai: 'cho-xem' }) // điều chỉ có ở sổ riêng của worktree
+    plant(wt, { ma: co.ma, tom_tat: 'Bản sao cũ của luật chính' }) // trùng mã với sổ chính ⇒ không chép, không cảnh báo
+    assert.deepEqual(cli('tim', wt, 'logo'), [], 'chưa chép: chưa tra thấy')
+    assert.match(cli('excerpt', wt, JSON.stringify({ coMod: false })).text, /Cảnh báo sổ chốt[\s\S]*1 điều chốt còn nằm trong sổ riêng của worktree/)
+    const noMod = cli('excerpt', wt, JSON.stringify({ coMod: false })).text
+    assert.ok(noMod.includes(`rg -i "<từ khoá>" "${path.join(main, '.claude', 'so-chot').split(path.sep).join('/')}"`), 'lệnh tra chỉ đúng sổ chính')
+    assert.deepEqual(cli('gen', wt).canh_bao, [], 'gen chép về rồi thì hết cảnh báo')
+    assert.equal(read(main, `.claude/so-chot/${ket.file}`), read(wt, `.claude/so-chot/${ket.file}`))
+    assert.deepEqual(cli('tim', wt, 'logo').map((x) => x.ma), [ket.ma])
+    assert.match(cli('excerpt', wt, JSON.stringify({ coMod: false })).text, /Chờ user xem lại \(1\)[\s\S]*Chọn logo mẫu 06/)
+    assert.match(read(main, `.claude/so-chot/${co.file}`), /Luật có sẵn ở sổ chính/)
+    assert.equal(fs.readdirSync(path.join(main, '.claude', 'so-chot', 'chung')).length, 2)
+    assert.equal(cli('da-xem', wt, ket.ma).trang_thai, 'dang-dung')
+  })
+
+  test('repo bare + toàn worktree, sổ bị git bỏ qua: không có "thư mục chính" ⇒ mỗi worktree giữ sổ của mình như cũ, không ghi gì vào repo.git', () => {
+    const src = repo('bare-src')
+    write(src, '.gitignore', '.claude/\n')
+    gitOk(src, 'add', '-A')
+    gitOk(src, 'commit', '-qm', 'base')
+    const bare = path.join(TMP, `bare-${++seq}.git`)
+    gitOk(TMP, 'clone', '-q', '--bare', src, bare)
+    const a = path.join(TMP, `bare-main-${seq}`)
+    const b = path.join(TMP, `bare-feat-${seq}`)
+    gitOk(bare, 'worktree', 'add', '-q', a, 'main')
+    gitOk(bare, 'worktree', 'add', '-q', '-b', 'feat', b)
+    const d = cli('ghi', a, JSON.stringify({ tom_tat: 'Luật cũ ở worktree main' }))
+    assert.ok(exists(a, `.claude/so-chot/${d.file}`))
+    assert.deepEqual(cli('tim', a, 'luật cũ').map((x) => x.ma), [d.ma])
+    assert.match(cli('excerpt', a, JSON.stringify({ coMod: false })).text, /Luật cũ ở worktree main/)
+    const e = cli('ghi', b, JSON.stringify({ tom_tat: 'Ghi ở worktree feat' }))
+    assert.ok(exists(b, `.claude/so-chot/${e.file}`))
+    assert.equal(exists(bare, '.claude'), false)
+    assert.equal(fs.realpathSync(cli('noi-so', a).store), fs.realpathSync(a))
+  })
+
+  test('noi-so: trả đúng nơi sổ thật sự nằm (thư mục chính khi sổ bị git bỏ qua; chính nó khi sổ trong git; gốc repo khi gọi từ thư mục con)', () => {
+    const ign = ignoredBook('noi')
+    assert.equal(cli('noi-so', ign.wt).dir, path.join(ign.main, '.claude', 'so-chot'))
+    assert.equal(cli('noi-so', ign.wt).index, path.join(ign.main, '.claude', 'so-chot', 'INDEX.md'))
+    const tr = repoWithWorktree('noi-tr')
+    assert.equal(cli('noi-so', tr.wt).dir, path.join(tr.wt, '.claude', 'so-chot'))
+    const con = path.join(ign.main, 'a', 'b')
+    fs.mkdirSync(con, { recursive: true })
+    assert.equal(cli('noi-so', con).dir, path.join(ign.main, '.claude', 'so-chot'))
+  })
+
+  test('sổ NẰM TRONG git: worktree vẫn ghi vào sổ của chính nó (đi theo nhánh, về main khi gộp) — như cũ', () => {
+    const { main, wt } = repoWithWorktree('tracked')
+    const d = cli('ghi', wt, JSON.stringify({ tom_tat: 'Theo nhánh' }))
+    assert.ok(exists(wt, `.claude/so-chot/${d.file}`))
+    assert.equal(exists(main, '.claude'), false)
+  })
+
   test('tên không có ở gốc lẫn mọi worktree ⇒ vẫn báo không hợp lệ, không tạo gì; thư mục tên trùng nhưng là file ⇒ cũng không', () => {
     const { main, wt } = repoWithWorktree('wtspec-none')
     spec(wt, '2026-10-13-abc')

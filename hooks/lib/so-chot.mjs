@@ -50,7 +50,7 @@ export const DONE_RE = /^[ \t>*_#-]*Trạng thái[ \t]*[:：]?[ \t*_]*[:：]?[ \
 export const KHAU_PHAN = Object.freeze({
   chung: 3000, tinhNang: 2000, loiDan: 300, canhBaoDong: 5, canhBaoCap: 650, loiCap: 450, roadmapCap: 170, tong: 6500,
 })
-const LOI_UU_TIEN = ['hai-ban-thay', 'trung-ma', 'index-mat', 'thay-mat', 'hong', 'pham-vi', 'symlink', 'index-lech']
+const LOI_UU_TIEN = ['ket-worktree', 'hai-ban-thay', 'trung-ma', 'index-mat', 'thay-mat', 'hong', 'pham-vi', 'symlink', 'index-lech']
 
 // ---------- tiện ích nhỏ ----------
 
@@ -101,8 +101,31 @@ function realRootOf(projectRoot) {
   if (r.error || r.status !== 0) return root
   try {
     const top = fs.realpathSync.native(r.stdout.trim())
-    return top !== root && fs.existsSync(path.join(top, SO_REL)) ? top : root
+    return top !== root && (fs.existsSync(path.join(top, SO_REL)) || fs.existsSync(path.join(storeRootOf(top), SO_REL))) ? top : root
   } catch { return root }
+}
+
+// Nơi cất file quyết định + INDEX.md. Bình thường = gốc dự án. Riêng khi gốc là một worktree PHỤ mà git BỎ QUA .claude/so-chot (sổ không
+// đi theo nhánh) ⇒ thư mục chính của repo: ghi ở worktree thì điều chốt kẹt lại đó, gộp xong không về sổ chính và mất khi dọn worktree; còn
+// phiên trong worktree thì không thấy sổ chính (gặp ở DouDou 23/11: điều chốt chọn logo chỉ còn trong worktree). Sổ nằm trong git ⇒ giữ nguyên
+// (đi theo nhánh, về main khi gộp). docs/specs, progress.md, ROADMAP vẫn ở gốc đang đứng. Nhớ theo tiến trình: mỗi lệnh CLI hỏi git một lần.
+const storeMemo = new Map()
+function storeRootOf(root) {
+  if (storeMemo.has(root)) return storeMemo.get(root)
+  let store = root
+  try {
+    // .git là FILE ⇒ worktree phụ (submodule cũng vậy, nhưng nó tự đứng đầu `git worktree list` của chính nó ⇒ store = root).
+    if (lstatSafe(path.join(root, '.git'))?.isFile()) {
+      const ig = spawnSync('git', ['check-ignore', '-q', INDEX_REL], { cwd: root, timeout: 5000, windowsHide: true })
+      if (!ig.error && ig.status === 0) {
+        // Repo bare + toàn worktree: mục đầu là chính repo.git (không có bản làm việc, không có "sổ chính") ⇒ giữ nguyên như cũ.
+        const main = worktreeList(root)[0]
+        if (main && !main.bare) store = fs.realpathSync.native(main.path)
+      }
+    }
+  } catch { store = root }
+  storeMemo.set(root, store)
+  return store
 }
 
 // Giờ Việt Nam (UTC+7), bất kể múi giờ máy.
@@ -297,7 +320,14 @@ function collectSpecs(realRoot, loi) {
 }
 
 // File quyết định .claude/so-chot/<thư mục>/*.md. Thư mục không phải 'chung' mà không có thư mục tính năng thật ⇒ bỏ, một cảnh báo.
+// Tính năng đang làm dở ở một worktree khác (thư mục docs/specs của nó chưa về đây) vẫn tính là có thật: chỉ hỏi git khi gặp tên lạ.
 function collectDecisionFiles(realRoot, specNames, loi) {
+  let elsewhere = null
+  const known = (name) => {
+    if (specNames.has(name)) return true
+    elsewhere ??= worktreeRoots(realRoot)
+    return elsewhere.some((wt) => isSpecDir(wt, name))
+  }
   const base = safePath(realRoot, SO_CHOT_REL)
   if (!base) { loi.push(loiObj('symlink', `Bỏ qua ${SO_CHOT_REL}: symlink/junction hoặc nằm ngoài thư mục dự án`)); return [] }
   if (!lstatSafe(base)?.isDirectory()) return []
@@ -309,7 +339,7 @@ function collectDecisionFiles(realRoot, specNames, loi) {
     if (dst.isSymbolicLink()) { loi.push(loiObj('symlink', `Bỏ qua ${SO_CHOT_REL}/${dirName}: symlink/junction`)); continue }
     if (!dst.isDirectory()) continue
     const names = listDir(dir).filter((n) => n.toLowerCase().endsWith('.md')).sort()
-    if (dirName !== 'chung' && !specNames.has(dirName)) {
+    if (dirName !== 'chung' && !known(dirName)) {
       if (names.length) loi.push(loiObj('pham-vi', `Bỏ qua ${names.length} file trong ${SO_CHOT_REL}/${dirName}: không có thư mục tính năng docs/specs/${dirName}`))
       continue
     }
@@ -336,11 +366,16 @@ function statFile(realRoot, rel) {
 // (file quyết định, progress.md, IDEAS.md, INDEX.md vì cảnh báo lệch phụ thuộc nó, tên thư mục tính năng, thứ bị bỏ qua).
 function collect(projectRoot) {
   const root = realRootOf(projectRoot)
+  const store = storeRootOf(root)
   const loi = []
   const specs = collectSpecs(root, loi)
-  const files = collectDecisionFiles(root, new Set(specs.map((s) => s.name)), loi)
+  const files = collectDecisionFiles(store, new Set(specs.map((s) => s.name)), loi)
+  if (store !== root) {
+    const ket = strandedLocal(root, store)
+    if (ket.length) loi.push(loiObj('ket-worktree', `${ket.length} điều chốt còn nằm trong sổ riêng của worktree này, chưa có ở sổ chính (${ket.slice(0, 2).map((k) => k.rel).join(', ')}${ket.length > 2 ? ', …' : ''}); lần ghi sổ kế tiếp ở đây sẽ tự chép về sổ chính`))
+  }
   const ideas = statFile(root, IDEAS_REL)
-  const index = statFile(root, INDEX_REL)
+  const index = statFile(store, INDEX_REL)
   const parts = [
     ...files.map((f) => `d\0${f.rel}\0${f.size}\0${f.mtimeMs}`),
     ...specs.map((s) => `s\0${s.name}\0${s.progress ? `${s.progress.size}\0${s.progress.mtimeMs}` : '-'}`),
@@ -348,7 +383,7 @@ function collect(projectRoot) {
     ...(index ? [`x\0${INDEX_REL}\0${index.size}\0${index.mtimeMs}`] : []),
     ...loi.map((l) => `l\0${l.msg}`),
   ]
-  return { root, loi, specs, files, ideas, index, fingerprint: sha1(parts.sort().join('\n')) }
+  return { root, store, loi, specs, files, ideas, index, fingerprint: sha1(parts.sort().join('\n')) }
 }
 
 // ---------- progress.md ----------
@@ -503,10 +538,17 @@ function isSpecDir(root, name) {
 }
 
 // Gốc của mọi worktree cùng repo với `root` (git worktree list --porcelain chạy ở root). Lỗi git / không phải repo ⇒ [].
-function worktreeRoots(root) {
+const worktreeRoots = (root) => worktreeList(root).map((w) => w.path)
+// [{ path, bare }] theo đúng thứ tự git in (mục đầu là thư mục chính, hoặc repo bare).
+function worktreeList(root) {
   const r = spawnSync('git', ['-c', 'core.quotepath=off', 'worktree', 'list', '--porcelain'], { cwd: root, encoding: 'utf8', timeout: 5000, windowsHide: true, maxBuffer: 1 << 20 })
   if (r.error || r.status !== 0) return []
-  return r.stdout.split(/\r?\n/).filter((l) => l.startsWith('worktree ')).map((l) => l.slice('worktree '.length)).filter((p) => p && path.isAbsolute(p))
+  const out = []
+  for (const l of r.stdout.split(/\r?\n/)) {
+    if (l.startsWith('worktree ')) { const p = l.slice('worktree '.length); out.push({ path: p, bare: false, ok: !!p && path.isAbsolute(p) }) }
+    else if (l === 'bare' && out.length) out.at(-1).bare = true
+  }
+  return out.filter((w) => w.ok).map(({ path: p, bare }) => ({ path: p, bare }))
 }
 
 // Như isSpecDir nhưng thư mục tính năng có ở gốc HOẶC ở docs/specs của bất kỳ worktree nào cùng repo: tính năng vừa tạo trong worktree
@@ -611,7 +653,7 @@ function parseAll(src) {
   })
   const ideasText = src.ideas ? readText(src.ideas.abs, MAX_BIG) : null
   const ideas = ideasText ? parseIdeas(ideasText.text).ideas : new Map()
-  return { root: src.root, decisions, loi, specs, ideas, fingerprint: src.fingerprint }
+  return { root: src.root, store: src.store, decisions, loi, specs, ideas, fingerprint: src.fingerprint }
 }
 
 const scanAll = (projectRoot) => parseAll(collect(projectRoot))
@@ -751,11 +793,12 @@ export function render(projectRoot) {
 //  - docs/ROADMAP-luu-tru.md: không ghi khi rỗng mà file chưa có; cũng không ghi khi ROADMAP.md bị bỏ qua (nó đi kèm ROADMAP.md).
 export function write(projectRoot) {
   const root = realRootOf(projectRoot)
+  adoptLocal(root)
   const { luuTruRong, ...r } = renderAll(scanAll(root))
   const out = { ghi: [], bo_qua: [] }
   let roadmapOk = true
   for (const [rel, content] of [[INDEX_REL, r.index], [ROADMAP_REL, r.roadmap], [LUU_TRU_REL, r.roadmapLuuTru]]) {
-    const abs = safePath(root, rel)
+    const abs = safePath(rel === INDEX_REL ? storeRootOf(root) : root, rel)
     const coSan = !!abs && !!lstatSafe(abs)?.isFile()
     if (rel === LUU_TRU_REL && (!roadmapOk || (luuTruRong && !coSan))) continue
     if (!abs) { out.bo_qua.push({ file: rel, ly_do: 'symlink/junction hoặc nằm ngoài thư mục dự án' }); roadmapOk &&= rel !== ROADMAP_REL; continue }
@@ -789,14 +832,59 @@ export function ensureGitattributes(projectRoot) {
 
 // ---------- ghi / đổi trạng thái / cất kho / tìm ----------
 
-function existingMas(root) {
-  const base = safePath(root, SO_CHOT_REL)
+const existingMas = (root) => masIn(storeRootOf(root))
+function masIn(bookRoot) {
+  const base = safePath(bookRoot, SO_CHOT_REL)
   const out = new Set()
   if (!base) return out
   for (const dir of listDir(base)) {
     for (const n of listDir(path.join(base, dir))) { const m = /^([a-z0-9]{4,16})-/.exec(n); if (m) out.add(m[1]) }
   }
   return out
+}
+
+// Sổ riêng còn sót trong worktree phụ của dự án có sổ bị git bỏ qua (do bản cũ ghi tại chỗ): file quyết định nào mà sổ chính chưa có mã đó
+// là điều chốt đang kẹt — dọn worktree là mất. Đọc ⇒ collect() báo một cảnh báo; ghi ⇒ adoptLocal() chép về sổ chính trước.
+function strandedLocal(root, store) {
+  const base = safePath(root, SO_CHOT_REL)
+  if (!base || !lstatSafe(base)?.isDirectory()) return []
+  const have = masIn(store)
+  const out = []
+  for (const dir of listDir(base).sort()) {
+    const dAbs = path.join(base, dir)
+    if (!validSpecName(dir) || !lstatSafe(dAbs)?.isDirectory()) continue // lstat: junction/symlink không phải thư mục thật ⇒ bỏ
+    for (const n of listDir(dAbs).sort()) {
+      const m = /^([a-z0-9]{4,16})-.*\.md$/i.exec(n)
+      if (!m || have.has(m[1]) || !lstatSafe(path.join(dAbs, n))?.isFile()) continue
+      out.push({ rel: `${dir}/${n}`, abs: path.join(dAbs, n) })
+    }
+  }
+  return out
+}
+
+// Chép các điều chốt đang kẹt ở sổ riêng của worktree về sổ chính: không ghi đè, giữ nguyên bản gốc. Trả số file đã chép.
+function adoptLocal(root) {
+  const store = storeRootOf(root)
+  if (store === root) return 0
+  let n = 0
+  for (const k of strandedLocal(root, store)) {
+    const dest = safePath(store, `${SO_CHOT_REL}/${k.rel}`)
+    if (!dest) continue
+    try {
+      fs.mkdirSync(path.dirname(dest), { recursive: true })
+      fs.copyFileSync(k.abs, dest, fs.constants.COPYFILE_EXCL)
+      n++
+    } catch { /* đã có file cùng tên hoặc không chép được ⇒ để nguyên, cảnh báo vẫn còn */ }
+  }
+  return n
+}
+
+// Nơi sổ chốt của một thư mục thật sự nằm (cho mod và công cụ ngoài khỏi tự ghép đường dẫn từ thư mục đang đứng).
+export function noiSo(projectRoot) {
+  const root = realRootOf(projectRoot)
+  const store = storeRootOf(root)
+  const dir = path.join(store, SO_REL)
+  return { root, store, dir, index: path.join(dir, 'INDEX.md') }
 }
 
 const pub = ({ than, ...d }) => d
@@ -806,6 +894,7 @@ const pub = ({ than, ...d }) => d
 // opts: { now (ms), write=false để bỏ qua sinh INDEX/ROADMAP khi ghi hàng loạt (gọi write() một lần cuối), gitattributes=false }.
 export function ghi(projectRoot, input = {}, opts = {}) {
   const root = realRootOf(projectRoot)
+  adoptLocal(root)
   const tom_tat = cutWords(oneLine(input.tom_tat), 200)
   if (!tom_tat) throw new Error('thiếu tom_tat')
   const pham_vi = String(input.pham_vi ?? '').trim() || 'chung'
@@ -829,7 +918,7 @@ export function ghi(projectRoot, input = {}, opts = {}) {
     const ma = newMa()
     if (used.has(ma)) continue // AC2: trùng mã (cực hiếm) ⇒ sinh lại
     const d = { ma, tom_tat, pham_vi, trang_thai, luc, ai_quyet, ...(thay_cho ? { thay_cho } : {}), ...(lien_quan ? { lien_quan } : {}), file: `${pham_vi}/${ma}-${slug}.md` }
-    const abs = safePath(root, `${SO_CHOT_REL}/${d.file}`)
+    const abs = safePath(storeRootOf(root), `${SO_CHOT_REL}/${d.file}`)
     if (!abs) throw new Error(`không ghi được ${SO_CHOT_REL}/${pham_vi}: nằm ngoài thư mục dự án hoặc qua symlink/junction`)
     fs.mkdirSync(path.dirname(abs), { recursive: true })
     try {
@@ -847,7 +936,7 @@ export function ghi(projectRoot, input = {}, opts = {}) {
 
 // Đổi trường trang_thai (+ sua_luc nếu là thao tác của người) trong file quyết định, giữ nguyên phần còn lại.
 function setDecisionStatus(root, d, to, suaLuc) {
-  const abs = safePath(root, `${SO_CHOT_REL}/${d.file}`)
+  const abs = safePath(storeRootOf(root), `${SO_CHOT_REL}/${d.file}`)
   const st = abs && lstatSafe(abs)
   if (!st?.isFile()) throw new Error(`không sửa được ${d.file}`)
   let text = setFrontField(fs.readFileSync(abs, 'utf8'), 'trang_thai', to)
@@ -857,6 +946,7 @@ function setDecisionStatus(root, d, to, suaLuc) {
 
 function doiTrangThai(projectRoot, ma, to, from, opts) {
   const root = realRootOf(projectRoot)
+  adoptLocal(root)
   const d = resolveMa(scanAll(root).decisions, ma)
   if (d.trang_thai === to) return pub(d)
   if (!from.includes(d.trang_thai)) throw new Error(`[${ma4(d.ma)}] đang ở trạng thái ${d.trang_thai}, không chuyển được sang ${to}`)
@@ -876,6 +966,7 @@ export const huy = (projectRoot, ma, opts = {}) => doiTrangThai(projectRoot, ma,
 // Chạy lại an toàn: không còn gì để cất ⇒ không đổi file nào. Điều `chung` không bao giờ tự cất.
 export function close(projectRoot, feature, opts = {}) {
   const root = realRootOf(projectRoot)
+  adoptLocal(root)
   const f = String(feature ?? '').trim()
   if (!f || f === 'chung') throw new Error('close cần tên thư mục tính năng (không phải "chung")')
   if (!isSpecDir(root, f)) throw new Error(`không có thư mục tính năng docs/specs/${oneLine(f, 60)}`)
@@ -978,7 +1069,9 @@ function fit(head, items, cap, notice) {
 function buildExcerpt(all, { branch, budget, mod }) {
   const scale = Math.min(1, budget / KHAU_PHAN.tong)
   const cap = (n) => Math.max(0, Math.floor(n * scale))
-  const tra = mod ? 'mcp__so-chot__tim_chot' : 'rg -i "<từ khoá>" .claude/so-chot'
+  // Sổ nằm ở thư mục chính (worktree của dự án có sổ bị git bỏ qua) ⇒ chỉ đường dẫn thật, kẻo tra trong worktree không ra gì.
+  const soDir = all.store && all.store !== all.root ? `"${path.join(all.store, SO_REL).split(path.sep).join('/')}"` : '.claude/so-chot'
+  const tra = mod ? 'mcp__so-chot__tim_chot' : `rg -i "<từ khoá>" ${soDir}`
   const { decisions } = all
   const hasBook = decisions.length > 0 || all.loi.some((l) => l.loai !== 'symlink') // chỉ có symlink bị bỏ qua ⇒ coi như chưa có sổ (AC14)
   const newestFirst = (xs) => [...xs].sort((a, b) => (a.luc < b.luc ? 1 : a.luc > b.luc ? -1 : a.ma < b.ma ? 1 : -1))
@@ -1056,6 +1149,7 @@ function runCli(argv) {
     try { return JSON.parse(s) } catch { return s }
   }
   const CMDS = {
+    'noi-so': () => noiSo(root),
     gen: () => { const w = write(root); return { ...w, canh_bao: [...w.bo_qua.map((b) => `${b.file}: ${b.ly_do}`), ...scan(root).loi.map((l) => l.msg)] } },
     excerpt: () => ({ text: excerpt(root, arg() || {}) }),
     ghi: () => pub(ghi(root, arg())),
@@ -1067,7 +1161,7 @@ function runCli(argv) {
     xong: () => { const a = arg(); return xong(root, typeof a === 'string' ? a : a.feature) },
   }
   try {
-    if (!CMDS[cmd] || !root) throw new Error('dùng: so-chot.mjs <gen|excerpt|ghi|tim|y-tuong|da-xem|huy|close|xong> <projectRoot> [json|-]')
+    if (!CMDS[cmd] || !root) throw new Error('dùng: so-chot.mjs <gen|excerpt|ghi|tim|y-tuong|da-xem|huy|close|xong|noi-so> <projectRoot> [json|-]')
     process.stdout.write(`${JSON.stringify(CMDS[cmd]())}\n`)
   } catch (e) {
     process.stderr.write(`lỗi: ${oneLine(e?.message ?? e, 300)}\n`)
