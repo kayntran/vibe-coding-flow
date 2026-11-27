@@ -6,6 +6,8 @@
 //   2. Thư mục build trong một git repo (BUILD_NAMES) mà git đang bỏ qua (.gitignore) và không theo dõi file nào trong đó.
 //   3. Worktree phụ đã gộp sạch: không còn thay đổi dở, không khoá, nhánh đã nằm trong nhánh chính (hoặc nội dung trùng nhánh chính).
 //      Gỡ bằng `git worktree remove` KHÔNG --force, nên git vẫn tự từ chối nếu có gì bất thường.
+//   4. Bản sao làm việc còn sót: <repo>/.claude/worktrees/<tên> mà git đã gỡ khỏi danh sách worktree, không còn .git, git không theo dõi.
+//   (1.) Thư mục nhà là repo git thì thư mục tạm bên trong nó vẫn tính là thư mục tạm.
 // Không bao giờ dọn: gốc ổ đĩa, thư mục người dùng, thư mục đang đứng hoặc thư mục cha của nó, đường dẫn có ký tự đại diện.
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
@@ -111,12 +113,20 @@ export function classify(raw, { cwd = process.cwd(), temps = tempRoots() } = {})
   const top = (git(parent, 'rev-parse', '--show-toplevel') ?? '').trim()
   // Có .git ở thư mục cha mà git báo lỗi (repo hỏng, khác chủ sở hữu) ⇒ không suy ra là "không có repo".
   if (!top && gitAbove(parent)) return { refuse: 'thư mục này nằm trong một repo mà git đang báo lỗi' }
-  // Thư mục con của một repo thì xét như trong dự án, dù repo đó nằm trong thư mục tạm.
-  if (!top) {
-    for (const root of temps) {
-      if (under(root, target)) return { kind: 'temp', target }
-      if (same(root, target)) return { refuse: 'đây là chính thư mục tạm, chỉ dọn được thứ bên trong' }
-    }
+  // Bản sao làm việc git đã gỡ khỏi danh sách nhưng còn sót file (<repo>/.claude/worktrees/<tên>, không còn .git, git không theo dõi).
+  if (top && path.basename(parent).toLowerCase() === 'worktrees' && path.basename(path.dirname(parent)).toLowerCase() === '.claude' && same(real(top), path.dirname(path.dirname(parent)))) {
+    const listed = git(top, 'worktree', 'list', '--porcelain')
+    const tracked = git(parent, 'ls-files', '--', path.basename(target))
+    if (listed === null || tracked === null) return { refuse: 'không kiểm được git về bản sao làm việc này' }
+    if (listed.split(/\r?\n/).some((l) => l.startsWith('worktree ') && same(real(l.slice(9)), target))) return { refuse: 'git vẫn ghi đây là worktree nhưng không mở được' }
+    if (tracked.trim()) return { refuse: 'git đang theo dõi file trong thư mục này, xoá đi sẽ mất dữ liệu của dự án' }
+    return { kind: 'leftover', target }
+  }
+  // Thư mục con của một repo nằm TRONG thư mục tạm thì xét như trong dự án; repo bọc ngoài thư mục tạm (vd thư mục nhà là repo) không tính.
+  for (const root of temps) {
+    if (top && (under(root, real(top)) || same(root, real(top)))) continue
+    if (under(root, target)) return { kind: 'temp', target }
+    if (same(root, target)) return { refuse: 'đây là chính thư mục tạm, chỉ dọn được thứ bên trong' }
   }
   const name = path.basename(target).toLowerCase()
   if (BUILD_NAMES.has(name)) {
