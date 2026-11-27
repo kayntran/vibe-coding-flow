@@ -2406,6 +2406,25 @@ describe('xoá thư mục hệ thống/cá nhân/.git ⇒ chặn (có lối ra F
   }
 })
 
+describe('xoá chính thư mục đang đứng hoặc thư mục cha ⇒ chặn trước, dặn tạo thư mục mới (Claude Code tự bật hộp hỏi không tắt được)', () => {
+  test('rm -rf thư mục đang đứng, ".", "..", thư mục cha ⇒ chặn, không gợi FLOW_OK; thư mục con, thư mục bên cạnh ⇒ qua', () => {
+    const fx = fixture()
+    const cho = path.join(fx.root, 'archtpl2')
+    fs.mkdirSync(path.join(cho, 'sub'), { recursive: true })
+    const fwd = cho.replace(/\\/g, '/')
+    const gitBash = fwd.replace(/^([A-Za-z]):/, (_, d) => `/${d.toLowerCase()}`)
+    for (const command of [`rm -rf ${gitBash} && mkdir -p ${gitBash} && cd ${gitBash}`, `rm -rf "${cho}"`, 'rm -rf .', 'rm -rf ..', `rm -rf ${fx.root.replace(/\\/g, '/')}`]) {
+      const reason = assertDeny(hook(fx, 'bash', bashIn(cho, command)))
+      assert.match(reason, /thư mục mới/, command)
+      assert.doesNotMatch(reason, /FLOW_OK=1/, command)
+      assertPlainOpening(reason, command)
+    }
+    for (const command of ['rm -rf sub', `rm -rf ${fwd}-cu`, 'rm -rf ./sub/x', 'rm -rf $X_TMP/y']) {
+      assertPass(hook(fx, 'bash', bashIn(cho, command)))
+    }
+  })
+})
+
 describe('tool PowerShell (Claude Code trên Windows) qua cùng cổng như Bash', () => {
   test('xoá thư mục, push ép main ⇒ deny (có lối ra); lệnh thường qua; $env:FLOW_OK=1; cho qua', () => {
     const fx = fixture()

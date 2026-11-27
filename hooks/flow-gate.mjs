@@ -917,24 +917,42 @@ function systemTarget(raw, home = os.homedir()) {
   const whole = p.replace(/\/\*+$/, '') || '/'
   return SYS_WHOLE.some((re) => re.test(whole)) || SYS_UNDER.some((re) => re.test(p)) ? raw : null
 }
-// Trả đường dẫn hệ thống bị xoá đệ quy, hoặc null.
-function deletesDir(toks, depth = 0) {
+// Đích là chính thư mục đang đứng hoặc thư mục cha của nó? Claude Code tự bật hộp hỏi cho trường hợp này và không cho tự duyệt.
+function holdsCwd(raw, cwd, home = os.homedir()) {
+  if (!cwd || /[$*?`]|%[^%]+%/.test(raw)) return false
+  let p = normPath(raw, home)
+  if (!/^([a-z]:|\/|~)/.test(p)) p = normPath(path.resolve(cwd, raw.replace(/^['"]|['"]$/g, '')), home)
+  const c = normPath(cwd, home)
+  return c === p || c.startsWith(`${p.replace(/\/+$/, '')}/`)
+}
+// Trả { target, cwd } khi xoá đệ quy vào thư mục hệ thống (cwd: false) hoặc vào thư mục đang đứng (cwd: true), không thì null.
+function deletesDir(toks, depth = 0, cwd = null) {
   if (depth > 4) return null
   let k = 0
   while (k < toks.length && (/^[A-Za-z_]\w*=/.test(toks[k]) || CMD_WRAPPERS.has(baseCmd(toks[k])))) k++
   if (k >= toks.length) return null
   const name = baseCmd(toks[k]).toLowerCase()
   const rest = toks.slice(k + 1)
-  const targets = () => rest.filter((t) => !/^-{1,2}[a-z]/i.test(t) && !/^\/[a-z]$/i.test(t)).map((t) => systemTarget(t)).find(Boolean) ?? null
+  const targets = () => {
+    for (const t of rest.filter((x) => !/^-{1,2}[a-z]/i.test(x) && !/^\/[a-z]$/i.test(x))) {
+      if (systemTarget(t)) return { target: t, cwd: false }
+      if (holdsCwd(t, cwd)) return { target: t, cwd: true }
+    }
+    return null
+  }
   if (name === 'rm') return rest.some((t) => /^-[a-zA-Z]*[rR]/.test(t) || t === '--recursive') ? targets() : null
   if (/^(remove-item|ri|del|erase)$/.test(name)) return rest.some((t) => /^-r(ecurse)?$/i.test(t)) ? targets() : null
   if (/^(rmdir|rd)$/.test(name)) return rest.some((t) => /^\/s$/i.test(t) || /^-r(ecurse)?$/i.test(t)) ? targets() : null
   if (SHELL_RUNNERS.test(name)) {
     const inner = rest.filter((t, i) => i >= rest.findIndex((x) => !/^[-/]/.test(x))).join(' ')
-    for (const t of tokenize(inner)) { const hit = deletesDir(t, depth + 1); if (hit) return hit }
+    for (const t of tokenize(inner)) { const hit = deletesDir(t, depth + 1, cwd); if (hit) return hit }
   }
   return null
 }
+const CWD_DELETE_DENY = (target) => permission('deny',
+  'Xoá chính thư mục AI đang đứng trong đó thì Claude Code sẽ bật hộp hỏi bạn, nên AI không chạy lệnh này. ' +
+  `Đích: ${target}. Cần chỗ trống sạch ⇒ tạo thư mục mới tên khác (thêm giờ, vd ${String(target).replace(/[\\/]+$/, '')}-2) rồi làm ở đó; ` +
+  'hoặc chuyển ra thư mục khác bằng MỘT lệnh cd riêng trước, rồi mới xoá ở lệnh sau. Không dùng FLOW_OK cho việc này (hộp hỏi vẫn bật).')
 const DIR_DELETE_DENY = (target) => denyWithExit(
   'Xoá thư mục hệ thống hoặc thư mục cá nhân thì không lấy lại được nên AI không chạy lệnh này. ' +
   `Đích: ${target} (ổ gốc, thư mục Windows/Program Files, thư mục nhà, khoá SSH hoặc lịch sử .git); thư mục tạm, nháp, test, build, worktree thì xoá bình thường được. ` +
@@ -946,8 +964,8 @@ async function hookBash(input) {
   if (typeof cmd !== 'string') return null
   // Lối ra của mọi lời chặn: user đã gật trong chat ⇒ AI chạy lại lệnh với tiền tố FLOW_OK=1 ⇒ cho qua mọi cổng, chỉ ghi dấu vết.
   if (/\bFLOW_OK=/.test(cmd)) { logApproval(cmd); return null }
-  const sysDel = safely('dirDelete', () => tokenize(cmd).map((t) => deletesDir(t)).find(Boolean))
-  if (sysDel) return DIR_DELETE_DENY(sysDel)
+  const del = safely('dirDelete', () => tokenize(cmd).map((t) => deletesDir(t, 0, n.cwd ? toNative(n.cwd) : null)).find(Boolean))
+  if (del) return del.cwd ? CWD_DELETE_DENY(del.target) : DIR_DELETE_DENY(del.target)
   const nudge = SLOW_SEARCH.test(cmd) ? SEARCH_NUDGE : null
   if (!GIT_WORDS.test(cmd)) return nudge
   let cwd = path.resolve(toNative(n.cwd))
