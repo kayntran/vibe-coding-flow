@@ -1419,7 +1419,7 @@ describe('bash: lệnh phá huỷ trên nhánh chính', () => {
     const fx = fixture()
     for (const c of [
       'git push --force origin main', 'git push origin --delete main', 'git reset --hard', 'git branch -D main', 'git branch -M feat main',
-      'git clean -fd', 'git restore .', 'git checkout -- .', 'rm -rf build',
+      'git clean -fd', 'git restore .', 'git checkout -- .', 'rm -rf /',
     ]) {
       assertExit(assertDeny(sh(fx, fx.main, c)))
       assertPass(sh(fx, fx.main, `FLOW_OK=1 ${c}`))
@@ -1872,7 +1872,7 @@ describe('sửa thẳng thư mục chính không bị chặn (luật cũ đã b�
   test('cổng khác vẫn chạy cạnh apply_patch: xoá thư mục, git reset --hard, push ép nhánh chính vẫn bị chặn; có FLOW_OK=1 thì qua', () => {
     const fx = fixture({ outsideTmp: true })
     const patch = `apply_patch <<'EOF'\n${patchOf('a.txt')}\nEOF`
-    assertExit(assertDeny(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: `rm -rf build && ${patch}` }))))
+    assertExit(assertDeny(hook(fx, 'bash', codexIn(fx.main, 'Bash', { command: `rm -rf / && ${patch}` }))))
     assertExit(assertDeny(hook(fx, 'bash', bashIn(fx.main, 'git reset --hard'))))
     assertExit(assertDeny(hook(fx, 'bash', bashIn(fx.main, `${patch}\ngit push --force origin main`))))
     assertPass(hook(fx, 'bash', bashIn(fx.main, 'FLOW_OK=1 rm -rf build')))
@@ -2377,19 +2377,22 @@ describe('ghi nội dung file qua lệnh shell ⇒ không chặn, kể cả nộ
   }
 })
 
-describe('xoá cả thư mục qua lệnh shell ⇒ chặn, dặn dùng don.mjs hoặc tạo thư mục mới; thật sự cần xoá thì có lối ra FLOW_OK=1', () => {
+describe('xoá thư mục hệ thống/cá nhân/.git ⇒ chặn (có lối ra FLOW_OK=1); thư mục tạm, build, test, worktree ⇒ cho qua [bfv3]', () => {
   const mustDeny = [
-    'rm -rf /tmp/x', 'rm -r build', 'rm -fr out', 'rm -Rf a b', 'rm --recursive dist', 'cd x && rm -rf node_modules',
-    'sudo rm -rf /var/x', '/bin/rm -rf x', 'FOO=1 rm -rf x', 'git status; rm -r -f tmp', 'bash -c "rm -rf x"',
-    'powershell -c "Remove-Item -Recurse -Force x"', 'cmd /c rmdir /s /q x',
+    'rm -rf /', 'rm -rf /*', 'rm -rf ~', 'rm -rf "$HOME"', 'rm -rf $DIR/*', 'sudo rm -rf /var/lib', '/bin/rm -rf /etc',
+    'FOO=1 rm -rf ~/.ssh', 'git status; rm -r -f .git', 'bash -c "rm -rf ~/Documents"', 'rm -rf C:/Windows/Temp',
+    'powershell -c "Remove-Item -Recurse -Force \'C:\\Program Files\\X\'"', 'cmd /c rmdir /s /q D:\\', 'rm -rf /c/Users/Someone',
   ]
-  const mustPass = ['rm a.txt', 'rm -f a.txt b.txt', 'rmdir empty', 'git rm -r --cached x', 'echo "rm -rf x"', 'git commit -m "bỏ rm -rf"', 'mkdir -p new-dir']
+  const mustPass = [
+    'rm a.txt', 'rm -f a.txt b.txt', 'rmdir empty', 'git rm -r --cached x', 'echo "rm -rf ~"', 'git commit -m "bỏ rm -rf /"', 'mkdir -p new-dir',
+    'rm -rf /tmp/x', 'rm -r build', 'rm -fr out', 'rm -Rf a b', 'rm --recursive dist', 'cd x && rm -rf node_modules', 'rm -rf $TMPDIR/x',
+    'bash -c "rm -rf x"', 'powershell -c "Remove-Item -Recurse -Force x"', 'cmd /c rmdir /s /q x', 'rm -rf .claude/worktrees/old', 'rm -rf ~/.claude/mods-cu',
+  ]
   for (const command of mustDeny) {
     test(`chặn: ${command}`, () => {
       const fx = fixture()
       const reason = assertDeny(hook(fx, 'bash', bashIn(fx.root, command)))
-      assert.match(reason, /thư mục mới/)
-      assert.match(reason, /don\.mjs/)
+      assert.match(reason, /thư mục hệ thống/)
       assertPlainOpening(reason, command)
       assertExit(reason)
     })
@@ -2407,10 +2410,9 @@ describe('tool PowerShell (Claude Code trên Windows) qua cùng cổng như Bash
   test('xoá thư mục, push ép main ⇒ deny (có lối ra); lệnh thường qua; $env:FLOW_OK=1; cho qua', () => {
     const fx = fixture()
     const ps = (command) => hook(fx, 'bash', { hook_event_name: 'PreToolUse', tool_name: 'PowerShell', cwd: fx.main, tool_input: { command }, transcript_path: path.join(fx.root, 't.jsonl') })
-    const dir = assertDeny(ps('cmd /c rd /s /q "\\\\?\\D:\\x\\.claude\\worktrees\\old"'))
-    assert.match(dir, /Thùng rác/)
-    assertExit(dir)
-    assertExit(assertDeny(ps('Remove-Item -Recurse -Force .\\build')))
+    assertPass(ps('cmd /c rd /s /q "\\\\?\\D:\\x\\.claude\\worktrees\\old"'))
+    assertPass(ps('Remove-Item -Recurse -Force .\\build'))
+    assertExit(assertDeny(ps('Remove-Item -Recurse -Force $env:USERPROFILE')))
     assertExit(assertDeny(ps('git push --force origin main')))
     assertPass(ps('git status'))
     assertPass(ps('$env:FLOW_OK=1; Remove-Item -Recurse -Force .\\build'))

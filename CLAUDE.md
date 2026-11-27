@@ -86,10 +86,10 @@ AGENTS.md, `.claude/rules/`) thắng phần này.
   <projectRoot> <json>`) — không ghi vào progress.md, plan hay memory. Memory chỉ giữ sở thích cá nhân xuyên dự án.
 - User nói ra ý tưởng (tính năng, cải tiến) giữa việc ⇒ ghi thêm một dòng vào `docs/IDEAS.md` (`mcp__so-chot__ghi_y_tuong`
   hoặc CLI `y-tuong`) rồi làm tiếp, không ngắt việc đang làm, không tra trùng lúc đó.
-- Hook chỉ chặn: lộ secret, ép/xoá nhánh chính, bỏ thay đổi ở bản chính, xoá thư mục, phá DB thật.
+- Hook chỉ chặn: lộ secret, ép/xoá nhánh chính, bỏ thay đổi ở bản chính, xoá thư mục hệ thống/cá nhân/.git, phá DB thật.
   Bị chặn ⇒ làm cách an toàn, không lách; thật cần ⇒ kể user mất gì, user gật thì chạy lại với `FLOW_OK=1` một lần. KHÔNG sửa kit giữa dự án.
-- Ghi file ưu tiên Write/Edit (Codex: apply_patch). Dọn thư mục tạm, build, worktree đã gộp sạch ⇒
-  `node ~/.claude/hooks/don.mjs "<đường dẫn>"`, không gõ lệnh xoá đệ quy. Đồ tạm của một việc để trong MỘT thư mục, xong việc là dọn.
+- Ghi file ưu tiên Write/Edit (Codex: apply_patch). Thư mục tạm, build ⇒ xoá thẳng được;
+  worktree ⇒ `node ~/.claude/hooks/don.mjs "<đường dẫn>"` (tự từ chối khi còn thứ chưa gộp). Đồ tạm của một việc để trong MỘT thư mục, xong việc là dọn.
 - Viết/sửa SPEC, plan, báo cáo xong ⇒ tóm tắt ngắn ngay trong chat + chép bản xem vào thư mục mở phiên và mở sẵn (khung
   xem file không mở được file trong worktree); chỉ đưa link khi mở được thật.
 - Gọi CLI/model ngoài (codex, agy, cursor-agent, grok, devin) ⇒ `node ~/.claude/hooks/cli-check.mjs <tên>` trước; chưa

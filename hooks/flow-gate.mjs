@@ -880,31 +880,65 @@ const SEARCH_NUDGE = {
   },
 }
 
-// Xoá cả thư mục (rm -r/-rf, Remove-Item -Recurse, rmdir|rd /s), kể cả trong bash -c / eval / powershell -c / cmd /c ⇒ chặn: bộ lọc an toàn của app bật
-// hộp hỏi user cho mỗi lệnh như vậy. Dọn chỗ chạy test thì tạo thư mục mới; thật sự cần xoá thì có lối ra (EXIT_LINE).
+// Xoá cả thư mục (rm -r/-rf, Remove-Item -Recurse, rmdir|rd /s), kể cả trong bash -c / eval / powershell -c / cmd /c ⇒ CHỈ chặn khi đích là thư mục
+// hệ thống, thư mục cá nhân hoặc .git (cùng luật với mod chan-nguy-hiem [bfv3]); thư mục tạm, nháp, test, build, worktree cho qua.
 const CMD_WRAPPERS = new Set(['sudo', 'command', 'builtin', 'exec', 'env', 'time', 'nice', 'nohup'])
+// Dạng chuẩn: gạch chéo xuôi, chữ thường, bỏ nháy, bỏ gạch cuối, thư mục nhà thành "~".
+function normPath(raw, home) {
+  let p = raw.replace(/^['"]|['"]$/g, '').replace(/\\/g, '/').trim()
+  p = p.replace(/^(\$home|\$env:userprofile|%userprofile%|\$\{home\})(?=\/|$)/i, '~')
+  const h = home.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  const gitBashHome = h.replace(/^([a-z]):/, (_, d) => `/${d}`)
+  p = p.toLowerCase()
+  for (const prefix of [h, gitBashHome]) if (prefix && (p === prefix || p.startsWith(`${prefix}/`))) p = `~${p.slice(prefix.length)}`
+  p = p.replace(/^\/([a-z])(?=\/|$)/, '$1:').replace(/^\/mnt\/([a-z])(?=\/|$)/, '$1:')
+  return p.length > 1 ? p.replace(/\/+$/, '') : p
+}
+// Đúng các thư mục này (hoặc "này/*"): xoá chính nó hoặc mọi thứ bên trong.
+const SYS_WHOLE = [
+  /^\/$/, /^[a-z]:$/, /^~$/, /^[a-z]:\/users$/, /^\/users$/, /^\/home$/, /^\/home\/[^/]+$/, /^[a-z]:\/users\/[^/]+$/,
+  /^~\/(documents|desktop|downloads|pictures|music|videos|onedrive|appdata|appdata\/(local|roaming|locallow)|library|\.config|\.local|\.claude|\.codex|\.factory|\.cache)$/,
+]
+// Mọi thứ nằm ở hoặc dưới các chỗ này.
+const SYS_UNDER = [
+  /^[a-z]:\/(windows|program files|program files \(x86\)|programdata|\$recycle\.bin|system volume information|recovery|boot)(\/|$)/,
+  /^\/(usr|bin|sbin|etc|boot|lib|lib64|system|library|applications|opt)(\/|$)/,
+  /^\/private\/(?!tmp(\/|$)|var\/folders(\/|$))/,
+  /^\/var\/(?!folders(\/|$)|tmp(\/|$))/,
+  /^~\/(\.ssh|\.gnupg|\.aws|\.kube)(\/|$)/,
+  /(^|\/)\.git$/,
+]
+// "$X/" hoặc "$X/*" với X chưa rõ: X rỗng là gốc ổ đĩa.
+const BARE_VAR = /^\$\{?\w+\}?\/?\*?$/
+function systemTarget(raw, home = os.homedir()) {
+  const bare = raw.replace(/['"]/g, '')
+  if (BARE_VAR.test(bare) && !/^\$\{?(home|tmp|temp|tmpdir)\}?/i.test(bare)) return raw
+  const p = normPath(raw, home)
+  const whole = p.replace(/\/\*+$/, '') || '/'
+  return SYS_WHOLE.some((re) => re.test(whole)) || SYS_UNDER.some((re) => re.test(p)) ? raw : null
+}
+// Trả đường dẫn hệ thống bị xoá đệ quy, hoặc null.
 function deletesDir(toks, depth = 0) {
-  if (depth > 4) return false
+  if (depth > 4) return null
   let k = 0
   while (k < toks.length && (/^[A-Za-z_]\w*=/.test(toks[k]) || CMD_WRAPPERS.has(baseCmd(toks[k])))) k++
-  if (k >= toks.length) return false
+  if (k >= toks.length) return null
   const name = baseCmd(toks[k]).toLowerCase()
   const rest = toks.slice(k + 1)
-  if (name === 'rm') return rest.some((t) => /^-[a-zA-Z]*[rR]/.test(t) || t === '--recursive')
-  if (/^(remove-item|ri|del|erase)$/.test(name)) return rest.some((t) => /^-r(ecurse)?$/i.test(t))
-  if (/^(rmdir|rd)$/.test(name)) return rest.some((t) => /^\/s$/i.test(t) || /^-r(ecurse)?$/i.test(t))
+  const targets = () => rest.filter((t) => !/^-{1,2}[a-z]/i.test(t) && !/^\/[a-z]$/i.test(t)).map((t) => systemTarget(t)).find(Boolean) ?? null
+  if (name === 'rm') return rest.some((t) => /^-[a-zA-Z]*[rR]/.test(t) || t === '--recursive') ? targets() : null
+  if (/^(remove-item|ri|del|erase)$/.test(name)) return rest.some((t) => /^-r(ecurse)?$/i.test(t)) ? targets() : null
+  if (/^(rmdir|rd)$/.test(name)) return rest.some((t) => /^\/s$/i.test(t) || /^-r(ecurse)?$/i.test(t)) ? targets() : null
   if (SHELL_RUNNERS.test(name)) {
     const inner = rest.filter((t, i) => i >= rest.findIndex((x) => !/^[-/]/.test(x))).join(' ')
-    return tokenize(inner).some((t) => deletesDir(t, depth + 1))
+    for (const t of tokenize(inner)) { const hit = deletesDir(t, depth + 1); if (hit) return hit }
   }
-  return false
+  return null
 }
-const DIR_DELETE_DENY = denyWithExit(
-  'Xoá hẳn cả một thư mục thì không lấy lại được nên AI không chạy lệnh này; AI sẽ dọn bằng cách an toàn thay thế. ' +
-  'Lệnh xoá đệ quy (rm -r/-rf, Remove-Item -Recurse, rmdir /s) bị chặn. Dọn thư mục tạm, thư mục build (dist, build, .next, node_modules…) hoặc worktree đã gộp sạch ⇒ ' +
-  '`node ~/.claude/hooks/don.mjs "<đường dẫn>"` (tự kiểm rồi mới xoá, từ chối thì nêu lý do). Cần chỗ trống để chạy test/build mà don.mjs từ chối ⇒ tạo thư mục ' +
-  'mới (tên khác, vd thêm hậu tố thời gian) trong scratchpad hoặc thư mục tạm. Thật sự phải bỏ thư mục khác ⇒ chuyển vào Thùng rác (lấy lại được) bằng PowerShell ' +
-  '`Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory("<đường dẫn>", "OnlyErrorDialogs", "SendToRecycleBin")`.')
+const DIR_DELETE_DENY = (target) => denyWithExit(
+  'Xoá thư mục hệ thống hoặc thư mục cá nhân thì không lấy lại được nên AI không chạy lệnh này. ' +
+  `Đích: ${target} (ổ gốc, thư mục Windows/Program Files, thư mục nhà, khoá SSH hoặc lịch sử .git); thư mục tạm, nháp, test, build, worktree thì xoá bình thường được. ` +
+  'Kiểm lại đường dẫn (biến rỗng ⇒ thành gốc ổ). Thật sự cần ⇒ kể user sẽ mất gì, user gật thì chạy lại.')
 
 async function hookBash(input) {
   const n = normalize(input, process.env)
@@ -912,7 +946,8 @@ async function hookBash(input) {
   if (typeof cmd !== 'string') return null
   // Lối ra của mọi lời chặn: user đã gật trong chat ⇒ AI chạy lại lệnh với tiền tố FLOW_OK=1 ⇒ cho qua mọi cổng, chỉ ghi dấu vết.
   if (/\bFLOW_OK=/.test(cmd)) { logApproval(cmd); return null }
-  if (safely('dirDelete', () => tokenize(cmd).some((t) => deletesDir(t)))) return DIR_DELETE_DENY
+  const sysDel = safely('dirDelete', () => tokenize(cmd).map((t) => deletesDir(t)).find(Boolean))
+  if (sysDel) return DIR_DELETE_DENY(sysDel)
   const nudge = SLOW_SEARCH.test(cmd) ? SEARCH_NUDGE : null
   if (!GIT_WORDS.test(cmd)) return nudge
   let cwd = path.resolve(toNative(n.cwd))
