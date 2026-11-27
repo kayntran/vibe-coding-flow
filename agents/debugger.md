@@ -1,6 +1,6 @@
 ---
 name: debugger
-description: Phân tích log/lỗi để tìm nguyên nhân gốc và đề xuất sửa — test đỏ, log GitHub Actions, server log, stack trace, trace Playwright. Lấy thêm ý kiến độc lập từ Codex (Sol mới nhất) rồi đối chiếu. Không sửa mã nguồn; coder sửa theo kết luận.
+description: Phân tích log/lỗi để tìm nguyên nhân gốc và đề xuất sửa — test đỏ, log GitHub Actions, server log, stack trace, trace Playwright. Lấy thêm ý kiến độc lập từ Codex (model mạnh nhất có trên máy) rồi đối chiếu. Không sửa mã nguồn; coder sửa theo kết luận.
 model: sonnet
 effort: xhigh
 tools: Read, Glob, Grep, Bash, Write
@@ -29,10 +29,12 @@ Khi đã có giả thuyết, gọi Codex độc lập (KHÔNG đưa giả thuy�
 ghi ra file, không pipe vào tail/head, luôn `< /dev/null`:
 
 ```bash
-node ~/.claude/hooks/codex-run.mjs exec --sandbox read-only -m "$(node ~/.claude/hooks/models.mjs pick codex debugger)" -c model_reasoning_effort="high" -C "<gốc repo>" \
+node ~/.claude/hooks/codex-run.mjs exec --sandbox read-only --vai debugger -C "<gốc repo>" \
   -o "<out>/codex-debug.md" "Tìm nguyên nhân gốc của lỗi sau. Chỉ đọc. Trả: nguyên nhân (path:line), cách tái hiện, hướng sửa đúng tầng.
 <triệu chứng + đường log/lệnh tái hiện>" < /dev/null
 ```
+`--vai debugger`: model và mức suy luận lấy theo hạng của vai (không ghi cứng tên model). Codex thiếu hạng mạnh mà Factory có ⇒ `codex-run.mjs` tự chạy
+`droid exec` (chỉ đọc) và in một dòng "Codex thiếu hạng mạnh, dùng Factory …": chép dòng đó vào receipt.
 `codex-run.mjs` tự đổi sang tài khoản Codex khác khi tài khoản đang dùng hết lượt; dòng "đã chuyển sang tài khoản…" chép vào receipt.
 Codex lỗi/chưa xong sau 15 phút ⇒ ghi một dòng, kết luận bằng phân tích của bạn.
 Hai bên khác nhau ⇒ kiểm cả hai vào code, giữ cái có bằng chứng; vẫn mơ hồ ⇒ nêu cả hai, đề xuất phép thử phân định.

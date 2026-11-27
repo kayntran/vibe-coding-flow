@@ -1,8 +1,8 @@
-// clis: kiểm CLI ngoài (claude, codex, cursor-agent, agy, grok, devin) TRƯỚC khi gọi — cài chưa, bản nào, đã đăng nhập chưa, vì sao không dùng được.
+// clis: kiểm CLI ngoài (claude, codex, cursor-agent, agy, grok, devin, droid, qodercli) TRƯỚC khi gọi — cài chưa, bản nào, đã đăng nhập chưa, vì sao không dùng được.
 // Bằng chứng từng lệnh/bẫy: docs/specs/2026-10-11-flow-v7-nocode/research.md §3 và notes/research-devin.md (nhãn [KIỂM] = đã chạy thật).
 //
 //   await check(name, opts) → { name, installed, path, version, auth:'ok'|'none'|'unknown', reason, message, ready, loginCmd, installHint }
-//   await checkAll(names?, opts) → { [name]: kết quả }              (song song; mặc định cả 6)
+//   await checkAll(names?, opts) → { [name]: kết quả }              (song song; mặc định cả 8)
 //   classifyFailure(name, {code, stdout, stderr, timedOut, error}) → { reason, message, loginCmd }   (xét TỪNG LẦN GỌI, không cache)
 //
 // reason: ok · not-installed · not-logged-in · quota · network · permission · timeout · error · unrecognized ·
@@ -20,7 +20,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-export const CLI_NAMES = ['claude', 'codex', 'cursor-agent', 'agy', 'grok', 'devin']
+export const CLI_NAMES = ['claude', 'codex', 'cursor-agent', 'agy', 'grok', 'devin', 'droid', 'qodercli']
 export const CACHE_TTL_MS = 10 * 60 * 1000
 export const MAX_TIMEOUT_MS = 20_000
 const DEFAULT_TIMEOUT_MS = 15_000
@@ -79,6 +79,30 @@ const CLIS = {
     parse: textAuth(/\S/),
     login: 'devin auth login',
     install: { win32: 'irm https://static.devin.ai/cli/setup.ps1 | iex', posix: 'curl -fsSL https://cli.devin.ai/install.sh | bash' },
+  },
+  // Factory `droid` 0.241.1: `--version` in "0.241.1" [KIỂM]. Không có `auth status` / `login` (`droid --help` chỉ có exec, resume, doctor, update…); lệnh kiểm không tốn lượt, không mở
+  // trình duyệt là `droid doctor --checks auth --json` (<1 giây): {"results":[{"id":"auth.credentials"|"auth.verify","status":"pass"|…}]}, exit 0 khi đã đăng nhập [KIỂM]. Output có email che
+  // một phần ⇒ chỉ trích cờ pass/fail. Trạng thái CHƯA đăng nhập chưa kiểm (không đăng xuất máy thật): giả định status "fail"; không đọc ra ⇒ nhận theo chuỗi "not logged in" chung.
+  // Đăng nhập: chạy `droid` (tương tác, mở trình duyệt lần đầu) — lệnh login và lệnh cài CHƯA xác minh bằng trang chính thức (không tra mạng); bản cài Windows nằm ở ~\bin\droid.exe [KIỂM].
+  droid: {
+    status: ['doctor', '--checks', 'auth', '--json'],
+    parse: ({ code, text }) => {
+      const st = (id) => new RegExp(`"id"\\s*:\\s*"${id}"[\\s\\S]*?"status"\\s*:\\s*"(\\w+)"`).exec(text)?.[1] ?? null
+      if (st('auth.credentials') === 'fail' || st('auth.verify') === 'fail') return 'none'
+      if (st('auth.verify') === 'pass' && code === 0) return 'ok'
+      return textAuth(LOGGED_RE)({ code, text })
+    },
+    login: 'droid',
+    install: { win32: 'irm https://app.factory.ai/cli/windows | iex', posix: 'curl -fsSL https://app.factory.ai/cli | sh' },
+  },
+  // Qoder CLI 1.1.65 (`qodercli`): `--version` in "1.1.65" [KIỂM]. `qodercli status` (đã đăng nhập) in các dòng "Version:", "Username:", "Email:", "Login Method:"… exit 0 [KIỂM] ⇒ chỉ nhận cờ có dòng
+  // Username/Email, KHÔNG đưa tên hay email vào kết quả. Trạng thái CHƯA đăng nhập chưa kiểm (không đăng xuất máy thật) ⇒ nhận theo chuỗi "not logged in" chung. Đăng nhập: `qodercli login`.
+  // Bản cài: ~/.qoder/bin/qodercli/qodercli[.exe] [KIỂM Windows]; lệnh cài CHƯA xác minh bằng trang chính thức (không tra mạng).
+  qodercli: {
+    status: ['status'],
+    parse: ({ code, text }) => (/^\s*(?:username|email)\s*:\s*\S/im.test(text) && !NOT_LOGGED_RE.test(text) ? 'ok' : textAuth(LOGGED_RE)({ code, text })),
+    login: 'qodercli login',
+    install: 'npm i -g @qoder-ai/qodercli',
   },
 }
 for (const spec of Object.values(CLIS)) spec.version = ['--version']
@@ -153,12 +177,15 @@ function extraDirs(c) {
     add(envGet(c, 'LOCALAPPDATA'), 'agy', 'bin')
     add(home, '.grok', 'bin')
     add(home, '.local', 'bin')
+    add(home, 'bin') // droid.exe (Factory) cài vào ~\bin
+    add(home, '.qoder', 'bin', 'qodercli')
   } else {
     dirs.push('/opt/homebrew/bin', '/usr/local/bin')
     add(home, '.local', 'bin')
     add(home, '.grok', 'bin')
     add(home, '.npm-global', 'bin')
     add(home, '.claude', 'local')
+    add(home, '.qoder', 'bin', 'qodercli')
   }
   return dirs
 }
@@ -191,18 +218,20 @@ function devinCandidates(c, dirs) {
 }
 
 // Đường dẫn tuyệt đối của file chạy được, hoặc null. Thứ tự: PATH → thư mục quen → (devin) thư mục cài Desktop.
+// env.VIBE_FLOW_PATH_ONLY=1 (kiểm thử) ⇒ chỉ tìm trên PATH: bài kiểm "máy trống" không vớ phải bản thật ở thư mục quen của máy đang chạy test.
 export function resolveBin(name, ctx) {
   assertName(name)
   const c = norm(ctx)
   const dirs = pathDirs(c)
   const files = c.win ? winExts(c).map((e) => name + e) : [name]
-  for (const dir of [...dirs, ...extraDirs(c)]) {
+  const pathOnly = Boolean(envGet(c, 'VIBE_FLOW_PATH_ONLY'))
+  for (const dir of pathOnly ? dirs : [...dirs, ...extraDirs(c)]) {
     for (const f of files) {
       const p = c.P.join(dir, f)
       if (c.exists(p)) return p
     }
   }
-  if (name === 'devin') for (const p of devinCandidates(c, dirs)) if (c.exists(p)) return p
+  if (name === 'devin' && !pathOnly) for (const p of devinCandidates(c, dirs)) if (c.exists(p)) return p
   return null
 }
 

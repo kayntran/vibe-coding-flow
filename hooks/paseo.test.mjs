@@ -3,7 +3,9 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { codexProvider, codexProviders, inPaseo, pick, providerId } from './paseo.mjs'
+import { parseDroidHelp } from './lib/models.mjs'
 
 function world() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'paseo-'))
@@ -58,6 +60,43 @@ test('pick Codex trên Windows ⇒ viaPaseo:false (chạy ngầm qua CLI, chốt
   assert.equal(pick('code-reviewer', { home: w.home, env: {}, platform: 'win32' }).viaPaseo, false)
   assert.equal(pick('code-reviewer', { home: w.home, env: {}, platform: 'darwin' }).viaPaseo, true)
   assert.equal(pick('coder', { home: w.home, env: {}, platform: 'win32' }).viaPaseo, true, 'Claude vẫn chạy thành phiên Paseo')
+})
+
+test('pick Codex thiếu hạng mạnh (máy chỉ có gpt-6-luna) ⇒ hạ hạng trong Codex + lời báo; KHÔNG BAO GIỜ nhận id của Factory (provider "codex/<id>" chỉ chạy được Codex)', () => {
+  const w = world()
+  const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), 'lib', 'fixtures', 'models')
+  fs.mkdirSync(path.join(w.home, '.codex'), { recursive: true })
+  fs.writeFileSync(path.join(w.home, '.codex', 'models_cache.json'), JSON.stringify({ ...JSON.parse(fs.readFileSync(path.join(fixtures, 'codex.json'), 'utf8')), fetched_at: new Date().toISOString() }))
+  // Factory có gpt-6-sol trong cache: nếu pick lỡ bật allowFallbackHost thì id này sẽ lọt ra.
+  fs.mkdirSync(path.join(w.home, '.claude', 'cache'), { recursive: true })
+  const droid = parseDroidHelp(fs.readFileSync(path.join(fixtures, 'droid-help.txt'), 'utf8'))
+  fs.writeFileSync(path.join(w.home, '.claude', 'cache', 'models.json'), JSON.stringify({ hosts: { droid: { fetchedAt: Date.now(), entries: droid } } }))
+  for (const platform of ['darwin', 'win32']) {
+    const r = pick('code-reviewer', { home: w.home, env: {}, platform })
+    assert.ok(!/gpt-6-sol|droid|latest/.test(JSON.stringify(r)), `${platform}: ${JSON.stringify(r)}`)
+    if (platform === 'darwin') assert.match(r.provider, /^codex\/gpt-6-luna$/)
+    assert.ok(r.warnings.some((w) => /hạng mạnh/.test(w) && /gpt-6-luna/.test(w)), `${platform}: ${r.warnings}`)
+  }
+})
+
+test('pick Codex 2 tài khoản (danh sách model khác nhau): provider nào thì model của tài khoản đó — codex ⇒ luna của tk 1, tk 1 hết lượt ⇒ codex-b ⇒ gpt-6.2-sol của tk 2; không bao giờ chéo', () => {
+  const w = world()
+  const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), 'lib', 'fixtures', 'models')
+  for (const [dir, file] of [['.codex', 'codex.json'], ['.codex-2', 'codex-2.json']]) {
+    fs.mkdirSync(path.join(w.home, dir), { recursive: true })
+    fs.writeFileSync(path.join(w.home, dir, 'auth.json'), '{}')
+    fs.writeFileSync(path.join(w.home, dir, 'models_cache.json'), JSON.stringify({ ...JSON.parse(fs.readFileSync(path.join(fixtures, file), 'utf8')), fetched_at: new Date().toISOString() }))
+  }
+  const one = pick('code-reviewer', { home: w.home, env: {}, platform: 'darwin' })
+  assert.equal(one.provider, 'codex/gpt-6-luna')
+  assert.ok(one.warnings.some((x) => /Tài khoản Codex 2 có gpt-6\.2-sol/.test(x)), String(one.warnings))
+  const state = path.join(w.home, '.claude', 'cache', 'codex-het-luot.json')
+  fs.mkdirSync(path.dirname(state), { recursive: true })
+  const k = path.join(w.home, '.codex')
+  fs.writeFileSync(state, JSON.stringify({ [k]: { until: Date.now() + 3600000 }, [k.toLowerCase()]: { until: Date.now() + 3600000 } }))
+  const two = pick('code-reviewer', { home: w.home, env: {}, platform: 'darwin' })
+  assert.equal(two.provider, 'codex-b/gpt-6.2-sol')
+  assert.equal(two.account, '2')
 })
 
 test('pick: vai soát mặc định Codex (provider đủ dạng id/model), vai viết code mặc định Claude (tên dòng), vai lạ báo lỗi', () => {

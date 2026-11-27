@@ -9,6 +9,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { newMa, renderDecision, slugOf } from './lib/so-chot.mjs'
 import { todayOf } from './lib/updates.mjs'
+import { parseAgyCatalog, parseCodexCatalog, parseCursorModels, parseDroidHelp, parseGrokModels } from './lib/models.mjs'
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'session-start.mjs')
 // Tắt bảo trì tự động của git (Mac: commit tách `git maintenance run --auto --detach` chạy nền ⇒ dọn thư mục tạm gặp ENOTEMPTY); xem flow-dispatch.test.mjs.
@@ -50,7 +51,8 @@ function run(fx, { cwd = fx.repo, input, env = {} } = {}) {
     encoding: 'utf8', cwd: fx.plain,
     // GIT_CEILING_DIRECTORIES: tmp dù nằm trong một repo nào đó thì `plain` vẫn không bị coi là repo.
     // FLOW_UPDATES=off: máy kiểm cập nhật tắt mặc định để test cũ không kích tiến trình nền / không đọc cache; nhóm test "nhắc cập nhật công cụ" bật lại.
-    env: { ...RUN_ENV, HOME: fx.home, USERPROFILE: fx.home, MCP_USAGE_LOG: fx.usage, GIT_CEILING_DIRECTORIES: fx.root, FLOW_UPDATES: 'off', ...env },
+    // FLOW_MODELS=off: phần báo dòng model mới tắt mặc định (không đọc cache model của HOME giả, không kích tiến trình nền); nhóm test "dòng model mới" bật lại.
+    env: { ...RUN_ENV, HOME: fx.home, USERPROFILE: fx.home, MCP_USAGE_LOG: fx.usage, GIT_CEILING_DIRECTORIES: fx.root, FLOW_UPDATES: 'off', FLOW_MODELS: 'off', ...env },
   })
   assert.equal(r.error, undefined)
   assert.equal(r.status, 0, r.stderr)
@@ -1224,6 +1226,126 @@ describe('nhắc luật ngôn ngữ sau khi nén (source compact / resume)', () 
     // cùng tình huống nhưng startup ⇒ không có dòng nhắc
     const startup = run(fx, { input: JSON.stringify({ hook_event_name: 'SessionStart', source: 'startup', cwd: fx.repo, prompt_id: 'p-1' }) })
     assert.ok(!startup.includes('Nhắc lại sau khi nén'))
+  })
+})
+
+// Báo dòng model mới của agy/Codex/Factory (AC-03/05/11). Hook CHỈ đọc cache ~/.claude/cache/models.json (HOME giả) nên không gọi CLI thật;
+// cache cũ ⇒ kích `models.mjs refresh` nền bằng script GIẢ (FLOW_MODELS_SCRIPT). Dữ liệu = bản chụp danh sách model thật + dòng giả.
+describe('dòng model mới (agy / Codex / Factory)', () => {
+  const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'lib', 'fixtures', 'models')
+  const text = (f) => fs.readFileSync(path.join(FIXTURES, f), 'utf8')
+  const NOW_MS = () => Date.now()
+  // Lưới an toàn: tiến trình làm tươi nền (nếu lỡ được kích) là script rỗng, không bao giờ chạy models.mjs thật với HOME giả.
+  const NOOP = path.join(os.tmpdir(), 'flow-models-noop.mjs')
+  fs.writeFileSync(NOOP, '// không làm gì\n')
+  const ON = { FLOW_MODELS: 'on', FLOW_MODELS_SCRIPT: NOOP }
+  const cachePath = (fx) => path.join(fx.home, '.claude', 'cache', 'models.json')
+  const lockPath = (fx) => path.join(fx.home, '.claude', 'cache', 'models.spawn.lock')
+  const readCache = (fx) => JSON.parse(fs.readFileSync(cachePath(fx), 'utf8'))
+  const agyText = (extra = []) => `${text('agy.txt')}\n${extra.map((i) => `${i}\t${i}`).join('\n')}`
+  // Ghi cache như một lần models.mjs đã đọc danh sách: mỗi host { fetchedAt, entries } (entries đã parse).
+  function putModels(fx, { agy = agyText(), fetchedAt = NOW_MS(), keep } = {}) {
+    const d = fs.existsSync(cachePath(fx)) ? readCache(fx) : { hosts: {} }
+    d.hosts = {
+      codex: { fetchedAt, entries: parseCodexCatalog(text('codex.json')) },
+      agy: { fetchedAt, entries: parseAgyCatalog(agy) },
+      droid: { fetchedAt, entries: parseDroidHelp(text('droid-help.txt')) },
+      'cursor-agent': { fetchedAt, entries: parseCursorModels(text('cursor.txt')) },
+      grok: { fetchedAt, entries: parseGrokModels(text('grok.txt')) },
+    }
+    if (keep === false) delete d.seenLines
+    fs.mkdirSync(path.dirname(cachePath(fx)), { recursive: true })
+    fs.writeFileSync(cachePath(fx), JSON.stringify(d))
+  }
+  const ZIRCON = ['gemini-5-zircon-high', 'gemini-5-zircon-xhigh', 'gemini-5-zircon-medium']
+  const waitFor = async (fn, ms = 8000) => {
+    const t0 = Date.now()
+    while (Date.now() - t0 < ms) { if (fn()) return true; await new Promise((r) => setTimeout(r, 50)) }
+    return fn()
+  }
+
+  test('lần đầu ghi im; thêm gemini-5-zircon ⇒ đúng MỘT dòng nêu zircon + hạng mạnh + vai đổi sang model nào; lần sau im (không báo lại)', () => {
+    const fx = fixture()
+    putModels(fx)
+    assert.equal(run(fx, { env: ON }), null, 'lần đầu: chỉ ghi seenLines, không báo')
+    assert.ok(readCache(fx).seenLines.agy.includes('neon'))
+    putModels(fx, { agy: agyText(ZIRCON) })
+    const ctx = run(fx, { env: ON })
+    const lines = ctx.split('\n')
+    assert.equal(lines.length, 1, ctx)
+    assert.ok(lines[0].startsWith('Báo user một lần, nguyên văn từng dòng: '))
+    assert.match(lines[0], /agy có dòng mới zircon \(hạng mạnh\)/)
+    assert.match(lines[0], /plan-reviewer/); assert.match(lines[0], /gemini-5-zircon-high/)
+    assert.match(lines[0], /cho vai X dùng model Y/)
+    assert.equal(run(fx, { env: ON }), null, 'phiên sau im')
+    assert.equal(run(fx, { env: ON }), null)
+    assert.ok(readCache(fx).seenLines.agy.includes('zircon'))
+  })
+
+  test('dòng chưa xếp được hạng ⇒ báo kèm lệnh chọn tay, không tự dùng; vai user đang giữ model riêng ⇒ "bạn đang giữ X" (AC-05)', () => {
+    const fx = fixture()
+    putModels(fx)
+    run(fx, { env: ON })
+    fs.writeFileSync(path.join(fx.home, '.claude', 'flow.local.json'), JSON.stringify({ models: { 'sensitive-reviewer': { agy: { line: 'carbon' } } } }))
+    putModels(fx, { agy: agyText([...ZIRCON, 'foo-bar']) })
+    const ctx = run(fx, { env: ON })
+    assert.equal(ctx.split('\n').length, 1, ctx)
+    assert.match(ctx, /vai sensitive-reviewer: có dòng mới zircon, bạn đang giữ gemini-4-carbon-high/)
+    assert.match(ctx, /foo chưa xếp được hạng nên chưa dùng/)
+    assert.match(ctx, /models\.mjs set <vai> agy foo/)
+    assert.doesNotMatch(ctx, /sensitive-reviewer giờ dùng/)
+  })
+
+  test('cache còn mới ⇒ không kích nền, không giành khoá; FLOW_MODELS=off ⇒ im hẳn, không đọc cache', async () => {
+    const fx = fixture()
+    putModels(fx)
+    const marker = path.join(fx.root, 'models-spawned.log')
+    const script = path.join(fx.root, 'fake-models.mjs')
+    fs.writeFileSync(script, `import fs from 'node:fs'\nfs.appendFileSync(${JSON.stringify(marker)}, process.argv.slice(2).join(' ') + '\\n')\n`)
+    run(fx, { env: { ...ON, FLOW_MODELS_SCRIPT: script } })
+    await new Promise((r) => setTimeout(r, 400))
+    assert.equal(fs.existsSync(marker), false)
+    assert.equal(fs.existsSync(lockPath(fx)), false)
+    putModels(fx, { agy: agyText(ZIRCON) })
+    const before = fs.readFileSync(cachePath(fx), 'utf8')
+    assert.equal(run(fx, { env: { FLOW_MODELS: 'off' } }), null)
+    assert.equal(fs.readFileSync(cachePath(fx), 'utf8'), before, 'tắt ⇒ không động vào cache (seenLines không thêm)')
+  })
+
+  test('cache cũ quá 6 giờ ⇒ kích `models.mjs refresh` chạy nền đúng MỘT lần (khoá 10 phút), hook không chờ; quá 10 phút ⇒ thử lại', async () => {
+    const fx = fixture()
+    putModels(fx, { fetchedAt: NOW_MS() - 8 * 3600000 })
+    const marker = path.join(fx.root, 'models-spawned.log')
+    const done = path.join(fx.root, 'models-done.txt')
+    const script = path.join(fx.root, 'fake-models.mjs')
+    fs.writeFileSync(script, `import fs from 'node:fs'\nfs.appendFileSync(${JSON.stringify(marker)}, process.argv.slice(2).join(' ') + '\\n')\nawait new Promise((r) => setTimeout(r, 3000))\nfs.writeFileSync(${JSON.stringify(done)}, 'x')\n`)
+    const env = { ...ON, FLOW_MODELS_SCRIPT: script }
+    const spawned = () => (fs.existsSync(marker) ? fs.readFileSync(marker, 'utf8').trim().split('\n') : [])
+    const t0 = process.hrtime.bigint()
+    run(fx, { env })
+    const took = Number(process.hrtime.bigint() - t0) / 1e6
+    assert.ok(took < 2900, `hook chạy ${took.toFixed(0)} ms: không được chờ tiến trình nền (3 s)`)
+    assert.equal(fs.existsSync(done), false)
+    assert.ok(await waitFor(() => spawned().length === 1))
+    assert.deepEqual(spawned(), ['refresh'])
+    run(fx, { env }); run(fx, { env })
+    await new Promise((r) => setTimeout(r, 500))
+    assert.equal(spawned().length, 1, 'khoá chưa hết hạn ⇒ không kích thêm')
+    fs.writeFileSync(lockPath(fx), String(Date.now() - 20 * 60000))
+    run(fx, { env })
+    assert.ok(await waitFor(() => spawned().length === 2))
+  })
+
+  test('dòng báo được trừ vào trần tổng: sổ tiến độ lớn + sổ chốt + dòng model mới ⇒ tổng ≤ 8.500 và dòng model vẫn nguyên vẹn', () => {
+    const fx = fixture()
+    putModels(fx)
+    run(fx, { env: ON })
+    progress(fx, 'feat-a', `Trạng thái: đang làm\n${'p'.repeat(5000)}\n`)
+    putModels(fx, { agy: agyText(ZIRCON) })
+    const ctx = run(fx, { env: ON })
+    assert.ok(ctx.length <= TOTAL_CAP, `${ctx.length} ký tự`)
+    assert.ok(ctx.includes('agy có dòng mới zircon'), 'dòng model mới không bị cắt')
+    assert.ok(ctx.indexOf(PREFIX) >= 0 && ctx.indexOf(PREFIX) < ctx.indexOf('agy có dòng mới zircon'))
   })
 })
 

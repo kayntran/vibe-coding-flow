@@ -4,10 +4,12 @@
 // Ghi <out> đúng schema review-schema.json (+ "reviewer"). Wrapper chỉ chạy MỘT model; thứ tự model do skill quyết.
 // Exit: 0 xong · 1 lỗi/chưa sẵn sàng/hết giờ/không ra JSON ⇒ dùng dự phòng · 3 KHÔNG GỬI vì còn secret/dữ liệu riêng (model ngoài chưa nhận gì), hoặc kết quả trả về chứa khoá (không ghi gì).
 //
-// Model: codex/opus/flash lấy từ hooks/lib/models.mjs resolve(host, vai) — codex: security-reviewer (brief bảo mật) | code-reviewer;
+// Model: codex/opus/flash lấy từ hooks/lib/models.mjs resolve(host, vai) THEO HẠNG của vai — codex: security-reviewer (brief bảo mật) | code-reviewer;
 // opus: plan-reviewer (agy); flash: sensitive-reviewer (agy); --role ghi đè. Grok chạy qua Cursor, không có trong kit/roles.json ⇒ id lấy từ
 // `cursor-agent --list-models` (bản grok mới nhất, mức high, không -fast); Cursor từ chối id kèm danh sách ⇒ chọn lại và chạy lại một lần.
 // Trước khi gọi: hooks/lib/clis.mjs check() — CLI chưa cài/chưa đăng nhập ⇒ exit 1 kèm lời của clis.
+// Codex thiếu hạng của vai mà Factory có (resolve trả host:"droid", AC-08) ⇒ check("droid") rồi `droid exec` chỉ đọc trong workspace tạm (prompt qua stdin, không
+// --output-schema vì schema đã nằm trong prompt, không xoay tài khoản Codex) + một dòng báo; Factory chưa sẵn sàng ⇒ hạ hạng ngay trong Codex.
 //
 // Hợp đồng gửi sạch (AC-28), cả ba tầng đều phải qua mới gọi model:
 //  1. diff: bỏ hunk của file nhạy cảm/dữ liệu riêng (isSensitiveFile, isPrivateData + glob `private` trong .claude/flow.json, thêm .mcp.json và Note/);
@@ -178,6 +180,18 @@ export function* tarEntries(buf) {
   }
 }
 
+// Cấu hình chạy lệnh của Factory: droid nạp hook từ `.factory/` (và `.droid*`) của THƯ MỤC LÀM VIỆC và chạy chế độ không đầu mà KHÔNG hỏi tin cậy ⇒ nhánh bị soát có thể chạy lệnh trên máy
+// người soát. Hai lớp: (a) buildWorkspace không chép các thư mục đó vào workspace; (b) droid chạy với `--settings <file do kit tạo>` tắt hook. Khoá `hooks.hooksDisabled` [KIỂM trong
+// schema của binary droid 0.241.1; chưa chạy thật vì không được gửi prompt ⇒ CHƯA kiểm thứ tự ưu tiên nếu dự án đặt ngược lại ở settings của nó] — nên lớp (a) luôn đi kèm.
+const AGENT_CONFIG = /(^|\/)\.(?:factory|droid[^/]*)(?:\/|$)/i; // KHÔNG phân biệt hoa thường: Windows/macOS mở .Factory trùng .factory
+export const DROID_SETTINGS = { hooks: { hooksDisabled: true } };
+export function writeDroidSettings(dir) {
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, "droid-settings.json");
+  writeFileSync(file, `${JSON.stringify(DROID_SETTINGS, null, 2)}\n`);
+  return file.replaceAll("\\", "/"); // dạng / chạy được trên Windows và qua được kiểm đối số an toàn khi droid là shim .cmd
+}
+
 // Tầng 3. Dựng workspace cho reviewer từ `git archive HEAD` vào thư mục dest (đã tồn tại, rỗng). Chỉ file thường: bỏ file nhạy cảm/dữ liệu riêng,
 // liên kết tượng trưng (có thể trỏ ra ngoài), file quá lớn để quét, và `exclude` (đường dẫn ép bỏ: đích đổi tên/sao chép từ file nhạy cảm — tên mới
 // không còn lộ là nhạy cảm nhưng nội dung vẫn thế). Không có .git. → { files, omitted: { private, links, large, skipped } }
@@ -187,11 +201,12 @@ export function buildWorkspace(wt, dest, projectCfg, { maxFileBytes = MAX_FILE_B
   const forced = new Set(exclude.flatMap((p) => [String(p), String(p).replace(/\\/g, "/").replace(/^\.\//, "")]));
   const a = spawnSync("git", ["-C", wt, "-c", "core.autocrlf=false", "archive", "--format=tar", "HEAD"], { maxBuffer: 1 << 30 });
   if (a.status !== 0) throw new Error(`git archive lỗi: ${a.error?.message ?? String(a.stderr ?? "").trim()}`);
-  const omitted = { private: 0, links: 0, large: 0, skipped: 0 };
+  const omitted = { private: 0, links: 0, large: 0, skipped: 0, agentConfig: 0 };
   let files = 0;
   for (const e of tarEntries(a.stdout)) {
     if (e.type === "1" || e.type === "2") { omitted.links++; continue; }
     if (e.type !== "0") continue; // thư mục (tạo khi cần), submodule rỗng…
+    if (AGENT_CONFIG.test(e.name)) { omitted.agentConfig++; continue; } // hook/cấu hình của Factory trong nhánh: không bao giờ vào nơi droid chạy
     if (isSensitiveFile(e.name) || isPrivateData(e.name, cfg) || forced.has(e.name)) { omitted.private++; continue; }
     if (e.data.length > maxFileBytes) { omitted.large++; continue; }
     const target = join(dest, ...e.name.split("/"));
@@ -310,6 +325,17 @@ export const WIN_SANDBOX = process.platform === "win32" ? ["-c", "windows.sandbo
 // Lệnh gọi từng model. Mọi đường dẫn đưa cho reviewer đều tương đối với workspace (cwd) — không lộ đường dẫn máy, không dẫn ra ngoài workspace.
 function buildCall(model, { ws, prompt, resolved, timeout, cursorModel }) {
   const m = resolved?.model ?? null; // null = không chọn được ⇒ để CLI dùng mặc định (không đoán id)
+  if (model === "codex" && resolved?.host === "droid") {
+    // Factory thay Codex: `droid exec` mặc định chỉ đọc (không --auto), thư mục chạy = workspace (cwd của tiến trình, không --cwd), chỉ truyền -r khi mức đã biết.
+    writeDroidSettings(join(ws, IN_DIR));
+    return {
+      cmd: resolveBin("droid") ?? "droid",
+      input: prompt,
+      label: `${m} ${resolved.effort ?? ""} (Factory)`.replace(/ +/g, " "),
+      // --settings: đường TƯƠNG ĐỐI với workspace (cwd của tiến trình), không phải đường tuyệt đối của thư mục tạm — Temp có dấu cách/chữ có dấu thì đối số tuyệt đối bị EUNSAFE qua shim .cmd.
+      args: ["exec", ...(m ? ["-m", m] : []), ...(resolved.effort ? ["-r", resolved.effort] : []), "--settings", `${IN_DIR}/droid-settings.json`],
+    };
+  }
   if (model === "codex") {
     return {
       cmd: resolveBin("codex") ?? "codex",
@@ -349,6 +375,7 @@ async function staleHintOf(deps, cli, text) {
 const SECRET_ENV = /KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|PRIVATE|AUTH|COOKIE|SESSION/i;
 const LOGIN_ENV = {
   codex: ["OPENAI_API_KEY", "CODEX_API_KEY"],
+  droid: ["FACTORY_API_KEY"],
   grok: ["CURSOR_API_KEY"],
   flash: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
   opus: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
@@ -418,10 +445,27 @@ async function review(o, io, deps) {
     return 1;
   }
   let resolved = null;
+  const role = o.role ?? defaultRole(o.model, o.brief);
+  // Chỉ Codex được chuyển sang Factory khi thiếu hạng (AC-08) và xoay tài khoản (allAccounts: model của tài khoản còn lượt, kèm `homes` = tài khoản có model đó); agy chỉ chọn trong agy.
+  const resolveNow = async () => {
+    const resolveFor = deps.resolve ?? resolveModel;
+    const codex = o.model === "codex";
+    let r = resolveFor(HOST_OF[o.model], role, {}, { allowFallbackHost: codex, allAccounts: codex });
+    if (r.host === "droid" && !prep) {
+      const dst = await check("droid");
+      if (!dst.ready) {
+        io.err(`! ${dst.message}${dst.loginCmd ? `. Đăng nhập: ${dst.loginCmd}` : ""}${dst.installHint ? `. Cài: ${dst.installHint}` : ""} ⇒ Codex dùng hạng thấp hơn.`);
+        r = resolveFor(HOST_OF[o.model], role, {}, { allAccounts: codex });
+      }
+    }
+    return r;
+  };
   if (HOST_OF[o.model]) {
-    try { resolved = (deps.resolve ?? resolveModel)(HOST_OF[o.model], o.role ?? defaultRole(o.model, o.brief)); } catch (e) { io.err(`${o.model}: ${e.message}`); return 1; }
+    try { resolved = await resolveNow(); } catch (e) { io.err(`${o.model}: ${e.message}`); return 1; }
     for (const w of resolved.warnings ?? []) io.err(`! ${w}`);
   }
+  let viaDroid = o.model === "codex" && resolved?.host === "droid"; // đường Factory: không xoay tài khoản Codex, lỗi phân loại theo droid
+  let failCli = viaDroid ? "droid" : cli;
   let cursorModel = null;
   if (o.model === "grok") {
     let listed = "";
@@ -476,8 +520,8 @@ async function review(o, io, deps) {
     for (const f of binaries) rmSync(join(ws, ...f.file.split("/")), { force: true });
     const bad = scanned.filter((f) => f.name !== "binary");
     if (bad.length) { io.err(`${o.model}: ${refuse("workspace", bad)}`); return 3; }
-    const { private: nPrivate, links, large, skipped } = built.omitted;
-    io.err(`Workspace tạm: ${built.files - binaries.length} file (bỏ ${nPrivate} nhạy cảm/dữ liệu riêng, ${links} liên kết, ${large} quá lớn, ${binaries.length} nhị phân${skipped ? `, ${skipped} không ghi được` : ""}).`);
+    const { private: nPrivate, links, large, skipped, agentConfig } = built.omitted;
+    io.err(`Workspace tạm: ${built.files - binaries.length} file (bỏ ${nPrivate} nhạy cảm/dữ liệu riêng, ${links} liên kết, ${large} quá lớn, ${binaries.length} nhị phân${skipped ? `, ${skipped} không ghi được` : ""}${agentConfig ? `, ${agentConfig} cấu hình chạy lệnh của Factory` : ""}).`);
 
     // tầng 2
     let prompt = buildPrompt(parts);
@@ -499,17 +543,32 @@ async function review(o, io, deps) {
     writeFileSync(`${stem}.prompt.txt`, prompt); // bản lưu đúng cái đã gửi
 
     let call = buildCall(o.model, { ws, prompt, resolved, timeout: o.timeout, cursorModel });
-    let env = { ...reviewerEnv(process.env, o.model), GIT_PAGER: "cat", PAGER: "cat" };
+    let env = { ...reviewerEnv(process.env, viaDroid ? "droid" : o.model), GIT_PAGER: "cat", PAGER: "cat" };
     if (o.model === "grok") env = cursorEnv(env);
 
     const t0 = Date.now();
-    // Codex: thử lần lượt các tài khoản đã đăng nhập, hết lượt thì sang tài khoản kế (chốt 0ufuusz3).
-    let r = o.model === "codex"
+    // Codex: thử lần lượt các tài khoản đã đăng nhập CÓ model đã chọn (tài khoản khác không có model đó ⇒ không gọi), hết lượt thì sang tài khoản kế (chốt 0ufuusz3).
+    const runCodex = () => (deps.withAccounts ?? (deps.exec ? (f, x) => f(x.env) : runWithAccounts))(
       // Test tiêm exec mà không tiêm withAccounts ⇒ chạy một lần, không đọc tài khoản/ghi sổ hết lượt của máy thật.
-      ? await (deps.withAccounts ?? (deps.exec ? (f, x) => f(x.env) : runWithAccounts))(
-        (e) => exec(call.cmd, call.args, { cwd: ws, env: e, input: call.input, timeoutMs: Math.max(1000, o.timeout * 1000 - (Date.now() - t0)) }),
-        { env, ok: (x) => Boolean(extractReview(x.stdout ?? "")), say: (s) => io.err(s) })
+      (e) => exec(call.cmd, call.args, { cwd: ws, env: e, input: call.input, timeoutMs: Math.max(1000, o.timeout * 1000 - (Date.now() - t0)) }),
+      { env, ok: (x) => Boolean(extractReview(x.stdout ?? "")), say: (s) => io.err(s), ...(resolved?.homes?.length ? { homes: resolved.homes } : {}) });
+    let r = o.model === "codex" && !viaDroid
+      ? await runCodex()
       : await exec(call.cmd, call.args, { cwd: ws, env, input: call.input, timeoutMs: o.timeout * 1000 });
+    // Hết lượt ở MỌI tài khoản có model đã chọn ⇒ resolve lại (tài khoản vừa hết lượt đã bị ghi sổ nên bị loại): model tốt nhất của tài khoản còn lại hoặc Factory, báo một dòng, chạy lại một lần.
+    if (o.model === "codex" && !viaDroid && r.quota) {
+      let next = null;
+      try { next = await resolveNow(); } catch { /* giữ kết quả hết lượt */ }
+      if (next && (next.model !== resolved.model || next.host !== resolved.host)) {
+        io.err(`Codex: hết lượt ở mọi tài khoản có ${resolved.model ?? "model đã chọn"} ⇒ chuyển sang ${next.host === "droid" ? "Factory " : ""}${next.model ?? "model mặc định của Codex"}.`);
+        resolved = next;
+        viaDroid = resolved.host === "droid";
+        failCli = viaDroid ? "droid" : cli;
+        call = buildCall(o.model, { ws, prompt, resolved, timeout: o.timeout, cursorModel });
+        env = { ...reviewerEnv(process.env, viaDroid ? "droid" : o.model), GIT_PAGER: "cat", PAGER: "cat" };
+        r = viaDroid ? await exec(call.cmd, call.args, { cwd: ws, env, input: call.input, timeoutMs: Math.max(1000, o.timeout * 1000 - (Date.now() - t0)) }) : await runCodex();
+      }
+    }
     // Cursor đổi tên model phía server (dính 2026-10-13) ⇒ lỗi "Cannot use this model … Available models: …": chọn lại từ danh sách đó, chạy lại một lần.
     const avail = o.model === "grok" && !extractReview(r.stdout ?? "") ? /Cannot use this model[\s\S]*?Available models:([\s\S]*)/i.exec(`${r.stdout ?? ""}\n${r.stderr ?? ""}`)?.[1] : null;
     const retryModel = avail ? pickCursorModel(avail) : null;
@@ -531,11 +590,11 @@ async function review(o, io, deps) {
     }
     writeFileSync(`${stem}.raw.txt`, rawText);
     if (!result) {
-      const v = classifyFailure(cli, { code: r.status, stdout: r.stdout, stderr: r.stderr, timedOut: r.timedOut, error: r.error });
+      const v = classifyFailure(failCli, { code: r.status, stdout: r.stdout, stderr: r.stderr, timedOut: r.timedOut, error: r.error });
       if (v.reason === "quota") io.err(`${o.model}: HẾT LƯỢT dùng (gói miễn phí/quota) ⇒ dùng model dự phòng.`);
       else if (v.reason === "not-logged-in") io.err(`${o.model}: ${v.message}. Đăng nhập: ${v.loginCmd} ⇒ dùng model dự phòng.`);
       else io.err(`${o.model}: không ra JSON review (exit=${r.status}, ${r.timedOut ? "ETIMEDOUT" : (r.error?.code ?? "")} ${secs}s). Xem ${stem}.raw.txt`);
-      const hint = await staleHintOf(deps, cli, rawText);
+      const hint = await staleHintOf(deps, failCli, rawText);
       if (hint) io.err(hint);
       return 1;
     }

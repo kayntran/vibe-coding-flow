@@ -206,6 +206,64 @@ test('check agy: không có lệnh kiểm đăng nhập ⇒ chỉ gọi --versio
   assert.deepEqual(calls.map((c) => c.args.join(' ')), ['--version'])
 })
 
+const DROID_OK = JSON.stringify({ ok: true, results: [
+  { id: 'env.info', category: 'environment', status: 'pass', detail: 'v0.241.1 on win32 x64' },
+  { id: 'auth.credentials', category: 'auth', status: 'pass', detail: 'stored login session loaded from credential storage' },
+  { id: 'auth.verify', category: 'auth', status: 'pass', detail: 'authenticated as t***@example.com via stored login session' },
+] }, null, 2)
+const DROID_OUT = JSON.stringify({ ok: false, results: [
+  { id: 'auth.credentials', category: 'auth', status: 'fail', detail: 'no stored login session' },
+  { id: 'auth.verify', category: 'auth', status: 'skip', detail: 'skipped' },
+] }, null, 2)
+const DROID_STATUS = 'doctor --checks auth --json'
+
+test('check droid: --version + `droid doctor --checks auth --json` (không tốn lượt, không mở trình duyệt); pass ⇒ ok; email che trong output KHÔNG lọt vào kết quả', async () => {
+  const p = 'C:\\Users\\Tester\\bin\\droid.exe'
+  const { opts, calls } = world(W, [p], { '--version': { stdout: '0.241.1\n' }, [DROID_STATUS]: { stdout: DROID_OK } })
+  const r = await check('droid', opts)
+  assert.deepEqual([r.installed, r.version, r.auth, r.reason, r.ready, r.loginCmd, r.installHint], [true, '0.241.1', 'ok', 'ok', true, null, null])
+  assert.equal(r.path, p)
+  assert.ok(!JSON.stringify(r).includes('example.com'))
+  assert.deepEqual(calls.map((c) => c.args.join(' ')).sort(), [DROID_STATUS, '--version'].sort())
+})
+
+test('check droid: chưa đăng nhập (credentials fail) ⇒ auth none + lệnh đăng nhập `droid`; lỗi mạng ⇒ không đòi đăng nhập lại', async () => {
+  const p = 'C:\\Users\\Tester\\bin\\droid.exe'
+  const out = world(W, [p], { '--version': { stdout: '0.241.1' }, [DROID_STATUS]: { code: 1, stdout: DROID_OUT } })
+  const r = await check('droid', out.opts)
+  assert.deepEqual([r.auth, r.reason, r.ready, r.loginCmd], ['none', 'not-logged-in', false, 'droid'])
+  const net = world(W, [p], { '--version': { stdout: '0.241.1' }, [DROID_STATUS]: { code: 1, stderr: 'getaddrinfo ENOTFOUND api.factory.ai' } })
+  const n = await check('droid', net.opts)
+  assert.deepEqual([n.auth, n.reason, n.loginCmd], ['unknown', 'network', null])
+})
+
+test('check droid: máy trống ⇒ not-installed + lệnh cài; PATH thưa: droid chỉ nằm ở thư mục cài mặc định (~\\bin Windows, ~/.local/bin macOS) vẫn thấy', async () => {
+  const none = world(W, [], {})
+  const r = await check('droid', none.opts)
+  assert.deepEqual([r.installed, r.reason, r.ready], [false, 'not-installed', false])
+  assert.match(r.installHint, /factory/i)
+  assert.equal(none.calls.length, 0)
+  assert.equal(resolveBin('droid', { ...W, exists: (p) => p === 'C:\\Users\\Tester\\bin\\droid.exe' }), 'C:\\Users\\Tester\\bin\\droid.exe')
+  assert.equal(resolveBin('droid', { ...M, exists: (p) => p === '/Users/tester/.local/bin/droid' }), '/Users/tester/.local/bin/droid')
+  assert.equal(resolveBin('droid', { ...M, env: { ...M.env, VIBE_FLOW_PATH_ONLY: '1' }, exists: (p) => p === '/Users/tester/.local/bin/droid' }), null, 'VIBE_FLOW_PATH_ONLY=1 ⇒ chỉ PATH')
+})
+
+const QODER_OK = 'Version: 1.1.65\nUsername: Nguoi Dung\nEmail: nguoi.dung@example.com\nAvatar: https://qoder.com/users/x/avatars\nUser Type: personal_standard\nLogin Method: browser\nAuth Source: local\n'
+
+test('check qodercli: --version + `qodercli status`; có dòng Username/Email ⇒ ok, tên/email KHÔNG lọt vào kết quả; chưa đăng nhập ⇒ lệnh `qodercli login`; PATH thưa vẫn thấy ~/.qoder/bin/qodercli', async () => {
+  const p = 'C:\\Users\\Tester\\.qoder\\bin\\qodercli\\qodercli.exe'
+  const { opts, calls } = world(W, [p], { '--version': { stdout: '1.1.65\n' }, status: { stdout: QODER_OK } })
+  const r = await check('qodercli', opts)
+  assert.deepEqual([r.installed, r.version, r.auth, r.reason, r.ready, r.loginCmd, r.path], [true, '1.1.65', 'ok', 'ok', true, null, p])
+  assert.ok(!JSON.stringify(r).includes('example.com') && !JSON.stringify(r).includes('Nguoi Dung'))
+  assert.deepEqual(calls.map((c) => c.args.join(' ')).sort(), ['--version', 'status'])
+  const out = world(W, [p], { '--version': { stdout: '1.1.65' }, status: { code: 1, stderr: 'Not logged in. Run qodercli login' } })
+  const n = await check('qodercli', out.opts)
+  assert.deepEqual([n.auth, n.reason, n.ready, n.loginCmd], ['none', 'not-logged-in', false, 'qodercli login'])
+  assert.equal(resolveBin('qodercli', { ...M, exists: (x) => x === '/Users/tester/.qoder/bin/qodercli/qodercli' }), '/Users/tester/.qoder/bin/qodercli/qodercli')
+  assert.match((await check('qodercli', world(W, [], {}).opts)).installHint, /qoder/i)
+})
+
 test('check grok: "You are logged in with grok.com" ⇒ ok; phiên bản trích từ "grok 1.0.46 (…) [stable]"', async () => {
   const p = 'C:\\Users\\Tester\\.grok\\bin\\grok.exe'
   const { opts } = world(W, [p], { '--version': { stdout: 'grok 1.0.46 (2765805b9442) [stable]\n' }, models: { stdout: 'You are logged in with grok.com.\n\nDefault model: grok-4.7\n' } })
@@ -277,8 +335,8 @@ test('check: đường dẫn thấy trên PATH nhưng chạy không được (EN
 
 test('check: giờ chờ mỗi lệnh luôn ≤ 20 giây dù người gọi xin nhiều hơn; mọi tham số lệnh là mảng token an toàn (không chuỗi shell)', async () => {
   for (const name of CLI_NAMES) {
-    const table = { '--version': { stdout: '1.2.3' }, 'auth status': { stdout: 'Logged in' }, 'login status': { stdout: 'Logged in' }, status: { stdout: 'Logged in' }, models: { stdout: 'logged in' } }
-    const files = { claude: `${NPM}\\claude.cmd`, codex: `${NPM}\\codex.cmd`, 'cursor-agent': 'C:\\Users\\Tester\\AppData\\Local\\cursor-agent\\cursor-agent.cmd', agy: 'C:\\Users\\Tester\\AppData\\Local\\agy\\bin\\agy.exe', grok: 'C:\\Users\\Tester\\.grok\\bin\\grok.exe', devin: `D:\\Program Files\\Devin\\${DEVIN_TAIL}` }
+    const table = { '--version': { stdout: '1.2.3' }, 'auth status': { stdout: 'Logged in' }, 'login status': { stdout: 'Logged in' }, status: { stdout: 'Logged in' }, models: { stdout: 'logged in' }, [DROID_STATUS]: { stdout: DROID_OK } }
+    const files = { claude: `${NPM}\\claude.cmd`, codex: `${NPM}\\codex.cmd`, 'cursor-agent': 'C:\\Users\\Tester\\AppData\\Local\\cursor-agent\\cursor-agent.cmd', agy: 'C:\\Users\\Tester\\AppData\\Local\\agy\\bin\\agy.exe', grok: 'C:\\Users\\Tester\\.grok\\bin\\grok.exe', devin: `D:\\Program Files\\Devin\\${DEVIN_TAIL}`, droid: 'C:\\Users\\Tester\\bin\\droid.exe', qodercli: 'C:\\Users\\Tester\\.qoder\\bin\\qodercli\\qodercli.exe' }
     const { opts, calls } = world(W, [files[name]], table, { timeoutMs: 99999 })
     await check(name, opts)
     assert.ok(calls.length >= 1)
@@ -292,7 +350,7 @@ test('check: giờ chờ mỗi lệnh luôn ≤ 20 giây dù người gọi xin 
   assert.ok(d.calls.every((c) => c.o.timeoutMs <= MAX_TIMEOUT_MS), 'mặc định cũng ≤ 20 giây')
 })
 
-test('checkAll: 6 CLI song song, trả đủ khoá theo thứ tự; tên lạ ⇒ ném lỗi', async () => {
+test('checkAll: 7 CLI song song, trả đủ khoá theo thứ tự; tên lạ ⇒ ném lỗi', async () => {
   const { opts } = world(M, [], {})
   const all = await checkAll(undefined, opts)
   assert.deepEqual(Object.keys(all), CLI_NAMES)

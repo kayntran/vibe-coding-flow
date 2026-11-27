@@ -1,4 +1,4 @@
-// SessionStart (startup|resume|clear|compact): ghép additionalContext từ tám phần, rỗng thì không in gì. Tổng ≤ 8.500 ký tự (SPEC AC10).
+// SessionStart (startup|resume|clear|compact): ghép additionalContext từ chín phần, rỗng thì không in gì. Tổng ≤ 8.500 ký tự (SPEC AC10).
 //  -1. Nhắc luật ngôn ngữ (audit 2026-10-13, CHỈ source compact|resume, đứng ĐẦU tiên): bản tóm tắt nén viết tiếng Anh làm phiên chuyển sang trả lời user bằng tiếng Anh.
 //      Chép nguyên văn dòng đầu tiên chứa "Ngôn ngữ" của ~/.claude/CLAUDE.md thành "Nhắc lại sau khi nén: <dòng>". Không có file / không có dòng ⇒ không thêm gì.
 //      Tính vào trần tổng TRƯỚC các phần khác (sổ chốt co lại nhường chỗ), nên không bao giờ bị cắt.
@@ -17,6 +17,9 @@
 //   6. Bản business + công nghệ của app (flow-business, flow-stack; docs/specs/2026-11-22-hoi-business/DESIGN.md §3): <repo>/docs/BUSINESS.md và docs/STACK.md. `trang_thai: da-duyet` ⇒ nạp mục
 //      `## 0. Tóm tắt` (BUSINESS ≤ 15 dòng / 1.500 ký tự, STACK ≤ 10 dòng / 1.000) + một dòng "bản đầy đủ ở …, không hỏi user câu business"; `nhap` ⇒ một dòng "buổi hỏi đang dở";
 //      dự án có code mà thiếu BUSINESS.md ⇒ một dòng nhắc. Dữ liệu repo (tiền tố như sổ tiến độ), nằm trong TOTAL_CAP; file không thường/symlink/realpath ngoài docs bị bỏ qua. CHỈ ĐỌC.
+//   7. Dòng model mới của agy/Codex/Factory (model-theo-hang AC-03/05/11): mỗi nhà cung cấp có dòng chưa từng báo ⇒ MỘT dòng (dòng nào, hạng nào, vai nào đổi sang model nào; vai user đang giữ model riêng
+//      ⇒ "bạn đang giữ X"; dòng chưa xếp được hạng ⇒ lệnh chọn tay), đúng một lần. CHỈ đọc cache models.json + ~/.codex/models_cache.json (không gọi CLI); cache cũ ⇒ kích `models.mjs refresh` chạy nền
+//      (khoá models.spawn.lock). Nằm trong TOTAL_CAP. FLOW_MODELS=off tắt.
 // Spec: plans/flow-v6-so-chot/SPEC.md (AC10–14, 21, 22b, 23); trước đó ~/.claude/plans/flow-v3-hooks-spec.md (Làn B). Docs: https://code.claude.com/docs/en/hooks
 // Lỗi nội bộ luôn CHO QUA (exit 0, không in gì) và ghi một dòng vào ~/.claude/logs/session-start.log.
 import { spawn, spawnSync } from 'node:child_process'
@@ -28,6 +31,7 @@ import { SINCE_FLOOR } from './don.mjs'
 import { normalize } from './lib/host.mjs'
 import { dueReminders, readState } from './lib/release-state.mjs'
 import { scanHiddenPaths, scanText } from './lib/secrets.mjs'
+import { claimModelsRefresh, newLineNotices } from './lib/models.mjs'
 import { excerpt, openProgress } from './lib/so-chot.mjs'
 import { claimRefresh, isStale, noteLine, readCache as readUpdatesCache, todayOf, updateCache as patchUpdatesCache } from './lib/updates.mjs'
 
@@ -274,6 +278,30 @@ function updatesSection() {
   if (line) patchUpdatesCache({}, (c) => ({ ...c, notified: todayOf(now) }))
   if (isStale(cache, now) && claimRefresh({}, now)) launchRefresh()
   return line ? `${UPDATES_PREFIX}${line}` : ''
+}
+
+// ---------- báo dòng model mới của agy/Codex/Factory (AC-03, AC-05, AC-11) ----------
+
+// CHỈ đọc cache danh sách model (~/.claude/cache/models.json) + ~/.codex/models_cache.json, KHÔNG gọi CLI (hook chỉ có 10 giây). So với `seenLines` trong cache:
+// lần đầu ghi im; có dòng mới ⇒ một dòng báo cho mỗi nhà cung cấp, một lần duy nhất. Cache cũ quá 6 giờ (hoặc chưa có mà CLI đã cài) ⇒ kích `models.mjs refresh`
+// chạy nền tách rời, như updatesSection: MỘT phiên giành được file khoá models.spawn.lock trong mỗi 10 phút ⇒ lần mở phiên kế mới thấy dòng mới nếu có.
+// FLOW_MODELS=off tắt hẳn; FLOW_MODELS_SCRIPT để test thay bằng script giả. Độ dài dòng báo được trừ vào trần TOTAL_CAP ở cuối file.
+const MODELS_SCRIPT = process.env.FLOW_MODELS_SCRIPT || path.join(HOOK_DIR, 'models.mjs')
+const MODELS_PREFIX = 'Báo user một lần, nguyên văn từng dòng: '
+function launchModelsRefresh() {
+  try {
+    const child = spawn(process.execPath, [MODELS_SCRIPT, 'refresh'], { cwd: HOOK_DIR, detached: true, stdio: 'ignore', windowsHide: true })
+    child.on('error', (e) => logErr(`kích làm tươi danh sách model lỗi (${errTag(e)})`))
+    child.unref()
+  } catch (e) {
+    logErr(`kích làm tươi danh sách model lỗi (${errTag(e)})`)
+  }
+}
+function modelsSection() {
+  if (process.env.FLOW_MODELS === 'off') return ''
+  const r = newLineNotices({})
+  if (r.stale.length && claimModelsRefresh({}, Date.now())) launchModelsRefresh()
+  return r.lines.length ? `${MODELS_PREFIX}${r.lines.join('\n')}` : ''
 }
 
 // ---------- quét đồ tạm cũ [12e1] ----------
@@ -585,12 +613,13 @@ try {
   const biz = repo ? safe('bản business/công nghệ', () => businessSection(repo.top)) : ''
   const mcp = safe('mcp', mcpSection)
   const upd = safe('cập nhật công cụ', updatesSection)
+  const mdl = safe('dòng model mới', modelsSection)
   const due = safe('nhắc sau phát hành', () => dueSection(cwd, repo?.top))
   safe('quét đồ tạm', launchSweep)
-  // Sổ chốt lấy phần trần còn lại sau nhắc ngôn ngữ + lời nhắc an toàn + tiến độ + bản business/công nghệ + nhắc MCP + nhắc sau phát hành + nhắc cập nhật (và các dòng trống ngăn cách giữa các phần) ⇒ tổng luôn ≤ TOTAL_CAP.
-  const room = TOTAL_CAP - lang.length - notices.length - progress.length - biz.length - mcp.length - due.length - upd.length - (lang ? 2 : 0) - (notices ? 2 : 0) - (progress ? 2 : 0) - (biz ? 2 : 0) - (mcp ? 2 : 0) - (due ? 2 : 0) - (upd ? 2 : 0)
+  // Sổ chốt lấy phần trần còn lại sau nhắc ngôn ngữ + lời nhắc an toàn + tiến độ + bản business/công nghệ + nhắc MCP + nhắc sau phát hành + nhắc cập nhật + dòng model mới (và các dòng trống ngăn cách giữa các phần) ⇒ tổng luôn ≤ TOTAL_CAP.
+  const room = TOTAL_CAP - lang.length - notices.length - progress.length - biz.length - mcp.length - due.length - upd.length - mdl.length - (lang ? 2 : 0) - (notices ? 2 : 0) - (progress ? 2 : 0) - (biz ? 2 : 0) - (mcp ? 2 : 0) - (due ? 2 : 0) - (upd ? 2 : 0) - (mdl ? 2 : 0)
   const chot = repo ? safe('so-chot', () => excerpt(repo.top, { branch: repo.branch, budget: room })) : ''
-  const parts = [lang, notices, progress, biz, chot, mcp, due, upd].filter(Boolean)
+  const parts = [lang, notices, progress, biz, chot, mcp, due, upd, mdl].filter(Boolean)
   if (parts.length) {
     process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: parts.join('\n\n') } }))
   }

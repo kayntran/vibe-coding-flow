@@ -35,7 +35,7 @@ CLI nào chưa sẵn sàng (chưa cài/chưa đăng nhập/hết lượt) thì b
    `--disable-slash-commands` — cờ đó vô hiệu chế độ chỉ đọc). Đo 2026-10-01: ~55 giây/câu.
    `mkdir -p /c/tmp/agy-research && cd /c/tmp/agy-research && agy -p "<câu hỏi>" --model "$(node ~/.claude/hooks/models.mjs pick agy plan-reviewer)" --mode plan --print-timeout 9m > "<out>/agy.md" 2>&1 < /dev/null`
    agy hay bịa URL repo ⇒ mọi URL nó đưa phải tự mở kiểm.
-   Output báo hết lượt dùng/quota/rate limit ⇒ chạy lại một lần với `--model "$(node ~/.claude/hooks/models.mjs pick agy sensitive-reviewer)"` (Gemini Flash mới nhất). Vẫn lỗi ⇒ ghi
+   Output báo hết lượt dùng/quota/rate limit ⇒ chạy lại một lần với `--model "$(node ~/.claude/hooks/models.mjs pick agy sensitive-reviewer)"` (model mạnh thứ hai của agy: cùng hạng mạnh nhưng khác dòng với plan-reviewer, nên không gọi lại đúng model vừa hết lượt). Vẫn lỗi ⇒ ghi
    một dòng vào receipt, bỏ qua. Trong researcher, agy chỉ để research, không sửa file.
 4. **Kiểm từng claim của Grok và agy**: repo có tồn tại, license đúng, còn bảo trì. Claim không kiểm được ⇒ ghi rõ
    "chưa xác minh". Hai nguồn ngoài nói khác nhau ⇒ ghi cả hai, nêu nguồn nào có bằng chứng.

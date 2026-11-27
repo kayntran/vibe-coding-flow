@@ -278,6 +278,38 @@ test('Codex: vai không có model trong danh sách ⇒ TOML bỏ khoá model (CL
   assert.match(coder, /^model_reasoning_effort = "high"$/m)
 })
 
+test('Codex thiếu hạng mạnh (danh sách thật 2026-11-27: chỉ gpt-6-luna) mà Factory có gpt-6-sol ⇒ TOML của Codex KHÔNG BAO GIỜ nhận id của Factory, hạ hạng trong Codex', async () => {
+  const home = tmp(); withCodex(home)
+  const fixtures = path.join(HERE, 'hooks', 'lib', 'fixtures', 'models')
+  const catalog = { codex: fs.readFileSync(path.join(fixtures, 'codex.json'), 'utf8'), droid: fs.readFileSync(path.join(fixtures, 'droid-help.txt'), 'utf8') }
+  const r = await run(home, miniKit(), { models: { catalog } })
+  assert.equal(r.code, 0, r.out)
+  for (const role of ['coder', 'recon']) {
+    const toml = rd(home, '.codex', 'agents', `${role}.toml`)
+    assert.match(toml, /^model = "gpt-6-luna"$/m, role)
+    assert.doesNotMatch(toml, /gpt-6-sol|gpt-6-astra|latest/, `${role}: id của Factory lọt vào TOML của Codex`)
+  }
+  assert.match(r.out, /hạng mạnh/, 'ghi chú hạ hạng phải có trong báo cáo cài')
+})
+
+test('Codex hai tài khoản có danh sách model KHÁC nhau: mỗi TOML dùng model của chính tài khoản đó (tk 1 = gpt-6-luna, tk 2 = gpt-6.2-sol); tài khoản khác có model tốt hơn ⇒ ghi chú, không ghi id tài khoản khác', async () => {
+  const home = tmp(); withCodex(home)
+  const fixtures = path.join(HERE, 'hooks', 'lib', 'fixtures', 'models')
+  for (const [dir, file] of [['.codex', 'codex.json'], ['.codex-2', 'codex-2.json']]) {
+    fs.mkdirSync(path.join(home, dir), { recursive: true })
+    fs.writeFileSync(path.join(home, dir, 'auth.json'), '{}')
+    fs.writeFileSync(path.join(home, dir, 'models_cache.json'), JSON.stringify({ ...JSON.parse(fs.readFileSync(path.join(fixtures, file), 'utf8')), fetched_at: new Date().toISOString() }))
+  }
+  const r = await run(home, miniKit(), { models: { catalog: {} } })
+  assert.equal(r.code, 0, r.out)
+  const tk1 = rd(home, '.codex', 'agents', 'coder.toml')
+  const tk2 = rd(home, '.codex-2', 'agents', 'coder.toml')
+  assert.match(tk1, /^model = "gpt-6-luna"$/m)
+  assert.doesNotMatch(tk1, /gpt-6\.2/, 'id của tài khoản 2 không được lọt vào TOML của tài khoản 1')
+  assert.match(tk2, /^model = "gpt-6\.2-sol"$/m)
+  assert.match(r.out, /Tài khoản Codex 2 có gpt-6\.2-sol \(hạng mạnh\), đổi tài khoản mặc định nếu muốn/)
+})
+
 test('Codex: chạy 2 lần y kết quả — không file nào đổi, không có thư mục sao lưu', async () => {
   const home = tmp(); const kit = miniKit()
   withCodex(home)

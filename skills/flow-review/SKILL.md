@@ -31,11 +31,12 @@ Không đảo quyết định đã có trong sổ chốt chỉ vì một reviewe
 
 Captain quyết từ `git diff --stat main...HEAD` diff là thường hay **nhạy cảm**, nói một dòng lý do. Thường ⇒ 1 lượt chất lượng
 **Grok high**, không gọi Codex. Nhạy cảm ⇒ thêm **Codex Sol `high`** lượt bảo mật (cùng commit đã qua `flow-security` thì dùng lại).
-Lượt thứ hai dùng họ model khác, không chạy Codex hai lần. Model luôn là bản mới nhất của dòng (`kit/roles.json` + `models.mjs`).
+Lượt thứ hai dùng họ model khác, không chạy Codex hai lần. Model do **hạng** của vai quyết, luôn là bản mới nhất có trên máy (`kit/roles.json` + `models.mjs`);
+Codex thiếu hạng mạnh mà Factory có ⇒ `review-ext.mjs` tự chạy `droid exec` chỉ đọc và in một dòng báo (chép vào receipt).
 Định nghĩa nhạy cảm, bảng lượt đủ: `references/chon-luot-soat.md`.
 
 **Dự phòng:** lượt nào lỗi, hết giờ, hết lượt hoặc không ra JSON ⇒ chạy lại bằng model kế tiếp CHƯA dùng cho nhánh này:
-Codex → Grok → Gemini Flash → Agent `code-reviewer`. Không còn AI ngoài nào chạy được ⇒ dùng `code-reviewer`, không đứng chờ, và
+Codex → Grok → agy (`--model flash`, model mạnh thứ hai của agy) → Agent `code-reviewer`. Không còn AI ngoài nào chạy được ⇒ dùng `code-reviewer`, không đứng chờ, và
 phải nói rõ với user là chỉ có AI soát nội bộ (câu báo: `references/chon-luot-soat.md`).
 
 ## 3. Gọi model: gửi sạch và hỏi trung lập

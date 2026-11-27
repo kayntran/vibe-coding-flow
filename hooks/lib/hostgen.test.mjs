@@ -159,6 +159,12 @@ test('TOML: nguồn sai/vai lạ/quyền chưa rõ không sinh agent thiếu rà
   assert.throws(() => codexAgentToml(agent('coder'), registry, { model: 'x', effort: 'nonsense' }), /effort/i)
 })
 
+test('TOML: model của Factory (resolve bật allowFallbackHost ⇒ host droid) bị từ chối — id đó không chạy được trong agent của Codex; kết quả host codex hoặc {model, effort} trần vẫn nhận', () => {
+  assert.throws(() => codexAgentToml(agent('coder'), registry, { host: 'droid', fallbackFrom: 'codex', model: 'gpt-6-sol', effort: 'high' }), /droid.*không dùng được cho Codex/)
+  assert.match(codexAgentToml(agent('coder'), registry, { host: 'codex', model: 'gpt-6-luna', effort: 'high' }), /^model = "gpt-6-luna"$/m)
+  assert.match(codexAgentToml(agent('coder'), registry, { model: 'gpt-6-luna', effort: 'high' }), /^model = "gpt-6-luna"$/m)
+})
+
 test('TOML: parser độc lập Python stdlib tomllib đọc toàn bộ bản xuất thật và chuỗi biên', (t) => {
   const candidates = [['python3', []], ['python', []], ['py', ['-3']]]
   const python = candidates.find(([cmd, args]) => spawnSync(cmd, [...args, '-c', 'import tomllib'], { timeout: 5000 }).status === 0)

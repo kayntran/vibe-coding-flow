@@ -1,0 +1,280 @@
+{
+  "_doc": "Đáp án cho bản chụp danh sách model thật ngày 2026-11-27 (agy.txt = `agy models`, codex.json / codex-2.json = ~/.codex/models_cache.json của tài khoản 1 / 2, droid-help.txt = `droid exec --help` bản 0.241.1, cursor.txt = `cursor-agent models` bản 2026.11.22, grok.txt = `grok models` 1.0.92, qoder.txt = stdout của `qodercli --list-models` 1.1.65). Viết tay theo luật xếp hạng ở kit/roles.json, KHÔNG sinh từ code. tiers.match = exact (so đủ từng dòng) | subset (chỉ các dòng nêu tên phải đúng hạng; dòng khác tuỳ). neverPick = id không bao giờ được chọn. pick = model đúng cho từng hạng ở mức effort high.",
+  "agy": {
+    "match": "exact",
+    "tiers": {
+      "manh": [
+        "neon",
+        "hydrogen",
+        "opus"
+      ],
+      "vua": [
+        "carbon",
+        "argon"
+      ],
+      "nhanh": [
+        "flash"
+      ],
+      "chua-xep": [
+        "sonnet",
+        "oss"
+      ]
+    },
+    "neverPick": [
+      "gemini-pro-orchestrator",
+      "gemini-pro-orchestrator-neon",
+      "gemini-pro-orchestrator-argon"
+    ],
+    "pick": {
+      "manh": "gemini-4-neon-high",
+      "vua": "gemini-4-carbon-high",
+      "nhanh": "gemini-3.8-flash-high"
+    },
+    "effortTop": {
+      "gemini-4-neon": [
+        "high",
+        "xhigh",
+        "medium",
+        "low"
+      ],
+      "gemini-4-carbon": [
+        "medium",
+        "high",
+        "low"
+      ]
+    }
+  },
+  "codex": {
+    "match": "exact",
+    "tiers": {
+      "manh": [],
+      "vua": [],
+      "nhanh": [
+        "luna"
+      ],
+      "chua-xep": []
+    },
+    "neverPick": [
+      "gpt-reserve",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+      "codex-auto-review"
+    ],
+    "pick": {
+      "manh": null,
+      "vua": null,
+      "nhanh": "gpt-6-luna"
+    }
+  },
+  "codex2": {
+    "_doc": "Tài khoản Codex thứ hai (~/.codex-2/models_cache.json, codex-2.json): có sol/astra/terra. gpt-6-sol và mọi gpt-5.6-* là 'Legacy' ⇒ loại; gpt-6.1-sol 'Previous generation' vẫn dùng được nhưng gpt-6.2-sol mới hơn.",
+    "match": "exact",
+    "tiers": {
+      "manh": [
+        "sol",
+        "astra"
+      ],
+      "vua": [
+        "terra"
+      ],
+      "nhanh": [
+        "luna"
+      ],
+      "chua-xep": []
+    },
+    "neverPick": [
+      "gpt-6-sol",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+      "gpt-reserve",
+      "codex-auto-review"
+    ],
+    "pick": {
+      "manh": "gpt-6.2-sol",
+      "vua": "gpt-6.1-terra",
+      "nhanh": "gpt-6-luna"
+    },
+    "escalate": {
+      "line": "astra",
+      "model": "gpt-6.2-astra"
+    }
+  },
+  "droid": {
+    "match": "subset",
+    "entryCount": 51,
+    "deprecated": [
+      "deepseek-v4-flash-0731",
+      "deepseek-v4-pro",
+      "minimax-m2.7"
+    ],
+    "efforts": {
+      "gpt-6-sol": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "claude-opus-5-5": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "gemini-3.8-flash": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "noEfforts": [
+      "auto"
+    ],
+    "aliases": [
+      "anthropic-latest-premium",
+      "anthropic-latest-balanced",
+      "anthropic-latest-medium",
+      "anthropic-latest-fast",
+      "openai-latest-premium",
+      "openai-latest-balanced",
+      "openai-latest-medium",
+      "openai-latest-fast",
+      "oss-latest-premium",
+      "oss-latest-balanced",
+      "oss-latest-fast"
+    ],
+    "tiers": {
+      "manh": [
+        "sol",
+        "astra",
+        "opus",
+        "pro"
+      ],
+      "vua": [
+        "terra",
+        "sonnet"
+      ],
+      "nhanh": [
+        "luna",
+        "haiku",
+        "mini",
+        "flash"
+      ],
+      "chua-xep": [
+        "fable",
+        "inkling",
+        "grok"
+      ]
+    },
+    "neverPick": [
+      "auto",
+      "minimax-m2.7",
+      "claude-opus-5-5-fast",
+      "gpt-5.6-sol-fast",
+      "gpt-5.4-mini-fast",
+      "openai-latest-premium",
+      "openai-latest-fast"
+    ],
+    "pick": {
+      "manh": "gpt-6-sol",
+      "vua": "gpt-5.6-terra",
+      "nhanh": "gpt-6-luna"
+    }
+  },
+  "cursor-agent": {
+    "_doc": "Cursor là chợ nhiều họ (claude, gpt-5.6, gemini-4, grok, kimi, muse, glm…): xếp theo họ, chưa host prefer vì chưa vai nào dùng. Biến thể -fast bị bỏ ngay khi đọc; auto và id không có dấu gạch không phải ứng viên; (NO ZDR) chỉ là cờ noZdr, không loại.",
+    "match": "exact",
+    "entryCount": 56,
+    "tiers": {
+      "manh": [
+        "opus",
+        "sol",
+        "neon",
+        "hydrogen",
+        "pro"
+      ],
+      "vua": [
+        "sonnet",
+        "carbon",
+        "argon",
+        "terra"
+      ],
+      "nhanh": [
+        "luna",
+        "flash",
+        "mini",
+        "nano",
+        "haiku",
+        "deepseek"
+      ],
+      "chua-xep": [
+        "composer",
+        "fable",
+        "grok",
+        "muse",
+        "kimi",
+        "glm"
+      ]
+    },
+    "neverPick": [
+      "auto",
+      "gpt-5.3-codex-high-fast",
+      "claude-opus-5-5-high-fast",
+      "composer-2.5-fast",
+      "gpt-5.2-fast"
+    ],
+    "pick": {
+      "manh": "gpt-5.6-sol-high",
+      "vua": "gpt-5.6-terra-high",
+      "nhanh": "gpt-5.6-luna-high"
+    },
+    "effortIds": {
+      "gpt-5.5": {
+        "xhigh": "gpt-5.5-extra-high"
+      },
+      "claude-4.6-opus-thinking": {
+        "high": "claude-4.6-opus-high-thinking",
+        "max": "claude-4.6-opus-max-thinking"
+      }
+    },
+    "noEfforts": [
+      "composer-2.5"
+    ],
+    "noZdr": [
+      "claude-fable-5",
+      "claude-fable-5-1",
+      "claude-fable-5-1-thinking",
+      "claude-fable-5-2",
+      "claude-fable-5-thinking"
+    ]
+  },
+  "grok": {
+    "_doc": "grok models: chỉ grok-4.7 (mặc định). Một họ duy nhất ⇒ dòng grok = hạng mạnh; không có mức effort ⇒ không truyền mức.",
+    "match": "exact",
+    "ids": [
+      "grok-4.7"
+    ],
+    "tiers": {
+      "manh": [
+        "grok"
+      ],
+      "vua": [],
+      "nhanh": [],
+      "chua-xep": []
+    },
+    "pick": {
+      "manh": "grok-4.7",
+      "vua": null,
+      "nhanh": null
+    }
+  },
+  "qoder": {
+    "_doc": "qodercli --list-models trên tài khoản miễn phí: stdout chỉ có tiêu đề MODEL (stderr: Warning: no models available for your account.) ⇒ không có model nào; Qoder tự chọn model miễn phí nên host providerPicks: không truyền -m, model rỗng là bình thường.",
+    "match": "exact",
+    "ids": [],
+    "providerPicks": true
+  }
+}

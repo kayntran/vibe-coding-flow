@@ -1,6 +1,6 @@
 {
-  "version": 1,
-  "_doc": "Registry vai: MỘT nguồn cho flow-gate (receipt/audit), flow-dispatch (writesCode), hostgen (TOML Codex) và models.mjs (vai -> dòng model). Chỉ ghi TÊN DÒNG (opus, sonnet, haiku, sol, luna, astra, flash...), không ghi số phiên bản hay id model: hooks/lib/models.mjs chọn bản mới nhất có trên máy lúc chạy [vmdk]. Bảng theo sổ chốt [bbzh] [50zu] [69u6] [csb8]. User đổi model cho vai bằng 'node hooks/models.mjs set' (ghi ở ~/.claude/flow.local.json, không đụng file này). agent:false = vai gọi qua wrapper (review-ext), không có file agents/*.md.",
+  "version": 2,
+  "_doc": "Registry vai: MỘT nguồn cho flow-gate (receipt/audit), flow-dispatch (writesCode), hostgen (TOML Codex) và models.mjs (vai -> HẠNG model). Vai xin hạng (manh > vua > nhanh), không ghi số phiên bản hay id model: hooks/lib/models.mjs đọc danh sách model trên máy lúc chạy, tự xếp dòng chưa biết vào hạng và chọn bản mới nhất [vmdk]. Claude giữ tên dòng (opus, sonnet, haiku: app tự lên đời). hosts.<host>.tiers = bảng gợi ý dòng đã biết theo hạng, thứ tự = ưu tiên khi hoà; skip = token loại khỏi ứng viên (bộ điều phối, model duyệt tự động, model ẩn, bản cũ; biến thể hậu tố -fast luôn bị loại riêng); tierByEffort = host tách mức effort theo hạng nên được dùng mức xhigh để phong hạng mạnh cho dòng mới (chỉ agy); prefer = họ model ưu tiên khi hai ứng viên cùng hạng khác nhà; fallbackHost = host thay thế khi thiếu hạng (chỉ nơi đổi được lệnh gọi mới dùng: codex-run, review-ext); aliases = mẫu hạng droid tự khai, chỉ dùng khi help liệt kê và không còn model cụ thể; providerPicks = nhà cung cấp tự chọn model (Qoder miễn phí) nên không truyền -m, model rỗng là bình thường; defaultTier = hạng của dòng chưa biết trên host đó. cursor-agent, grok, qodercli đã đọc được danh sách nhưng chưa vai nào dùng (xem `models.mjs tiers <app>`). Vai ghi thêm line = dòng ưu tiên trong hạng (không có trên máy thì rơi về hạng). User đổi model cho vai bằng 'node hooks/models.mjs set' (ghi ở ~/.claude/flow.local.json, không đụng file này). Bảng theo sổ chốt [bbzh] [50zu] [69u6] [csb8]. agent:false = vai gọi qua wrapper (review-ext), không có file agents/*.md.",
   "hosts": {
     "claude": {
       "lines": [
@@ -10,42 +10,64 @@
       ]
     },
     "codex": {
-      "lines": {
-        "sol": [
-          "astra",
-          "luna"
-        ],
-        "astra": [
-          "sol",
-          "luna"
-        ],
-        "luna": [
-          "terra",
-          "sol"
-        ],
-        "terra": [
-          "sol",
-          "luna"
-        ]
-      }
+      "tiers": {
+        "manh": ["sol", "astra"],
+        "vua": ["terra"],
+        "nhanh": ["luna"]
+      },
+      "skip": ["orchestrator", "auto", "review", "reserve", "deprecated", "legacy"],
+      "prefer": "gpt",
+      "fallbackHost": "droid"
     },
     "agy": {
-      "lines": {
-        "opus": [
-          "sonnet",
-          "pro"
-        ],
-        "sonnet": [
-          "opus",
-          "pro"
-        ],
-        "flash": [
-          "pro"
-        ],
-        "pro": [
-          "flash"
-        ]
+      "tiers": {
+        "manh": ["neon", "hydrogen"],
+        "vua": ["carbon", "argon"],
+        "nhanh": ["flash"]
+      },
+      "skip": ["orchestrator", "auto", "review", "reserve", "deprecated", "legacy"],
+      "prefer": "gemini",
+      "tierByEffort": true
+    },
+    "droid": {
+      "tiers": {
+        "manh": ["sol", "astra", "opus"],
+        "vua": ["terra", "sonnet"],
+        "nhanh": ["luna", "haiku"]
+      },
+      "skip": ["orchestrator", "auto", "review", "reserve", "deprecated", "legacy"],
+      "prefer": "gpt",
+      "aliases": {
+        "manh": "openai-latest-premium",
+        "vua": "openai-latest-balanced",
+        "nhanh": "openai-latest-fast"
       }
+    },
+    "cursor-agent": {
+      "tiers": {
+        "manh": ["sol", "astra", "opus", "neon", "hydrogen"],
+        "vua": ["terra", "sonnet", "carbon", "argon"],
+        "nhanh": ["luna", "haiku", "flash"]
+      },
+      "skip": ["orchestrator", "auto", "review", "reserve", "deprecated", "legacy"]
+    },
+    "grok": {
+      "tiers": {
+        "manh": ["grok"],
+        "vua": [],
+        "nhanh": []
+      },
+      "skip": ["orchestrator", "auto", "review", "reserve", "deprecated", "legacy"]
+    },
+    "qodercli": {
+      "tiers": {
+        "manh": [],
+        "vua": [],
+        "nhanh": []
+      },
+      "skip": ["orchestrator", "auto", "review", "reserve", "deprecated", "legacy"],
+      "providerPicks": true,
+      "defaultTier": "nhanh"
     }
   },
   "roles": {
@@ -64,7 +86,15 @@
           }
         },
         "codex": {
-          "line": "sol",
+          "tier": "manh",
+          "effort": "high",
+          "escalate": {
+            "line": "astra",
+            "effort": "high"
+          }
+        },
+        "droid": {
+          "tier": "manh",
           "effort": "high",
           "escalate": {
             "line": "astra",
@@ -88,10 +118,18 @@
           }
         },
         "codex": {
-          "line": "sol",
+          "tier": "manh",
           "effort": "medium",
           "escalate": {
-            "line": "sol",
+            "tier": "manh",
+            "effort": "high"
+          }
+        },
+        "droid": {
+          "tier": "manh",
+          "effort": "medium",
+          "escalate": {
+            "tier": "manh",
             "effort": "high"
           }
         }
@@ -112,10 +150,18 @@
           }
         },
         "codex": {
-          "line": "luna",
+          "tier": "nhanh",
           "effort": "medium",
           "escalate": {
-            "line": "luna",
+            "tier": "nhanh",
+            "effort": "high"
+          }
+        },
+        "droid": {
+          "tier": "nhanh",
+          "effort": "medium",
+          "escalate": {
+            "tier": "nhanh",
             "effort": "high"
           }
         }
@@ -136,7 +182,15 @@
           }
         },
         "codex": {
-          "line": "sol",
+          "tier": "manh",
+          "effort": "high",
+          "escalate": {
+            "line": "astra",
+            "effort": "high"
+          }
+        },
+        "droid": {
+          "tier": "manh",
           "effort": "high",
           "escalate": {
             "line": "astra",
@@ -156,7 +210,11 @@
           "effort": "high"
         },
         "codex": {
-          "line": "sol",
+          "tier": "manh",
+          "effort": "medium"
+        },
+        "droid": {
+          "tier": "manh",
           "effort": "medium"
         }
       }
@@ -172,7 +230,11 @@
           "effort": "high"
         },
         "codex": {
-          "line": "sol",
+          "tier": "manh",
+          "effort": "high"
+        },
+        "droid": {
+          "tier": "manh",
           "effort": "high"
         }
       }
@@ -188,7 +250,11 @@
           "effort": "medium"
         },
         "codex": {
-          "line": "luna",
+          "tier": "nhanh",
+          "effort": "low"
+        },
+        "droid": {
+          "tier": "nhanh",
           "effort": "low"
         }
       }
@@ -204,7 +270,11 @@
           "effort": "high"
         },
         "codex": {
-          "line": "sol",
+          "tier": "manh",
+          "effort": "medium"
+        },
+        "droid": {
+          "tier": "manh",
           "effort": "medium"
         }
       }
@@ -220,7 +290,11 @@
           "effort": "medium"
         },
         "codex": {
-          "line": "sol",
+          "tier": "manh",
+          "effort": "high"
+        },
+        "droid": {
+          "tier": "manh",
           "effort": "high"
         }
       }
@@ -237,11 +311,15 @@
           "effort": "high"
         },
         "codex": {
-          "line": "sol",
+          "tier": "manh",
+          "effort": "high"
+        },
+        "droid": {
+          "tier": "manh",
           "effort": "high"
         },
         "agy": {
-          "line": "opus",
+          "tier": "manh",
           "effort": "high"
         }
       }
@@ -254,20 +332,25 @@
       "audit": false,
       "models": {
         "codex": {
-          "line": "sol",
+          "tier": "manh",
+          "effort": "high"
+        },
+        "droid": {
+          "tier": "manh",
           "effort": "high"
         }
       }
     },
     "sensitive-reviewer": {
-      "desc": "lượt review thêm khi đụng tiền, đăng nhập, dữ liệu [csb8]",
+      "desc": "lượt review thêm khi đụng tiền, đăng nhập, dữ liệu [csb8]; cũng là model dự phòng khi plan-reviewer hết lượt ⇒ cùng hạng mạnh nhưng ưu tiên dòng khác",
       "agent": false,
       "writesCode": false,
       "receipt": false,
       "audit": false,
       "models": {
         "agy": {
-          "line": "flash",
+          "tier": "manh",
+          "line": "hydrogen",
           "effort": "high"
         }
       }

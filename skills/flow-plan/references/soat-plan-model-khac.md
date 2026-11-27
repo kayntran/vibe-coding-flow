@@ -2,13 +2,14 @@
 
 Dùng ở mục "Soát plan bằng model khác" của `flow-plan`. Kiểm `node ~/.claude/hooks/cli-check.mjs <tên>` trước, chưa sẵn sàng thì sang bậc sau.
 
-- Đang ở Claude: **Codex** (`pick codex plan-reviewer`) → **Opus qua agy** (`pick agy plan-reviewer`) → Agent `code-reviewer` với `model: "opus"`.
-- Đang ở Codex: **Sol high** (`pick codex plan-reviewer`).
+- Đang ở Claude: **Codex** (`codex-run.mjs --vai plan-reviewer`) → **model mạnh của agy** (`pick agy plan-reviewer`, dòng Gemini mới nhất) → Agent `code-reviewer` với `model: "opus"`.
+- Đang ở Codex: **hạng mạnh, mức high** (`codex-run.mjs --vai plan-reviewer`).
+- Model chọn theo hạng của vai (không ghi cứng tên). Codex thiếu hạng mạnh mà Factory có ⇒ `codex-run.mjs` tự chạy `droid exec` chỉ đọc và in một dòng báo.
 
 ```bash
-# codex-run.mjs = codex exec, tự đổi tài khoản Codex khi hết lượt và báo một dòng
-node ~/.claude/hooks/codex-run.mjs exec --sandbox read-only -m "$(node ~/.claude/hooks/models.mjs pick codex plan-reviewer)" \
-  -c model_reasoning_effort="high" -C "<gốc repo>" -o "<scratchpad>/plan-review.md" "<ĐỀ>" < /dev/null
+# codex-run.mjs = codex exec, tự đổi tài khoản Codex khi hết lượt và báo một dòng; --vai = model + mức theo hạng của vai
+node ~/.claude/hooks/codex-run.mjs exec --sandbox read-only --vai plan-reviewer \
+  -C "<gốc repo>" -o "<scratchpad>/plan-review.md" "<ĐỀ>" < /dev/null
 # agy: cd vào thư mục trống, agy -p "<ĐỀ, kèm đường dẫn tuyệt đối SPEC/PLAN>" --model "$(node ~/.claude/hooks/models.mjs pick agy plan-reviewer)" --mode plan
 ```
 

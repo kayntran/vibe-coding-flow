@@ -89,7 +89,8 @@ function tomlString(value) {
 }
 
 /**
- * rolesJson = object kit/roles.json đã parse; resolvedModel = {model:string|null, effort:string|null}.
+ * rolesJson = object kit/roles.json đã parse; resolvedModel = {model:string|null, effort:string|null} của resolve('codex', vai) MẶC ĐỊNH (chọn theo hạng, chỉ trong Codex);
+ * kết quả của Factory (host:'droid', do allowFallbackHost) bị từ chối: id đó không chạy được trong TOML của Codex.
  * Không truyền resolver ⇒ bỏ model và dùng effort Codex từ registry, KHÔNG lấy model/effort Claude.
  * Resolver effort:null ⇒ bỏ khoá effort để host kế thừa. Vai writesCode:true kế thừa sandbox cha.
  */
@@ -107,6 +108,7 @@ export function codexAgentToml(agentMdText, rolesJson, resolvedModel) {
   if (resolvedModel != null && (typeof resolvedModel !== 'object' || Array.isArray(resolvedModel))) {
     throw new TypeError('resolvedModel phải là kết quả resolve: {model, effort}.')
   }
+  if (resolvedModel?.host !== undefined && resolvedModel.host !== 'codex') throw new Error(`resolvedModel của ${resolvedModel.host} không dùng được cho Codex (dùng resolve('codex', vai) không bật allowFallbackHost).`)
   const model = resolvedModel?.model ?? null
   const effort = resolvedModel?.effort === undefined ? role.models?.codex?.effort : resolvedModel.effort
   if (model !== null && (typeof model !== 'string' || !model.trim())) throw new Error('resolvedModel.model cần slug không rỗng hoặc null.')

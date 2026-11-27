@@ -60,7 +60,11 @@ export function pick(role, { host, home = os.homedir(), env = process.env, kit =
   if (!r) throw new Error(`không có vai "${role}" trong kit/roles.json`)
   const h = host ?? (CODEX_ONLY.has(role) && r.models?.codex ? 'codex' : r.models?.claude ? 'claude' : 'codex')
   if (!r.models?.[h]) throw new Error(`vai "${role}" không có model cho ${h}`)
-  const m = resolveModel(h, role, { home, env, roles })
+  // Chọn theo hạng của vai, CHỈ trong host h (không bật allowFallbackHost): provider "codex/<id>" không bao giờ nhận id của Factory; thiếu hạng ⇒ hạ hạng + warnings.
+  // Codex nhiều tài khoản: danh sách model riêng từng tài khoản ⇒ chọn theo tài khoản của provider sẽ chạy (không ghi id của tài khoản khác).
+  const cx = h === 'codex' && platform !== 'win32' ? codexProvider({ home, env }) : null
+  const cxHome = cx ? codexProviders({ home, env }).find((p) => p.id === cx.id)?.home : null
+  const m = resolveModel(h, role, { home, env: cxHome ? { ...env, CODEX_HOME: cxHome } : env, roles })
   const agentFile = path.join(kit, 'agents', `${role}.md`)
   const base = {
     thinkingOptionId: m.effort ?? undefined,
@@ -74,8 +78,7 @@ export function pick(role, { host, home = os.homedir(), env = process.env, kit =
     // Windows: phiên Codex trong Paseo dùng sandbox "elevated" của user, chưa duyệt UAC thì không đọc được file (chốt 8338)
     // ⇒ viaPaseo:false: chạy ngầm qua review-ext.mjs / codex-run.mjs, không create_agent.
     if (platform === 'win32') return { ...base, viaPaseo: false, use: 'review-ext.mjs --model codex | codex-run.mjs exec' }
-    const c = codexProvider({ home, env })
-    return { ...base, viaPaseo: true, provider: `${c.id}${m.model ? `/${m.model}` : ''}`, account: c.account }
+    return { ...base, viaPaseo: true, provider: `${cx.id}${m.model ? `/${m.model}` : ''}`, account: cx.account }
   }
   return { ...base, viaPaseo: true, provider: 'claude', modelLine: m.model }
 }

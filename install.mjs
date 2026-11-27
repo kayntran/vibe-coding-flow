@@ -348,7 +348,8 @@ export async function install(opts = {}) {
     const hooksText = JSON.stringify(hooksMerge.json, null, 2) + '\n'
 
     const roles = models.loadRoles(join(kitDir, 'kit', 'roles.json'))
-    const resolveOpts = { home, env, roles, memo: new Map(), ...(opts.models ?? {}) }
+    // Mỗi tài khoản Codex có danh sách model riêng: TOML của tài khoản nào dùng model của chính tài khoản đó (không ghi id của tài khoản khác); tài khoản khác có model tốt hơn ⇒ ghi chú.
+    const resolveOpts = { home, env: { ...env, CODEX_HOME: codexDir }, roles, memo: new Map(), ...(opts.models ?? {}) }
     const warned = new Set()
     const tomls = new Map()
     const agentsDir = join(kitDir, 'agents')
