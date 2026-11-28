@@ -917,6 +917,17 @@ function systemTarget(raw, home = os.homedir()) {
   const whole = p.replace(/\/\*+$/, '') || '/'
   return SYS_WHOLE.some((re) => re.test(whole)) || SYS_UNDER.some((re) => re.test(p)) ? raw : null
 }
+// `T=D:/tmp/x && rm -rf $T`: biến gán đường dẫn cụ thể (gán đứng riêng) trước đó trong cùng lệnh ⇒ thay giá trị vào rồi mới xét.
+const SET_VAR = /(^|&&|\|\||;|\n)\s*([A-Za-z_]\w*)=("[^"$`]*"|'[^']*'|[^\s;&|$`'"]+)\s*(?=&&|\|\||;|\n|$)/g
+function expandSetVars(line) {
+  let out = line
+  for (const m of [...line.matchAll(SET_VAR)]) {
+    const value = m[3].replace(/^['"]|['"]$/g, '')
+    const at = out.indexOf(m[0]) + m[0].length
+    out = out.slice(0, at) + out.slice(at).replace(new RegExp(`\\$(?:\\{${m[2]}\\}|${m[2]}(?!\\w))`, 'g'), () => value)
+  }
+  return out
+}
 // Đích là chính thư mục đang đứng hoặc thư mục cha của nó? Claude Code tự bật hộp hỏi cho trường hợp này và không cho tự duyệt.
 function holdsCwd(raw, cwd, home = os.homedir()) {
   if (!cwd || /[$*?`]|%[^%]+%/.test(raw)) return false
@@ -964,7 +975,7 @@ async function hookBash(input) {
   if (typeof cmd !== 'string') return null
   // Lối ra của mọi lời chặn: user đã gật trong chat ⇒ AI chạy lại lệnh với tiền tố FLOW_OK=1 ⇒ cho qua mọi cổng, chỉ ghi dấu vết.
   if (/\bFLOW_OK=/.test(cmd)) { logApproval(cmd); return null }
-  const del = safely('dirDelete', () => tokenize(cmd).map((t) => deletesDir(t, 0, n.cwd ? toNative(n.cwd) : null)).find(Boolean))
+  const del = safely('dirDelete', () => tokenize(expandSetVars(cmd)).map((t) => deletesDir(t, 0, n.cwd ? toNative(n.cwd) : null)).find(Boolean))
   if (del) return del.cwd ? CWD_DELETE_DENY(del.target) : DIR_DELETE_DENY(del.target)
   const nudge = SLOW_SEARCH.test(cmd) ? SEARCH_NUDGE : null
   if (!GIT_WORDS.test(cmd)) return nudge

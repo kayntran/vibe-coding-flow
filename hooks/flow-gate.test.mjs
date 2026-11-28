@@ -2382,11 +2382,14 @@ describe('xoá thư mục hệ thống/cá nhân/.git ⇒ chặn (có lối ra F
     'rm -rf /', 'rm -rf /*', 'rm -rf ~', 'rm -rf "$HOME"', 'rm -rf $DIR/*', 'sudo rm -rf /var/lib', '/bin/rm -rf /etc',
     'FOO=1 rm -rf ~/.ssh', 'git status; rm -r -f .git', 'bash -c "rm -rf ~/Documents"', 'rm -rf C:/Windows/Temp',
     'powershell -c "Remove-Item -Recurse -Force \'C:\\Program Files\\X\'"', 'cmd /c rmdir /s /q D:\\', 'rm -rf /c/Users/Someone',
+    'T="" && rm -rf $T/*', 'T=C:/Windows && rm -rf ${T}', 'rm -rf $T && T=D:/tmp/x',
   ]
   const mustPass = [
     'rm a.txt', 'rm -f a.txt b.txt', 'rmdir empty', 'git rm -r --cached x', 'echo "rm -rf ~"', 'git commit -m "bỏ rm -rf /"', 'mkdir -p new-dir',
     'rm -rf /tmp/x', 'rm -r build', 'rm -fr out', 'rm -Rf a b', 'rm --recursive dist', 'cd x && rm -rf node_modules', 'rm -rf $TMPDIR/x',
     'bash -c "rm -rf x"', 'powershell -c "Remove-Item -Recurse -Force x"', 'cmd /c rmdir /s /q x', 'rm -rf .claude/worktrees/old', 'rm -rf ~/.claude/mods-cu',
+    'cd "D:/Work/PingDock/.claude/worktrees/khung" && T=D:/tmp/khung-sync-check && rm -rf $T && mkdir -p $T/docs', 'T="D:/tmp/a b"; rm -rf "$T"',
+    "cat > t.ts <<'EOF'\nconst a = ['rm -rf $T', 'rm -rf /']\nEOF\nnode t.ts",
   ]
   for (const command of mustDeny) {
     test(`chặn: ${command}`, () => {
