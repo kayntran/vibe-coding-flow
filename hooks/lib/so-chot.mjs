@@ -22,13 +22,14 @@
 // cảnh báo ≤3 dòng · roadmap 1 dòng; KHÔNG gồm phần tiến độ và nhắc MCP (session-start tự ghép). `budget` = trần tổng ký tự của chuỗi trả về;
 // nhỏ hơn mặc định thì mọi khẩu phần co theo tỉ lệ. Trường hợp xấu nhất mặc định ≈ 6.470 ký tự.
 //
-// CLI: node so-chot.mjs <gen|excerpt|ghi|tim|y-tuong|da-xem|huy|close> <projectRoot> [json|-]  → stdout JSON, exit 0; lỗi ⇒ exit 1 + một dòng stderr.
-import { spawnSync } from 'node:child_process'
+// CLI: node so-chot.mjs <gen|excerpt|ghi|tim|y-tuong|da-xem|huy|close|xong|noi-so|ghi-so> <projectRoot> [json|-]  → stdout JSON, exit 0; lỗi ⇒ exit 1 + một dòng stderr.
+// ghi-so {pha?, trang_thai?, buoc_tiep_theo?}: đổi đầu sổ tiến độ đang mở (ghiSo) — công cụ ghi_so của mod Claude và của MCP so-chot-mcp.mjs (Antigravity) gọi chung hàm này.
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { runGit } from './git-bin.mjs' // git theo đường dẫn tuyệt đối, không chạy git.exe nằm trong thư mục dự án (xem git-bin.mjs)
 
 const SO_CHOT_REL = '.claude/so-chot'
 const INDEX_REL = `${SO_CHOT_REL}/INDEX.md`
@@ -97,7 +98,7 @@ const SO_REL = path.join('.claude', 'so-chot')
 function realRootOf(projectRoot) {
   const root = fs.realpathSync.native(path.resolve(String(projectRoot)))
   if (fs.existsSync(path.join(root, SO_REL)) || fs.existsSync(path.join(root, '.git'))) return root
-  const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: root, encoding: 'utf8', timeout: 5000, windowsHide: true })
+  const r = runGit(['rev-parse', '--show-toplevel'], { cwd: root, encoding: 'utf8', timeout: 5000, windowsHide: true })
   if (r.error || r.status !== 0) return root
   try {
     const top = fs.realpathSync.native(r.stdout.trim())
@@ -116,7 +117,7 @@ function storeRootOf(root) {
   try {
     // .git là FILE ⇒ worktree phụ (submodule cũng vậy, nhưng nó tự đứng đầu `git worktree list` của chính nó ⇒ store = root).
     if (lstatSafe(path.join(root, '.git'))?.isFile()) {
-      const ig = spawnSync('git', ['check-ignore', '-q', INDEX_REL], { cwd: root, timeout: 5000, windowsHide: true })
+      const ig = runGit(['check-ignore', '-q', INDEX_REL], { cwd: root, timeout: 5000, windowsHide: true })
       if (!ig.error && ig.status === 0) {
         // Repo bare + toàn worktree: mục đầu là chính repo.git (không có bản làm việc, không có "sổ chính") ⇒ giữ nguyên như cũ.
         const main = worktreeList(root)[0]
@@ -434,6 +435,76 @@ export function openProgress(projectRoot, branch) {
   return null
 }
 
+// ---------- ghi đầu sổ tiến độ (công cụ ghi_so của mod so-chot và của MCP so-chot-mcp.mjs: MỘT nguồn ở đây) ----------
+
+// Sửa hoặc chèn `Khoá: giá trị` ở đầu sổ tiến độ, giữ kiểu xuống dòng của file. Có dòng `Khoá:` ở đầu dòng ⇒ thay; chưa có ⇒ chèn ngay sau
+// DÒNG ĐẦU TIÊN trong số: tiêu đề `# `, `Trạng thái…`, `Bước tiếp theo…` (thường là tiêu đề; không có dòng nào như vậy ⇒ chèn lên đầu file).
+export function withField(text, key, value) {
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const lines = text.split(/\r?\n/)
+  const at = lines.findIndex((line) => line.startsWith(`${key}:`))
+  if (at >= 0) lines[at] = `${key}: ${value}`
+  else {
+    const after = lines.findIndex((line) => /^(Trạng thái|Bước tiếp theo|# )/.test(line))
+    lines.splice(after < 0 ? 0 : after + 1, 0, `${key}: ${value}`)
+  }
+  return lines.join(eol)
+}
+
+// Nhánh git hiện tại của thư mục (null khi không phải repo / đang tách HEAD / git lỗi).
+export function branchOf(projectRoot) {
+  const r = runGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: path.resolve(String(projectRoot)), encoding: 'utf8', timeout: 5000, windowsHide: true })
+  const b = r.error || r.status !== 0 ? '' : r.stdout.trim()
+  return b && b !== 'HEAD' ? b : null
+}
+
+// Sổ tiến độ đang mở (chưa có dòng `Trạng thái: xong`) mà ghi_so sẽ sửa: ghi đúng `branch` nếu có (openProgress); không có ⇒ sổ mở sửa gần nhất
+// trong docs/specs của dự án. Đứng ở thư mục con (apps/web…) chưa có docs/specs riêng ⇒ tìm ở gốc repo — trừ khi bên gọi truyền `allow(gốcRepo)`
+// trả false (vd MCP chỉ cho ghi trong vùng làm việc của phiên: gốc repo cha nằm ngoài vùng ⇒ không leo, coi như chưa có sổ). Không có ⇒ null.
+// { feature, file (tuyệt đối), rel, mtimeMs }
+export function soTienDoDangMo(projectRoot, { branch = null, allow = null } = {}) {
+  let root = realRootOf(projectRoot)
+  if (collectSpecs(root, []).length === 0) {
+    const r = runGit(['rev-parse', '--show-toplevel'], { cwd: root, encoding: 'utf8', timeout: 5000, windowsHide: true })
+    if (!r.error && r.status === 0) {
+      try {
+        const top = fs.realpathSync.native(r.stdout.trim())
+        if (!allow || allow(top)) root = top
+      } catch {}
+    }
+  }
+  if (branch) {
+    const hit = openProgress(root, branch)
+    if (hit) return hit
+  }
+  const cands = collectSpecs(root, []).filter((s) => s.progress).sort((a, b) => b.progress.mtimeMs - a.progress.mtimeMs)
+  for (const s of cands) {
+    const r = readText(s.progress.abs)
+    if (!r || DONE_RE.test(r.text.normalize('NFC'))) continue
+    return { feature: s.name, file: s.progress.abs, rel: `${SPECS_REL}/${s.name}/progress.md`, mtimeMs: s.progress.mtimeMs }
+  }
+  return null
+}
+
+// Cập nhật Pha / Trạng thái / Bước tiếp theo của sổ tiến độ đang mở; chỉ trường là chuỗi không rỗng mới đổi (mỗi giá trị gom về MỘT dòng:
+// xuống dòng trong giá trị không được chèn thêm dòng `Trạng thái:` giả vào sổ). Không có sổ mở / không trường nào để đổi ⇒ ném lỗi.
+// → { feature, file, rel, changed: ["Trạng thái: xong", …] }
+export function ghiSo(projectRoot, input = {}, { branch = null, allow = null } = {}) {
+  const hit = soTienDoDangMo(projectRoot, { branch, allow })
+  if (!hit) throw new Error('Dự án không có sổ tiến độ đang mở (docs/specs/*/progress.md chưa xong).')
+  const fields = [['Trạng thái', input?.trang_thai], ['Bước tiếp theo', input?.buoc_tiep_theo], ['Pha', input?.pha]]
+  const todo = fields.map(([key, v]) => [key, typeof v === 'string' ? oneLine(v) : '']).filter(([, v]) => v !== '')
+  if (todo.length === 0) throw new Error('Không có trường nào để đổi.')
+  const st = lstatSafe(hit.file)
+  if (!st?.isFile() || st.size > MAX_BIG) throw new Error(`không sửa được ${hit.rel}: không phải file thường hoặc quá lớn`)
+  let text = fs.readFileSync(hit.file, 'utf8')
+  const bom = text.startsWith('﻿') ? '﻿' : ''
+  text = text.slice(bom.length)
+  for (const [key, v] of todo) text = withField(text, key, v)
+  atomicWrite(hit.file, bom + text)
+  return { feature: hit.feature, file: hit.file, rel: hit.rel, changed: todo.map(([key, v]) => `${key}: ${v}`) }
+}
+
 // ---------- ý tưởng (AC19–20) ----------
 
 // Dòng ý tưởng: "- y-xxxxxx · <ngày> · <loại> · <nội dung>"; sự kiện: "- y-xxxxxx · <ngày> · → <thư mục spec>" (làm) | "· bỏ".
@@ -541,7 +612,7 @@ function isSpecDir(root, name) {
 const worktreeRoots = (root) => worktreeList(root).map((w) => w.path)
 // [{ path, bare }] theo đúng thứ tự git in (mục đầu là thư mục chính, hoặc repo bare).
 function worktreeList(root) {
-  const r = spawnSync('git', ['-c', 'core.quotepath=off', 'worktree', 'list', '--porcelain'], { cwd: root, encoding: 'utf8', timeout: 5000, windowsHide: true, maxBuffer: 1 << 20 })
+  const r = runGit(['-c', 'core.quotepath=off', 'worktree', 'list', '--porcelain'], { cwd: root, encoding: 'utf8', timeout: 5000, windowsHide: true, maxBuffer: 1 << 20 })
   if (r.error || r.status !== 0) return []
   const out = []
   for (const l of r.stdout.split(/\r?\n/)) {
@@ -1159,9 +1230,10 @@ function runCli(argv) {
     huy: () => { const a = arg(); return huy(root, typeof a === 'string' ? a : a.ma) },
     close: () => { const a = arg(); return close(root, typeof a === 'string' ? a : a.feature) },
     xong: () => { const a = arg(); return xong(root, typeof a === 'string' ? a : a.feature) },
+    'ghi-so': () => { const a = arg(); return ghiSo(root, a, { branch: branchOf(root) }) },
   }
   try {
-    if (!CMDS[cmd] || !root) throw new Error('dùng: so-chot.mjs <gen|excerpt|ghi|tim|y-tuong|da-xem|huy|close|xong|noi-so> <projectRoot> [json|-]')
+    if (!CMDS[cmd] || !root) throw new Error('dùng: so-chot.mjs <gen|excerpt|ghi|tim|y-tuong|da-xem|huy|close|xong|noi-so|ghi-so> <projectRoot> [json|-]')
     process.stdout.write(`${JSON.stringify(CMDS[cmd]())}\n`)
   } catch (e) {
     process.stderr.write(`lỗi: ${oneLine(e?.message ?? e, 300)}\n`)

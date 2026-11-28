@@ -7,12 +7,17 @@
 //   2. Claude Code: ghép hook (hooks/lib/hostgen.mjs claudeHooks) + permissions.deny chặn đọc file bí mật vào ~/.claude/settings.json.
 //   3. Codex có mặt (~/.codex hoặc $CODEX_HOME tồn tại, hoặc `codex` trên PATH): khối VIBE-FLOW trong AGENTS.md, skill flow-* sang
 //      ~/.agents/skills, ~/.codex/agents/<vai>.toml, ~/.codex/hooks.json; bộ điều phối Codex cũ → ~/.codex/backup-vibe-flow-<thời điểm>/.
-//   4. In việc user cần làm: trust hook trong Codex (/hooks), đăng nhập CLI nào chưa sẵn sàng (hooks/lib/clis.mjs).
+//   4. Antigravity (agy) có mặt (~/.gemini tồn tại hoặc `agy` trên PATH): khối VIBE-FLOW trong ~/.gemini/AGENTS.md (luật kit + từ điển công cụ agy), skill flow-* sang
+//      ~/.gemini/config/skills (skill > 24.000 byte chỉ cảnh báo), ~/.gemini/config/agents/<vai>.md, khoá `vibe-flow` trong ~/.gemini/config/hooks.json (hooks/agy-hook.mjs:
+//      chặn lệnh/ghi file nguy hiểm, nạp sổ tiến độ), máy chủ MCP `so-chot` trong ~/.gemini/config/mcp_config.json (hooks/so-chot-mcp.mjs). Mọi file có sẵn bị sửa/thay đều
+//      được cất bản sao vào ~/.gemini/backup-vibe-flow-<thời điểm>/ trước; GEMINI.md KHÔNG bao giờ bị sửa (chỉ báo); antigravity-cli/settings.json chỉ được THÊM luật chặn đọc file
+//      khoá còn thiếu (read_file(*/.env*), */.dev.vars, */.mcp.json, *.pem, *.key) — không bỏ, không mở luật nào. Ghi đè file có sẵn giữ nguyên quyền truy cập (posix) của file đó.
+//   5. In việc user cần làm: trust hook trong Codex (/hooks), đăng nhập CLI nào chưa sẵn sàng (hooks/lib/clis.mjs).
 // Quy tắc: không xoá file của user (chỉ chuyển vào backup); không in secret; bản do kit sinh ra (có dấu "tự sinh bởi vibe-flow")
 // được cập nhật tại chỗ không cần sao lưu, file trùng tên KHÔNG phải của kit thì sao lưu trước khi thay.
 // Biến môi trường: VIBE_FLOW_NO_LOGIN_CHECK=1 bỏ bước kiểm đăng nhập CLI (CI/kiểm thử);
 //   VIBE_FLOW_PATH_ONLY=1 tìm `codex` chỉ trên PATH, bỏ các thư mục quen /opt/homebrew/bin, /usr/local/bin, ~/.local/bin (kiểm thử "máy không có Codex").
-import { existsSync, readFileSync, writeFileSync, copyFileSync, cpSync, statSync, mkdirSync, readdirSync, renameSync, rmSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, copyFileSync, cpSync, statSync, mkdirSync, readdirSync, renameSync, rmSync, realpathSync, chmodSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { homedir } from 'node:os'
 import { join, dirname, resolve, relative, basename, isAbsolute } from 'node:path'
@@ -36,6 +41,9 @@ export const SECRET_DENY = [
 
 const GENERATED = 'tự sinh bởi vibe-flow'
 const SKILL_MARK = '.vibe-flow-generated'
+const AGY_RULE_LIMIT = 24000 // agy: mỗi file luật / thân SKILL.md tối đa 24.000 byte
+const AGY_MCP_NAME = 'so-chot' // khoá máy chủ MCP sổ chốt trong ~/.gemini/config/mcp_config.json
+const AGY_DENY_ALL = ['command(*)', 'write_file(*)', 'mcp(*)'] // luật permissions.deny của agy làm kit không chạy được
 const LEGACY_HOOK = /worker-wait-hook|orchestration-policy/i
 // Hook của kit đã gỡ (khoá hookKey = script + đối số): cài lại thì bỏ khỏi settings.json / hooks.json của user, mọi đường dẫn, mọi sự kiện.
 // flow-gate.mjs edit: luật chặn sửa thẳng thư mục chính đã bỏ [chốt 2026-11-08, sổ chốt 8kxf6ad3].
@@ -51,10 +59,15 @@ function freePath(p) {
   for (let i = 1; ; i++) if (!existsSync(`${p}.${i}`)) return `${p}.${i}`
 }
 
+// Ghi file tạm rồi đổi tên. File gốc đã có ⇒ GIỮ NGUYÊN quyền truy cập (posix): file tạm tạo ngay với quyền đó (không bao giờ rộng hơn bản gốc kể cả lúc mới tạo)
+// rồi chmod chính xác trước khi đổi tên, để cấu hình chỉ chủ tài khoản đọc (0600: có token MCP, khoá…) không bị cài lại nới thành 0644. Windows không có quyền kiểu này ⇒ bỏ qua.
 function writeAtomic(file, data) {
   mkdirSync(dirname(file), { recursive: true })
+  let mode
+  if (process.platform !== 'win32') { try { mode = statSync(file).mode & 0o7777 } catch { mode = undefined } }
   const tmp = `${file}.${process.pid}.tmp`
-  writeFileSync(tmp, data)
+  writeFileSync(tmp, data, mode === undefined ? undefined : { mode })
+  if (mode !== undefined) chmodSync(tmp, mode)
   renameSync(tmp, file)
 }
 
@@ -155,6 +168,35 @@ export function mergeCodexHooks(existing, kit) {
   }
   for (const [event, groups] of Object.entries(kit.hooks)) hooks[event] = [...(hooks[event] ?? []), ...groups]
   return { json: { ...existing, hooks }, legacy }
+}
+
+// ~/.gemini/config/hooks.json của agy: khoá cấp một = TÊN hook. Kit giữ đúng một khoá (hostgen AGY_HOOK_NAME = `vibe-flow`): thay nguyên khoá đó,
+// mọi khoá khác của user để nguyên (kể cả thứ tự). existing = object đã parse hoặc null.
+export function mergeAgyHooks(existing, kit) {
+  const out = isPlain(existing) ? { ...existing } : {}
+  for (const [name, spec] of Object.entries(kit)) out[name] = spec
+  return out
+}
+
+// ~/.gemini/antigravity-cli/settings.json của agy: bảo đảm permissions.deny có các luật chặn ĐỌC file khoá (AC-04: mở quyền chạy lệnh/ghi file vẫn phải giữ cấm đọc .env, .dev.vars…).
+// Thiếu thì thêm vào cuối; luật có sẵn (deny, allow, ask…) và khoá khác giữ nguyên thứ tự. existing = object đã parse hoặc null (file chưa có).
+export const AGY_SECRET_DENY = ['read_file(*/.env*)', 'read_file(*/.dev.vars)', 'read_file(*/.mcp.json)', 'read_file(*.pem)', 'read_file(*.key)']
+export function mergeAgySettings(existing, rules = AGY_SECRET_DENY) {
+  const out = isPlain(existing) ? structuredClone(existing) : {}
+  if (out.permissions !== undefined && !isPlain(out.permissions)) throw new Error('"permissions" trong settings.json của agy không phải object')
+  const p = (out.permissions ??= {})
+  if (p.deny !== undefined && !Array.isArray(p.deny)) throw new Error('"permissions.deny" trong settings.json của agy không phải danh sách')
+  p.deny ??= []
+  for (const r of rules) if (!p.deny.includes(r)) p.deny.push(r)
+  return out
+}
+
+// ~/.gemini/config/mcp_config.json của agy: {"mcpServers":{<tên>:{command,args}}}. Thêm/thay đúng máy chủ `name`, giữ máy chủ khác và khoá khác ở nguyên chỗ.
+export function mergeAgyMcp(existing, name, server) {
+  const out = isPlain(existing) ? { ...existing } : {}
+  if (out.mcpServers !== undefined && !isPlain(out.mcpServers)) throw new Error('"mcpServers" trong mcp_config.json của agy không phải object')
+  out.mcpServers = { ...(out.mcpServers ?? {}), [name]: server }
+  return out
 }
 
 const MARK = (name) => ({
@@ -358,9 +400,11 @@ export async function install(opts = {}) {
         const md = readFileSync(join(agentsDir, f), 'utf8')
         const name = frontName(md)
         if (!name) throw new Error('thiếu name trong frontmatter')
+        if (roles.roles[name] && !roles.roles[name].models?.codex) continue // vai có trong bảng nhưng không chạy trên Codex (không khai models.codex): bỏ qua êm, không báo; vai không có trong bảng vẫn báo như cũ
         const r = models.resolve('codex', name, resolveOpts)
         for (const w of r.warnings) warned.add(w)
-        tomls.set(name, hostgen.codexAgentToml(md, roles, { model: r.model, effort: r.effort }))
+        const toml = hostgen.codexAgentToml(md, roles, { model: r.model, effort: r.effort })
+        if (toml !== null && toml !== undefined) tomls.set(name, toml) // null = hostgen quyết định vai này không có bản Codex
       } catch (e) {
         notes.push(`Bỏ qua vai ${f.replace(/\.md$/, '')} cho Codex: ${e.message}`)
       }
@@ -462,7 +506,187 @@ export async function install(opts = {}) {
     return true
   }
 
-  // 4. việc user cần làm
+  // 4. Antigravity (agy): luật AGENTS.md, skill flow-*, agent theo vai, hook chặn, MCP sổ chốt — tất cả dưới ~/.gemini (chỉ khi máy có agy hoặc đã có ~/.gemini)
+  const geminiDir = join(home, '.gemini')
+  const agyPresent = existsSync(geminiDir) || Boolean(models.findExe('agy', env, home))
+  if (agyPresent) {
+    try {
+      await installAgy()
+    } catch (e) {
+      problems.push(`Antigravity: ${e.message}`)
+    }
+  }
+
+  async function installAgy() {
+    const tag = 'agy'
+    const backupDir = join(geminiDir, `backup-vibe-flow-${stamp}`)
+    const backupPath = (abs) => {
+      let rel = relative(home, abs)
+      if (rel.startsWith('..') || isAbsolute(rel)) rel = relative(geminiDir, abs)
+      if (rel.startsWith('..') || isAbsolute(rel)) rel = basename(abs)
+      return freePath(join(backupDir, rel))
+    }
+    const toBackup = (abs, move) => {
+      const dest = backupPath(abs)
+      mkdirSync(dirname(dest), { recursive: true })
+      if (move) { try { renameSync(abs, dest) } catch { cpSync(abs, dest, { recursive: true }); rmSync(abs, { recursive: true, force: true }) } } else cpSync(abs, dest, { recursive: true })
+    }
+    const same = (file, data) => existsSync(file) && (Buffer.isBuffer(data) ? readFileSync(file).equals(data) : readFileSync(file, 'utf8') === data)
+
+    // --- tính trước (chưa ghi gì): lỗi ở đây ⇒ bỏ cả phần Antigravity, không ghi nửa chừng ---
+    const claudeMd = join(kitDir, 'CLAUDE.md')
+    if (!existsSync(claudeMd)) throw new Error(`kit thiếu CLAUDE.md (${norm(claudeMd)})`)
+    const rulesDir = join(kitDir, 'rules')
+    const ruleTexts = existsSync(rulesDir)
+      ? readdirSync(rulesDir).filter((f) => f.endsWith('.md')).sort().map((f) => readFileSync(join(rulesDir, f), 'utf8'))
+      : []
+    const block = hostgen.agyAgentsBlock(readFileSync(claudeMd, 'utf8'), ruleTexts)
+    const agentsFile = join(geminiDir, 'AGENTS.md')
+    const agentsBefore = existsSync(agentsFile) ? readFileSync(agentsFile, 'utf8') : null
+    const spliced = spliceAgents(agentsBefore ?? '', block)
+    const agentsBytes = Buffer.byteLength(spliced.text, 'utf8')
+    if (agentsBytes > AGY_RULE_LIMIT) notes.push(`Antigravity: ~/.gemini/AGENTS.md dài ${agentsBytes} byte, vượt ${AGY_RULE_LIMIT} byte/file: agy cắt phần cuối. Rút bớt luật riêng của bạn trong file đó.`)
+
+    // GEMINI.md: file toàn cục của Gemini, agy/IDE nạp cộng dồn với AGENTS.md. Kit KHÔNG sửa/xoá (có thể là luật của dự án khác): chỉ báo.
+    const geminiMd = join(geminiDir, 'GEMINI.md')
+    if (existsSync(geminiMd) && readFileSync(geminiMd, 'utf8').trim()) {
+      notes.push(`Antigravity: ~/.gemini/GEMINI.md có luật không phải của kit (${statSync(geminiMd).size} byte); agy và IDE vẫn nạp nó ở MỌI dự án cùng với luật của kit. Kit không sửa file này. Muốn bỏ: cất bản sao ra chỗ khác rồi xoá nội dung (làm tay một lần).`)
+    }
+
+    const hooksFile = join(geminiDir, 'config', 'hooks.json')
+    const hooksCur = readJsonObject(hooksFile)
+    const hooksNext = mergeAgyHooks(hooksCur.data, hostgen.agyHooksJson(root))
+    const mcpFile = join(geminiDir, 'config', 'mcp_config.json')
+    const mcpCur = readJsonObject(mcpFile)
+    const mcpNext = mergeAgyMcp(mcpCur.data, AGY_MCP_NAME, { command: 'node', args: [`${root}/hooks/so-chot-mcp.mjs`] })
+    // Quyền của agy: bảo đảm có luật chặn ĐỌC file khoá; không bỏ, không mở luật nào của user.
+    const settingsFile = join(geminiDir, 'antigravity-cli', 'settings.json')
+    const settingsCur = readJsonObject(settingsFile)
+    const settingsNext = mergeAgySettings(settingsCur.data)
+
+    const roles = models.loadRoles(join(kitDir, 'kit', 'roles.json'))
+    const agentFiles = new Map()
+    const kitAgentsDir = join(kitDir, 'agents')
+    for (const f of existsSync(kitAgentsDir) ? readdirSync(kitAgentsDir).filter((x) => x.endsWith('.md')).sort() : []) {
+      try {
+        const md = readFileSync(join(kitAgentsDir, f), 'utf8')
+        const name = frontName(md)
+        if (!name) throw new Error('thiếu name trong frontmatter')
+        agentFiles.set(name, hostgen.agyAgentMd(md, roles))
+      } catch (e) {
+        notes.push(`Bỏ qua vai ${f.replace(/\.md$/, '')} cho Antigravity: ${e.message}`)
+      }
+    }
+
+    const skillsSrc = join(kitDir, 'skills')
+    const skills = existsSync(skillsSrc)
+      ? readdirSync(skillsSrc, { withFileTypes: true }).filter((e) => e.isDirectory() && e.name.startsWith('flow-')).map((e) => e.name).sort()
+      : []
+    for (const name of skills) {
+      const skillMd = join(skillsSrc, name, 'SKILL.md')
+      const bytes = existsSync(skillMd) ? statSync(skillMd).size : 0
+      if (bytes > AGY_RULE_LIMIT) notes.push(`Antigravity: skill ${name} dài ${bytes} byte, vượt ${AGY_RULE_LIMIT} byte (24 KB): agy sẽ cảnh báo/cắt. Đã chép nguyên bản; nên rút gọn hoặc chuyển bớt sang references/.`)
+    }
+
+    // --- ghi ---
+    mkdirSync(geminiDir, { recursive: true })
+    let n = 0
+
+    // AGENTS.md
+    if (agentsBefore === null || spliced.text !== agentsBefore) {
+      if (agentsBefore !== null) toBackup(agentsFile, false)
+      writeAtomic(agentsFile, spliced.text)
+      changed.push(`${tag}: AGENTS.md`)
+      n++
+    }
+
+    // skill sang ~/.gemini/config/skills
+    const skillsDest = join(geminiDir, 'config', 'skills')
+    for (const name of skills) {
+      const src = join(skillsSrc, name)
+      const dest = join(skillsDest, name)
+      const hadMark = existsSync(join(dest, SKILL_MARK))
+      if (existsSync(dest) && !hadMark) { toBackup(dest, true); changed.push(`${tag}: cất skill ${name} có sẵn vào ${basename(backupDir)}`) }
+      const files = listFiles(src)
+      let wrote = false
+      for (const f of files) {
+        const data = readFileSync(f.abs)
+        const out = join(dest, f.rel)
+        if (!same(out, data)) { writeAtomic(out, data); wrote = true }
+      }
+      const mark = join(dest, SKILL_MARK)
+      if (!existsSync(mark)) { writeAtomic(mark, `${GENERATED} — đừng sửa tay\n`); wrote = true }
+      if (hadMark) {
+        const keep = new Set([...files.map((f) => f.rel), SKILL_MARK])
+        for (const f of listFiles(dest)) if (!keep.has(f.rel)) { toBackup(f.abs, true); wrote = true }
+      }
+      if (wrote) { changed.push(`${tag}: skill ${name}`); n++ }
+    }
+    if (existsSync(skillsDest)) {
+      for (const e of readdirSync(skillsDest, { withFileTypes: true })) {
+        if (e.isDirectory() && !skills.includes(e.name) && existsSync(join(skillsDest, e.name, SKILL_MARK))) {
+          toBackup(join(skillsDest, e.name), true)
+          changed.push(`${tag}: cất skill ${e.name} (đã bỏ khỏi kit) vào ${basename(backupDir)}`)
+          n++
+        }
+      }
+    }
+
+    // agent theo vai
+    const agentsDest = join(geminiDir, 'config', 'agents')
+    for (const [name, mdText] of agentFiles) {
+      const file = join(agentsDest, `${name}.md`)
+      if (same(file, mdText)) continue
+      if (existsSync(file) && !readFileSync(file, 'utf8').includes(GENERATED)) toBackup(file, false)
+      writeAtomic(file, mdText)
+      changed.push(`${tag}: vai ${name}`)
+      n++
+    }
+    if (existsSync(agentsDest)) {
+      for (const f of readdirSync(agentsDest).filter((x) => x.endsWith('.md'))) {
+        if (agentFiles.has(f.replace(/\.md$/, ''))) continue
+        if (readFileSync(join(agentsDest, f), 'utf8').includes(GENERATED)) {
+          toBackup(join(agentsDest, f), true)
+          changed.push(`${tag}: cất vai ${f} (đã bỏ khỏi kit) vào ${basename(backupDir)}`)
+          n++
+        }
+      }
+    }
+
+    // hooks.json
+    if (!hooksCur.exists || JSON.stringify(hooksCur.data) !== JSON.stringify(hooksNext)) {
+      if (hooksCur.exists) toBackup(hooksFile, false)
+      writeAtomic(hooksFile, JSON.stringify(hooksNext, null, 2) + '\n')
+      changed.push(`${tag}: hooks.json`)
+      n++
+    }
+
+    // mcp_config.json
+    if (!mcpCur.exists || JSON.stringify(mcpCur.data) !== JSON.stringify(mcpNext)) {
+      if (mcpCur.exists) toBackup(mcpFile, false)
+      writeAtomic(mcpFile, JSON.stringify(mcpNext, null, 2) + '\n')
+      changed.push(`${tag}: mcp_config.json`)
+      n++
+    }
+
+    // antigravity-cli/settings.json: chỉ khi thiếu luật chặn đọc file khoá (đủ rồi thì không ghi lại, giữ nguyên từng byte)
+    if (!settingsCur.exists || JSON.stringify(settingsCur.data) !== JSON.stringify(settingsNext)) {
+      if (settingsCur.exists) toBackup(settingsFile, false)
+      writeAtomic(settingsFile, JSON.stringify(settingsNext, null, 2) + '\n')
+      changed.push(`${tag}: antigravity-cli/settings.json`)
+      n++
+    }
+
+    say(n ? `Antigravity: đã cập nhật (luật AGENTS.md, ${skills.length} skill, ${agentFiles.size} vai, hook chặn, MCP sổ chốt).` : 'Antigravity: đã đủ, không đổi gì.')
+    if (existsSync(backupDir)) say(`Bản sao file cũ của ~/.gemini nằm trong ${norm(backupDir)} (không xoá).`)
+
+    // Quyền của agy: đang chặn chạy lệnh/ghi file/MCP thì kit chưa chạy được ở agy. Mở quyền là bước riêng sau khi kiểm lớp chặn thật — installer chỉ THÊM luật chặn đọc file khoá, không mở gì.
+    const blockedKinds = AGY_DENY_ALL.filter((r) => settingsNext.permissions.deny.includes(r))
+    if (blockedKinds.length) notes.push(`Antigravity: ~/.gemini/antigravity-cli/settings.json đang chặn ${blockedKinds.join(', ')} nên agy chưa chạy lệnh/ghi file/dùng sổ chốt được. Kit không tự mở quyền; mở sau khi đã kiểm lớp chặn bằng agy -p.`)
+    notes.push('Antigravity IDE (app) có cấu hình riêng ở ~/.gemini/antigravity-ide: kit chưa ghi vào đó; luật AGENTS.md thì IDE cũng đọc, còn hook/MCP/skill chưa kiểm.')
+  }
+
+  // 5. việc user cần làm
   // Mỗi tài khoản Codex trust hook riêng ⇒ nêu đúng tài khoản có hook vừa đổi (kể cả khi tài khoản chính lỗi).
   const trustAccounts = changed.filter((c) => /^codex.*: hooks\.json$/.test(c)).map((c) => /tài khoản ([^)]+)\)/.exec(c)?.[1] ?? '1')
   if (codexPresent && trustAccounts.length) {

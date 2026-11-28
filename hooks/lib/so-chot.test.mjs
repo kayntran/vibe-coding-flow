@@ -1700,3 +1700,185 @@ describe('CLI', () => {
     assert.equal(exists(root, '.claude'), false)
   })
 })
+
+// ---------- ghi_so: sửa đầu sổ tiến độ đang mở (một nguồn cho mod Claude và MCP của Antigravity) ----------
+
+describe('ghiSo / withField / soTienDoDangMo / branchOf', () => {
+  const NOT_OPEN = /Dự án không có sổ tiến độ đang mở/
+
+  test('withField (giữ đúng cách chèn của mod cũ): thay dòng có sẵn; chưa có ⇒ chèn sau dòng đầu tiên là tiêu đề / Trạng thái / Bước tiếp theo; không neo ⇒ lên đầu; giữ CRLF', () => {
+    assert.equal(L.withField('# T\nPha: 1\nTrạng thái: đang làm\n', 'Pha', '4 · thi công'), '# T\nPha: 4 · thi công\nTrạng thái: đang làm\n')
+    assert.equal(L.withField('# T\nTrạng thái: đang làm\n', 'Pha', '3'), '# T\nPha: 3\nTrạng thái: đang làm\n')
+    assert.equal(L.withField('Trạng thái: đang làm\nGhi chú\n', 'Pha', '3'), 'Trạng thái: đang làm\nPha: 3\nGhi chú\n')
+    assert.equal(L.withField('Ghi chú\n', 'Pha', '3'), 'Pha: 3\nGhi chú\n')
+    assert.equal(L.withField('# T\r\nTrạng thái: đang làm\r\n', 'Pha', '3'), '# T\r\nPha: 3\r\nTrạng thái: đang làm\r\n')
+  })
+
+  test('không có docs/specs, hoặc mọi sổ đã xong ⇒ báo lỗi, không ghi gì', () => {
+    const root = repo()
+    assert.equal(L.soTienDoDangMo(root), null)
+    assert.throws(() => L.ghiSo(root, { pha: '5' }), NOT_OPEN)
+    const done = spec(root, 'da-xong', '# x\nTrạng thái: xong\n')
+    const before = fs.readFileSync(done, 'utf8')
+    assert.equal(L.soTienDoDangMo(root), null)
+    assert.throws(() => L.ghiSo(root, { pha: '5' }), NOT_OPEN)
+    assert.equal(fs.readFileSync(done, 'utf8'), before)
+  })
+
+  test('có sổ mở nhưng không truyền trường nào (hoặc toàn rỗng / không phải chuỗi) ⇒ "Không có trường nào để đổi."', () => {
+    const root = repo()
+    const f = spec(root, 'dang-lam', '# x\nTrạng thái: đang làm\n')
+    const before = fs.readFileSync(f, 'utf8')
+    for (const input of [{}, undefined, null, { pha: '' }, { pha: '   ', trang_thai: 5 }, { buoc_tiep_theo: ['a'] }]) {
+      assert.throws(() => L.ghiSo(root, input), /Không có trường nào để đổi\./, JSON.stringify(input))
+    }
+    assert.equal(fs.readFileSync(f, 'utf8'), before)
+  })
+
+  test('đổi đủ ba trường: thứ tự Trạng thái → Bước tiếp theo → Pha; phần còn lại của sổ nguyên vẹn', () => {
+    const root = repo()
+    const f = spec(root, '2026-11-01-a', '# Tiến độ: a\nTrạng thái: đang làm\nPha: 3\nBước tiếp theo: viết test\n\n## Ghi chú\nKhông đụng vào đây.\n')
+    const d = L.ghiSo(root, { pha: ' 4 · thi công ', trang_thai: 'đang làm (review)', buoc_tiep_theo: 'chạy bộ test' })
+    assert.deepEqual(d.changed, ['Trạng thái: đang làm (review)', 'Bước tiếp theo: chạy bộ test', 'Pha: 4 · thi công'])
+    assert.equal(d.feature, '2026-11-01-a')
+    assert.equal(d.rel, 'docs/specs/2026-11-01-a/progress.md')
+    assert.equal(d.file, f)
+    assert.equal(fs.readFileSync(f, 'utf8'), '# Tiến độ: a\nTrạng thái: đang làm (review)\nPha: 4 · thi công\nBước tiếp theo: chạy bộ test\n\n## Ghi chú\nKhông đụng vào đây.\n')
+    assert.deepEqual(fs.readdirSync(path.dirname(f)).sort(), ['progress.md'], 'không để lại file tạm')
+  })
+
+  test('chỉ trường được truyền mới đổi; trường chưa có thì thêm; trang_thai "xong" đóng sổ (parseProgress thấy xong, không còn là sổ mở)', () => {
+    const root = repo()
+    const f = spec(root, 'viec', '# viec\nTrạng thái: đang làm\n')
+    L.ghiSo(root, { buoc_tiep_theo: 'gộp' })
+    assert.equal(fs.readFileSync(f, 'utf8'), '# viec\nBước tiếp theo: gộp\nTrạng thái: đang làm\n')
+    const d = L.ghiSo(root, { trang_thai: 'xong' })
+    assert.deepEqual(d.changed, ['Trạng thái: xong'])
+    assert.equal(L.parseProgress(fs.readFileSync(f, 'utf8')).state, 'xong')
+    assert.equal(L.soTienDoDangMo(root), null)
+    assert.throws(() => L.ghiSo(root, { pha: '9' }), NOT_OPEN)
+  })
+
+  test('giá trị nhiều dòng bị gom về một dòng: không chèn được dòng "Trạng thái: xong" giả', () => {
+    const root = repo()
+    const f = spec(root, 'viec', '# viec\nTrạng thái: đang làm\n')
+    L.ghiSo(root, { buoc_tiep_theo: 'làm A\nTrạng thái: xong' })
+    const text = fs.readFileSync(f, 'utf8')
+    assert.equal(text.split('\n').filter((l) => l.startsWith('Trạng thái:')).length, 1)
+    assert.equal(L.parseProgress(text).state, 'dang-lam')
+  })
+
+  test('giữ CRLF và BOM của file', () => {
+    const root = repo()
+    const f = spec(root, 'crlf', '﻿# crlf\r\nTrạng thái: đang làm\r\nPha: 1\r\n')
+    L.ghiSo(root, { pha: '2', buoc_tiep_theo: 'x' })
+    assert.equal(fs.readFileSync(f, 'utf8'), '﻿# crlf\r\nBước tiếp theo: x\r\nTrạng thái: đang làm\r\nPha: 2\r\n')
+  })
+
+  test('nhiều sổ mở: không biết nhánh ⇒ sổ sửa gần nhất; biết nhánh ⇒ sổ ghi đúng nhánh đó dù cũ hơn', () => {
+    const root = repo()
+    const cu = spec(root, 'a-cu', '# a\nTrạng thái: đang làm\nNhánh / worktree: feat/a\n', 5)
+    const moi = spec(root, 'b-moi', '# b\nTrạng thái: đang làm\nNhánh / worktree: feat/b\n', 0)
+    assert.equal(L.soTienDoDangMo(root).feature, 'b-moi')
+    assert.equal(L.soTienDoDangMo(root, { branch: 'feat/a' }).feature, 'a-cu')
+    assert.equal(L.soTienDoDangMo(root, { branch: 'nhanh-la' }).feature, 'b-moi', 'nhánh không có sổ ⇒ rơi về sổ mở gần nhất')
+    L.ghiSo(root, { pha: '8' })
+    assert.match(fs.readFileSync(moi, 'utf8'), /Pha: 8/)
+    assert.doesNotMatch(fs.readFileSync(cu, 'utf8'), /Pha:/)
+    L.ghiSo(root, { pha: '7' }, { branch: 'feat/a' })
+    assert.match(fs.readFileSync(cu, 'utf8'), /Pha: 7/)
+    assert.doesNotMatch(fs.readFileSync(moi, 'utf8'), /Pha: 7/)
+  })
+
+  test('hai dự án hai sổ: ghi ở A không đụng B', () => {
+    const a = repo('a')
+    const b = repo('b')
+    const fb = spec(b, 'viec', '# b\nTrạng thái: đang làm\n')
+    spec(a, 'viec', '# a\nTrạng thái: đang làm\n')
+    const before = snap(b)
+    L.ghiSo(a, { pha: '5' })
+    assert.deepEqual(snap(b), before)
+    assert.doesNotMatch(fs.readFileSync(fb, 'utf8'), /Pha:/)
+  })
+
+  test('đứng ở thư mục con của repo: vẫn sửa sổ của gốc repo', () => {
+    const root = repo()
+    const f = spec(root, 'viec', '# viec\nTrạng thái: đang làm\n')
+    const con = path.join(root, 'src', 'deep')
+    fs.mkdirSync(con, { recursive: true })
+    L.ghiSo(con, { pha: '6' })
+    assert.match(fs.readFileSync(f, 'utf8'), /Pha: 6/)
+  })
+
+  test('file sổ quá lớn (> 2 MB) ⇒ không sửa, nội dung nguyên vẹn', () => {
+    const root = repo()
+    const f = spec(root, 'lon', '# lon\nTrạng thái: đang làm\n')
+    fs.appendFileSync(f, 'x'.repeat(2 * 1024 * 1024 + 10))
+    const before = sha(fs.readFileSync(f))
+    assert.throws(() => L.ghiSo(root, { pha: '1' }), /không sửa được docs\/specs\/lon\/progress\.md/)
+    assert.equal(sha(fs.readFileSync(f)), before)
+  })
+
+  test('allow: bên gọi chặn việc leo lên gốc repo cha — thư mục con thiếu docs/specs mà allow(gốc) = false ⇒ KHÔNG đụng sổ của gốc; allow(gốc) = true hoặc không truyền ⇒ như cũ', () => {
+    const root = repo()
+    const prog = spec(root, 'viec', '# v\nTrạng thái: đang làm\n')
+    const sub = path.join(root, 'apps', 'web')
+    fs.mkdirSync(sub, { recursive: true })
+    const before = fs.readFileSync(prog, 'utf8')
+    const asked = []
+    assert.equal(L.soTienDoDangMo(sub, { allow: (d) => { asked.push(d); return false } }), null)
+    assert.deepEqual(asked.map((d) => fs.realpathSync(d)), [fs.realpathSync(root)], 'allow được hỏi đúng một lần, với gốc repo định leo tới')
+    assert.throws(() => L.ghiSo(sub, { trang_thai: 'xong' }, { allow: () => false }), NOT_OPEN)
+    assert.equal(fs.readFileSync(prog, 'utf8'), before, 'sổ ở gốc không bị đổi')
+    assert.equal(L.soTienDoDangMo(sub, { allow: () => true })?.feature, 'viec')
+    assert.equal(L.soTienDoDangMo(sub)?.feature, 'viec')
+    L.ghiSo(sub, { pha: '7' }, { allow: (d) => fs.realpathSync(d) === fs.realpathSync(root) })
+    assert.match(fs.readFileSync(prog, 'utf8'), /Pha: 7/)
+    // thư mục con CÓ docs/specs riêng thì không cần leo, allow không bị hỏi
+    const own = spec(sub, 'rieng', '# r\nTrạng thái: đang làm\n')
+    let called = false
+    L.ghiSo(sub, { pha: '3' }, { allow: () => { called = true; return false } })
+    assert.equal(called, false)
+    assert.match(fs.readFileSync(own, 'utf8'), /Pha: 3/)
+  })
+
+  test('branchOf: repo chưa có commit / thư mục không phải repo / HEAD tách ⇒ null; có nhánh ⇒ tên nhánh', () => {
+    const root = repo()
+    assert.equal(L.branchOf(root), null)
+    write(root, 'a.txt', 'a\n')
+    gitOk(root, 'add', '-A')
+    gitOk(root, 'commit', '-q', '-m', 'init')
+    assert.equal(L.branchOf(root), 'main')
+    gitOk(root, 'checkout', '-q', '-b', 'feat/x')
+    assert.equal(L.branchOf(root), 'feat/x')
+    gitOk(root, 'checkout', '-q', '--detach')
+    assert.equal(L.branchOf(root), null)
+    const plain = path.join(TMP, `khong-git-${++seq}`)
+    fs.mkdirSync(plain)
+    assert.equal(L.branchOf(plain), null)
+  })
+
+  test('CLI ghi-so: in JSON, dùng nhánh git hiện tại để chọn sổ; không có sổ ⇒ exit 1 + một dòng stderr', () => {
+    const run = (cmd, root, arg) => spawnSync(process.execPath, [SCRIPT, cmd, root, arg], { encoding: 'utf8' })
+    const root = repo()
+    write(root, 'a.txt', 'a\n')
+    gitOk(root, 'add', '-A')
+    gitOk(root, 'commit', '-q', '-m', 'init')
+    gitOk(root, 'checkout', '-q', '-b', 'feat/a')
+    const cu = spec(root, 'a-cu', '# a\nTrạng thái: đang làm\nNhánh / worktree: feat/a\n', 5)
+    spec(root, 'b-moi', '# b\nTrạng thái: đang làm\nNhánh / worktree: feat/b\n', 0)
+    const ok = run('ghi-so', root, JSON.stringify({ pha: '6 · QA', trang_thai: 'đang làm' }))
+    assert.equal(ok.status, 0, ok.stderr)
+    const out = JSON.parse(ok.stdout)
+    assert.deepEqual(out.changed, ['Trạng thái: đang làm', 'Pha: 6 · QA'])
+    assert.equal(out.feature, 'a-cu')
+    assert.match(fs.readFileSync(cu, 'utf8'), /Pha: 6 · QA/)
+    const bad = run('ghi-so', repo(), JSON.stringify({ pha: '1' }))
+    assert.equal(bad.status, 1)
+    assert.equal(bad.stdout, '')
+    assert.match(bad.stderr, /^lỗi: Dự án không có sổ tiến độ đang mở[^\n]*\n$/)
+    const none = run('ghi-so', root, '{}')
+    assert.equal(none.status, 1)
+    assert.match(none.stderr, /^lỗi: Không có trường nào để đổi\.\n$/)
+  })
+})

@@ -847,11 +847,13 @@ async function gateDeps(g, sawAdd) {
 }
 
 // Chạy một cổng; lỗi nội bộ ⇒ ghi log và coi như cho qua (vẫn xét các cổng/đoạn lệnh sau).
-function safely(name, fn) {
+// strict (chỉ hooks/agy-hook.mjs bật, qua hookBash(input, { strict: true })): lỗi ném tiếp ra ngoài để lớp gọi chặn theo kiểu fail-closed.
+function safely(name, fn, strict = false) {
   try {
     return fn()
   } catch (e) {
     log(`${name}: ${e?.stack ?? e}`)
+    if (strict) throw e
     return null
   }
 }
@@ -884,7 +886,7 @@ const SEARCH_NUDGE = {
 // hệ thống, thư mục cá nhân hoặc .git (cùng luật với mod chan-nguy-hiem [bfv3]); thư mục tạm, nháp, test, build, worktree cho qua.
 const CMD_WRAPPERS = new Set(['sudo', 'command', 'builtin', 'exec', 'env', 'time', 'nice', 'nohup'])
 // Dạng chuẩn: gạch chéo xuôi, chữ thường, bỏ nháy, bỏ gạch cuối, thư mục nhà thành "~".
-function normPath(raw, home) {
+export function normPath(raw, home) {
   let p = raw.replace(/^['"]|['"]$/g, '').replace(/\\/g, '/').trim()
   p = p.replace(/^(\$home|\$env:userprofile|%userprofile%|\$\{home\})(?=\/|$)/i, '~')
   const h = home.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
@@ -910,7 +912,7 @@ const SYS_UNDER = [
 ]
 // "$X/" hoặc "$X/*" với X chưa rõ: X rỗng là gốc ổ đĩa.
 const BARE_VAR = /^\$\{?\w+\}?\/?\*?$/
-function systemTarget(raw, home = os.homedir()) {
+export function systemTarget(raw, home = os.homedir()) {
   const bare = raw.replace(/['"]/g, '')
   if (BARE_VAR.test(bare) && !/^\$\{?(home|tmp|temp|tmpdir)\}?/i.test(bare)) return raw
   const p = normPath(raw, home)
@@ -1022,17 +1024,20 @@ const DB_WIPE_DENY = (what) => denyWithExit(
   `Lệnh này ${what}, dữ liệu mất thì không lấy lại được nên AI không chạy. ` +
   'Kể user bằng lời: database nào (bản thử hay bản thật), mất những gì, đã sao lưu chưa; user gật thì chạy lại.')
 
-async function hookBash(input) {
+// opts.strict (chỉ hooks/agy-hook.mjs bật): lỗi nội bộ của các cổng CÓ THỂ chặn không bị nuốt mà ném ra, để bên gọi chặn theo kiểu fail-closed.
+// Cổng chỉ nhắc (gateMerge, gateDeps) vẫn nuốt lỗi như cũ. Không truyền opts ⇒ hành vi y như trước (lỗi ⇒ cho qua).
+export async function hookBash(input, { strict = false } = {}) {
+  const guard = (name, fn) => safely(name, fn, strict)
   const n = normalize(input, process.env)
   const cmd = n.command ?? input.tool_input?.command
   if (typeof cmd !== 'string') return null
   // Lối ra của mọi lời chặn: user đã gật trong chat ⇒ AI chạy lại lệnh với tiền tố FLOW_OK=1 ⇒ cho qua mọi cổng, chỉ ghi dấu vết.
   if (/\bFLOW_OK=/.test(cmd)) { logApproval(cmd); return null }
-  const vague = safely('varDelete', () => unresolvedInLine(cmd))
+  const vague = guard('varDelete', () => unresolvedInLine(cmd))
   if (vague) return VAR_DELETE_DENY(vague)
-  const del = safely('dirDelete', () => tokenize(expandSetVars(cmd)).map((t) => deletesDir(t, 0, n.cwd ? toNative(n.cwd) : null)).find(Boolean))
+  const del = guard('dirDelete', () => tokenize(expandSetVars(cmd)).map((t) => deletesDir(t, 0, n.cwd ? toNative(n.cwd) : null)).find(Boolean))
   if (del) return del.cwd ? CWD_DELETE_DENY(del.target) : DIR_DELETE_DENY(del.target)
-  const dbHit = safely('dbWipe', () => dbWipe(tokenize(cmd).map((t) => t.join(' ')).join('\n')))
+  const dbHit = guard('dbWipe', () => dbWipe(tokenize(cmd).map((t) => t.join(' ')).join('\n')))
   if (dbHit) return DB_WIPE_DENY(dbHit)
   const nudge = SLOW_SEARCH.test(cmd) ? SEARCH_NUDGE : null
   if (!GIT_WORDS.test(cmd)) return nudge
@@ -1054,13 +1059,13 @@ async function hookBash(input) {
       const m = parseGitMerge(g)
       if (m) gates.push(() => safelyAsync('gateMerge', () => gateMerge(m)))
     } else if (g.sub === 'commit') {
-      gates.push(() => safely(`gateSecrets ${g.sub}`, () => gateSecrets(g)), () => safelyAsync('gateDeps', () => gateDeps(g, sawAdd)))
+      gates.push(() => guard(`gateSecrets ${g.sub}`, () => gateSecrets(g)), () => safelyAsync('gateDeps', () => gateDeps(g, sawAdd)))
     } else if (g.sub === 'push') {
       // push thường lên nhánh chính: cho qua, không hỏi [chốt 2026-10-14]; chỉ chặn secret, push ép, xoá nhánh chính
-      gates.push(() => safely(`gateSecrets ${g.sub}`, () => gateSecrets(g)), () => safely('gateForcePush', () => gateForcePush(g)),
-        () => safely('gateDeleteMainPush', () => gateDeleteMainPush(g)))
+      gates.push(() => guard(`gateSecrets ${g.sub}`, () => gateSecrets(g)), () => guard('gateForcePush', () => gateForcePush(g)),
+        () => guard('gateDeleteMainPush', () => gateDeleteMainPush(g)))
     } else if (DESTRUCTIVE_SUBS.has(g.sub)) {
-      gates.push(() => safely(`gateDestructive ${g.sub}`, () => gateDestructive(g)))
+      gates.push(() => guard(`gateDestructive ${g.sub}`, () => gateDestructive(g)))
     }
     for (const gate of gates) {
       const out = await gate()
@@ -1128,7 +1133,7 @@ function stampTestRunning(info, pid) {
   return alive
 }
 
-async function hookStop(input) {
+export async function hookStop(input) {
   if (input.stop_hook_active) return null
   const info = repoInfo(input.cwd || process.cwd())
   if (!info || !info.linked) return null
@@ -1428,8 +1433,14 @@ async function cliStatus() {
 
 const HOOKS = { edit: () => null, bash: hookBash, stop: hookStop, 'subagent-stop': hookSubagentStop } // edit: hook cũ còn trong settings.json của user — nhận và bỏ qua
 const [, , mode, arg1, arg2] = process.argv
+// Bị import (hooks/agy-hook.mjs dùng hookBash/hookStop/systemTarget) thì chỉ cung cấp hàm, không đọc stdin / không chạy lệnh CLI.
+const isEntry = (() => {
+  try { return Boolean(process.argv[1]) && fs.realpathSync(path.resolve(process.argv[1])) === fs.realpathSync(fileURLToPath(import.meta.url)) } catch { return false }
+})()
 
-if (HOOKS[mode]) {
+if (!isEntry) {
+  // chỉ import
+} else if (HOOKS[mode]) {
   try {
     const out = await HOOKS[mode](JSON.parse(fs.readFileSync(0, 'utf8').replace(/^\uFEFF/, '')))
     if (out) process.stdout.write(JSON.stringify(out))
