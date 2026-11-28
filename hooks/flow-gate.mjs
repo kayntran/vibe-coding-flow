@@ -901,7 +901,7 @@ const SYS_WHOLE = [
 ]
 // Mọi thứ nằm ở hoặc dưới các chỗ này.
 const SYS_UNDER = [
-  /^[a-z]:\/(windows|program files|program files \(x86\)|programdata|\$recycle\.bin|system volume information|recovery|boot)(\/|$)/,
+  /^[a-z]:\/(windows(?!\/temp\/)|program files|program files \(x86\)|programdata|\$recycle\.bin|system volume information|recovery|boot)(\/|$)/,
   /^\/(usr|bin|sbin|etc|boot|lib|lib64|system|library|applications|opt)(\/|$)/,
   /^\/private\/(?!tmp(\/|$)|var\/folders(\/|$))/,
   /^\/var\/(?!folders(\/|$)|tmp(\/|$))/,
@@ -969,14 +969,71 @@ const DIR_DELETE_DENY = (target) => denyWithExit(
   `Đích: ${target} (ổ gốc, thư mục Windows/Program Files, thư mục nhà, khoá SSH hoặc lịch sử .git); thư mục tạm, nháp, test, build, worktree thì xoá bình thường được. ` +
   'Kiểm lại đường dẫn (biến rỗng ⇒ thành gốc ổ). Thật sự cần ⇒ kể user sẽ mất gì, user gật thì chạy lại.')
 
+// Đích xoá Claude Code không đoán trước được ⇒ nó tự bật hộp hỏi không tắt được ⇒ chặn trước, AI viết lại bằng đường dẫn đầy đủ:
+// biến chưa rõ, $(...)/`...`; hoặc *, ?, ., .. tương đối đứng sau một lệnh cd trong cùng lệnh.
+const CD_WORD = /^(cd|pushd|popd|set-location|sl|chdir)$/i
+function unresolvedDeleteTarget(toks, depth = 0, afterCd = false) {
+  if (depth > 4) return null
+  let k = 0
+  while (k < toks.length && (/^[A-Za-z_]\w*=/.test(toks[k]) || CMD_WRAPPERS.has(baseCmd(toks[k])))) k++
+  const name = baseCmd(toks[k] ?? '').toLowerCase()
+  const rest = toks.slice(k + 1)
+  if (SHELL_RUNNERS.test(name)) {
+    const inner = rest.filter((t, i) => i >= rest.findIndex((x) => !/^[-/]/.test(x))).join(' ')
+    return unresolvedInLine(inner, depth + 1, afterCd)
+  }
+  if (!/^(rm|rmdir)$/.test(name)) return null
+  const args = rest.filter((t) => !/^-/.test(t))
+  return args.find((t) => /[$`]/.test(t)) ??
+    (afterCd ? args.find((t) => !/^([/~]|[A-Za-z]:)/.test(t) && (/[*?]/.test(t) || /^\.\.?\/?$/.test(t))) : null) ?? null
+}
+function unresolvedInLine(line, depth = 0, afterCd = false) {
+  for (const t of tokenize(expandSetVars(line))) {
+    if (CD_WORD.test(t[0] ?? '')) { afterCd = true; continue }
+    const hit = unresolvedDeleteTarget(t, depth, afterCd)
+    if (hit) return hit
+  }
+  return null
+}
+const VAR_DELETE_DENY = (target) => permission('deny',
+  'Lệnh xoá có đích Claude Code không đoán trước được nên nó sẽ bật hộp hỏi bạn, AI viết lại lệnh thay vì chạy. ' +
+  `Đích: ${target}. Ghi đường dẫn đầy đủ, cụ thể (vd rm -f /d/tmp/x/* thay cho cd /d/tmp/x && rm -f *; biến thì chạy riêng một lệnh in giá trị trước, ` +
+  'hoặc gán T=<đường dẫn> && rm -rf $T trong cùng lệnh). Không dùng FLOW_OK cho việc này (hộp hỏi vẫn bật).')
+
+// Xoá dữ liệu cơ sở dữ liệu (thay mod chan-nguy-hiem, không bật hộp hỏi): SQL chỉ xét khi lệnh gửi tới một client DB.
+const DB_CLIENT = /\b(psql|mysql|mariadb|sqlite3|sqlcmd|duckdb|mongosh|supabase|prisma|drizzle-kit|turso|wrangler\s+d1|knex|sequelize)\b/i
+const DB_WIPE = [
+  [/\bsupabase\s+db\s+reset\b/i, 'xoá sạch database rồi dựng lại (Supabase)'],
+  [/\bprisma\s+migrate\s+reset\b/i, 'xoá sạch database (Prisma)'],
+  [/\bdrizzle-kit\s+push\b[^|;&]*--force/i, 'ép ghi đè cấu trúc database (Drizzle)'],
+  [/\b(format|diskpart)\b\s+[a-z]:/i, 'định dạng ổ đĩa'],
+]
+const SQL_WIPE = [
+  [/\bdrop\s+(table|database|schema)\b/i, 'xoá bảng hoặc cả database (DROP)'],
+  [/\btruncate\b/i, 'xoá sạch dữ liệu trong bảng (TRUNCATE)'],
+  [/\bdelete\s+from\s+[\w."]+\s*(;|$|["'])/im, 'xoá mọi dòng trong bảng (DELETE không có WHERE)'],
+  [/\balter\s+table\b[^;]*\bdrop\s+column\b/i, 'xoá cột trong bảng'],
+]
+function dbWipe(cmd) {
+  const hit = DB_WIPE.find(([re]) => re.test(cmd)) ?? (DB_CLIENT.test(cmd) ? SQL_WIPE.find(([re]) => re.test(cmd)) : null)
+  return hit ? hit[1] : null
+}
+const DB_WIPE_DENY = (what) => denyWithExit(
+  `Lệnh này ${what}, dữ liệu mất thì không lấy lại được nên AI không chạy. ` +
+  'Kể user bằng lời: database nào (bản thử hay bản thật), mất những gì, đã sao lưu chưa; user gật thì chạy lại.')
+
 async function hookBash(input) {
   const n = normalize(input, process.env)
   const cmd = n.command ?? input.tool_input?.command
   if (typeof cmd !== 'string') return null
   // Lối ra của mọi lời chặn: user đã gật trong chat ⇒ AI chạy lại lệnh với tiền tố FLOW_OK=1 ⇒ cho qua mọi cổng, chỉ ghi dấu vết.
   if (/\bFLOW_OK=/.test(cmd)) { logApproval(cmd); return null }
+  const vague = safely('varDelete', () => unresolvedInLine(cmd))
+  if (vague) return VAR_DELETE_DENY(vague)
   const del = safely('dirDelete', () => tokenize(expandSetVars(cmd)).map((t) => deletesDir(t, 0, n.cwd ? toNative(n.cwd) : null)).find(Boolean))
   if (del) return del.cwd ? CWD_DELETE_DENY(del.target) : DIR_DELETE_DENY(del.target)
+  const dbHit = safely('dbWipe', () => dbWipe(tokenize(cmd).map((t) => t.join(' ')).join('\n')))
+  if (dbHit) return DB_WIPE_DENY(dbHit)
   const nudge = SLOW_SEARCH.test(cmd) ? SEARCH_NUDGE : null
   if (!GIT_WORDS.test(cmd)) return nudge
   let cwd = path.resolve(toNative(n.cwd))

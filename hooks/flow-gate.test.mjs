@@ -2379,14 +2379,14 @@ describe('ghi nội dung file qua lệnh shell ⇒ không chặn, kể cả nộ
 
 describe('xoá thư mục hệ thống/cá nhân/.git ⇒ chặn (có lối ra FLOW_OK=1); thư mục tạm, build, test, worktree ⇒ cho qua [bfv3]', () => {
   const mustDeny = [
-    'rm -rf /', 'rm -rf /*', 'rm -rf ~', 'rm -rf "$HOME"', 'rm -rf $DIR/*', 'sudo rm -rf /var/lib', '/bin/rm -rf /etc',
+    'rm -rf /', 'rm -rf /*', 'rm -rf ~', 'sudo rm -rf /var/lib', '/bin/rm -rf /etc',
     'FOO=1 rm -rf ~/.ssh', 'git status; rm -r -f .git', 'bash -c "rm -rf ~/Documents"', 'rm -rf C:/Windows/Temp',
     'powershell -c "Remove-Item -Recurse -Force \'C:\\Program Files\\X\'"', 'cmd /c rmdir /s /q D:\\', 'rm -rf /c/Users/Someone',
-    'T="" && rm -rf $T/*', 'T=C:/Windows && rm -rf ${T}', 'rm -rf $T && T=D:/tmp/x',
+    'T="" && rm -rf $T/*', 'T=C:/Windows && rm -rf ${T}',
   ]
   const mustPass = [
     'rm a.txt', 'rm -f a.txt b.txt', 'rmdir empty', 'git rm -r --cached x', 'echo "rm -rf ~"', 'git commit -m "bỏ rm -rf /"', 'mkdir -p new-dir',
-    'rm -rf /tmp/x', 'rm -r build', 'rm -fr out', 'rm -Rf a b', 'rm --recursive dist', 'cd x && rm -rf node_modules', 'rm -rf $TMPDIR/x',
+    'rm -rf /tmp/x', 'rm -r build', 'rm -fr out', 'rm -Rf a b', 'rm --recursive dist', 'cd x && rm -rf node_modules',
     'bash -c "rm -rf x"', 'powershell -c "Remove-Item -Recurse -Force x"', 'cmd /c rmdir /s /q x', 'rm -rf .claude/worktrees/old', 'rm -rf ~/.claude/mods-cu',
     'cd "D:/Work/PingDock/.claude/worktrees/khung" && T=D:/tmp/khung-sync-check && rm -rf $T && mkdir -p $T/docs', 'T="D:/tmp/a b"; rm -rf "$T"',
     "cat > t.ts <<'EOF'\nconst a = ['rm -rf $T', 'rm -rf /']\nEOF\nnode t.ts",
@@ -2422,10 +2422,46 @@ describe('xoá chính thư mục đang đứng hoặc thư mục cha ⇒ chặn 
       assert.doesNotMatch(reason, /FLOW_OK=1/, command)
       assertPlainOpening(reason, command)
     }
-    for (const command of ['rm -rf sub', `rm -rf ${fwd}-cu`, 'rm -rf ./sub/x', 'rm -rf $X_TMP/y']) {
+    for (const command of ['rm -rf sub', `rm -rf ${fwd}-cu`, 'rm -rf ./sub/x', 'T=/d/tmp/y && rm -rf $T']) {
       assertPass(hook(fx, 'bash', bashIn(cho, command)))
     }
   })
+})
+
+describe('không để Claude Code bật hộp hỏi: đích xoá còn biến chưa rõ / $(...) ⇒ chặn, AI viết lại bằng đường dẫn cụ thể', () => {
+  test('biến chưa gán, $(...), backtick ⇒ chặn, không gợi FLOW_OK; biến gán trong cùng lệnh, xoá file không -r có biến ⇒ qua', () => {
+    const fx = fixture()
+    for (const command of ['rm -rf $TMPDIR/x', 'rm -rf "$OUT"', 'rm -rf "$(mktemp -d)"', 'rm -rf `pwd`/x', 'bash -c "rm -rf $D/x"', 'rmdir $X', 'rm -rf "$HOME"', 'rm -rf $DIR/*', 'rm -rf $T && T=D:/tmp/x',
+      'mkdir -p /d/tmp/t1/hubcopy && cd /d/tmp/t1/hubcopy && rm -f * && scp -q x .', 'cd build; rm -rf .', 'pushd out && rm -r ./*']) {
+      const reason = assertDeny(hook(fx, 'bash', bashIn(fx.root, command)))
+      assert.match(reason, /đường dẫn đầy đủ/, command)
+      assert.doesNotMatch(reason, /FLOW_OK=1/, command)
+      assertPlainOpening(reason, command)
+    }
+    for (const command of ['T=/d/tmp/x && rm -rf $T', 'echo $HOME', 'rm -rf build', 'cp -r $SRC dst', 'rm -f /d/tmp/t1/hubcopy/*', 'rm -f *.log',
+      'cd /d/tmp/x && rm -rf node_modules', 'rm -rf C:/Windows/Temp/hd-t5', 'ssh winlap "Remove-Item C:/Windows/Temp/hd-t5-verify.ps1"']) assertPass(hook(fx, 'bash', bashIn(fx.root, command)))
+  })
+})
+
+describe('xoá dữ liệu cơ sở dữ liệu ⇒ chặn có lối ra FLOW_OK=1 (thay mod chan-nguy-hiem, không bật hộp)', () => {
+  const mustDeny = [
+    'supabase db reset', 'npx prisma migrate reset --force', 'pnpm drizzle-kit push --force', 'psql "$DB" -c "DROP TABLE users"',
+    'sqlite3 app.db "TRUNCATE logs"', 'psql -c "DELETE FROM users;"', 'mysql -e "ALTER TABLE t DROP COLUMN c"', 'format D:',
+  ]
+  const mustPass = [
+    'psql -c "DELETE FROM users WHERE id = 1"', 'git commit -m "drop table cũ"', 'truncate -s 0 app.log', 'supabase db push',
+    'echo "DROP TABLE x" > note.md', 'psql -c "select 1"',
+  ]
+  for (const command of mustDeny) {
+    test(`chặn: ${command}`, () => {
+      const fx = fixture()
+      const reason = assertDeny(hook(fx, 'bash', bashIn(fx.root, command)))
+      assertPlainOpening(reason, command)
+      assertExit(reason)
+      assertPass(hook(fx, 'bash', bashIn(fx.root, `FLOW_OK=1 ${command}`)))
+    })
+  }
+  for (const command of mustPass) test(`không chặn: ${command}`, () => { const fx = fixture(); assertPass(hook(fx, 'bash', bashIn(fx.root, command))) })
 })
 
 describe('tool PowerShell (Claude Code trên Windows) qua cùng cổng như Bash', () => {
